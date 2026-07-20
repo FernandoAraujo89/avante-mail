@@ -22,8 +22,8 @@ import { errorMessage } from "../lib/utils";
 const REQUIRED_ENV = [
   "DATABASE_URL",
   "REDIS_URL",
-  "AWS_ACCESS_KEY_ID",
-  "AWS_SECRET_ACCESS_KEY",
+  "SES_SMTP_USER",
+  "SES_SMTP_PASSWORD",
   "SES_FROM_EMAIL",
   "JWT_SECRET",
   "NEXT_PUBLIC_BASE_URL",

@@ -1,20 +1,53 @@
-import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import nodemailer, { type Transporter } from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 /**
- * Cliente do Amazon SES (API v2), criado de forma lazy e reutilizado.
- * A região vem de SES_REGION (ou AWS_REGION); as credenciais são resolvidas
- * pela cadeia padrão do SDK (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY ou
- * IAM role da instância). São Paulo = sa-east-1.
+ * Envio de e-mail pelo Amazon SES via SMTP (nodemailer).
+ * Configuração vem do .env.local:
+ *  - SES_SMTP_HOST (padrão: email-smtp.<SES_REGION>.amazonaws.com)
+ *  - SES_SMTP_PORT (padrão: 587, STARTTLS)
+ *  - SES_SMTP_USER / SES_SMTP_PASSWORD (credenciais SMTP do SES)
+ *  - SES_FROM_EMAIL (remetente verificado)
+ * O transporter é criado de forma lazy e reutilizado.
  */
-let cached: SESv2Client | undefined;
+let cached: Transporter<SMTPTransport.SentMessageInfo> | undefined;
 
-export function getSesClient(): SESv2Client {
+function getTransporter(): Transporter<SMTPTransport.SentMessageInfo> {
   if (!cached) {
-    const region =
-      process.env.SES_REGION ?? process.env.AWS_REGION ?? "sa-east-1";
-    cached = new SESv2Client({ region });
+    const region = process.env.SES_REGION ?? "sa-east-1";
+    const host =
+      process.env.SES_SMTP_HOST ?? `email-smtp.${region}.amazonaws.com`;
+    const port = Number(process.env.SES_SMTP_PORT) || 587;
+
+    const user = process.env.SES_SMTP_USER;
+    const pass = process.env.SES_SMTP_PASSWORD;
+    if (!user || !pass) {
+      throw new Error("SES_SMTP_USER/SES_SMTP_PASSWORD não definidas.");
+    }
+
+    cached = nodemailer.createTransport({
+      host,
+      port,
+      // 465 = TLS direto; 587 = STARTTLS.
+      secure: port === 465,
+      requireTLS: port !== 465,
+      auth: { user, pass },
+    });
   }
   return cached;
+}
+
+/**
+ * O SES devolve o MessageId na resposta SMTP ("250 Ok <messageId>"). É esse
+ * mesmo id que aparece em mail.messageId nas notificações do SNS, então o
+ * usamos para casar as devoluções/reclamações com o envio.
+ */
+function extractSesMessageId(info: SMTPTransport.SentMessageInfo): string {
+  const response = info.response ?? "";
+  const match = response.match(/\bOk\s+(\S+)/i);
+  if (match) return match[1];
+  const parts = response.trim().split(/\s+/);
+  return parts[parts.length - 1] || info.messageId || "";
 }
 
 export interface SendEmailArgs {
@@ -27,10 +60,6 @@ export interface SendEmailArgs {
   from?: string;
 }
 
-/**
- * Envia um e-mail pelo SES e devolve o MessageId — usado para casar os
- * eventos de devolução/reclamação (SNS) com o envio correspondente.
- */
 export async function sendEmail(
   args: SendEmailArgs
 ): Promise<{ messageId: string }> {
@@ -39,23 +68,13 @@ export async function sendEmail(
     throw new Error("SES_FROM_EMAIL não definida.");
   }
 
-  const headers = args.headers
-    ? Object.entries(args.headers).map(([Name, Value]) => ({ Name, Value }))
-    : undefined;
+  const info = await getTransporter().sendMail({
+    from,
+    to: args.to,
+    subject: args.subject,
+    html: args.html,
+    headers: args.headers,
+  });
 
-  const result = await getSesClient().send(
-    new SendEmailCommand({
-      FromEmailAddress: from,
-      Destination: { ToAddresses: [args.to] },
-      Content: {
-        Simple: {
-          Subject: { Data: args.subject, Charset: "UTF-8" },
-          Body: { Html: { Data: args.html, Charset: "UTF-8" } },
-          ...(headers ? { Headers: headers } : {}),
-        },
-      },
-    })
-  );
-
-  return { messageId: result.MessageId ?? "" };
+  return { messageId: extractSesMessageId(info) };
 }
