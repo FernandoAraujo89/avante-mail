@@ -2,7 +2,6 @@ import "./env";
 
 import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
-import { Resend } from "resend";
 
 import {
   campaigns,
@@ -17,13 +16,15 @@ import {
   EMAIL_QUEUE_NAME,
   type EmailJobData,
 } from "../lib/queue";
+import { sendEmail } from "../lib/ses";
 import { errorMessage } from "../lib/utils";
 
 const REQUIRED_ENV = [
   "DATABASE_URL",
   "REDIS_URL",
-  "RESEND_API_KEY",
-  "RESEND_FROM_EMAIL",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "SES_FROM_EMAIL",
   "JWT_SECRET",
   "NEXT_PUBLIC_BASE_URL",
 ];
@@ -36,7 +37,9 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// E-mails por segundo. Respeite o limite de envio aprovado no SES — em
+// sandbox é 1/s; ajuste SES_MAX_SEND_RATE conforme a cota da conta.
+const MAX_SEND_RATE = Math.max(1, Number(process.env.SES_MAX_SEND_RATE) || 10);
 
 async function processJob(job: Job<EmailJobData>): Promise<void> {
   const { sendId, campaignId, contactId } = job.data;
@@ -123,8 +126,7 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
       console.warn(`[WORKER] Avisos do MJML: ${errors.join(" | ")}`);
     }
 
-    const { data, error } = await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL as string,
+    const { messageId } = await sendEmail({
       to: contact.email,
       subject: campaign.subject,
       html,
@@ -137,15 +139,11 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
       },
     });
 
-    if (error) {
-      throw new Error(error.message ?? "Erro desconhecido do Resend.");
-    }
-
     await db
       .update(campaignSends)
       .set({
         status: "sent",
-        resendId: data?.id ?? null,
+        providerMessageId: messageId || null,
         sentAt: new Date(),
       })
       .where(eq(campaignSends.id, sendId));
@@ -193,8 +191,8 @@ async function finalizeCampaignIfDone(campaignId: string): Promise<void> {
 const worker = new Worker<EmailJobData>(EMAIL_QUEUE_NAME, processJob, {
   connection: createRedisConnection(),
   concurrency: 5,
-  // O plano gratuito do Resend limita a 2 requisições/segundo.
-  limiter: { max: 2, duration: 1000 },
+  // Respeita o limite de envio do SES (SES_MAX_SEND_RATE e-mails/segundo).
+  limiter: { max: MAX_SEND_RATE, duration: 1000 },
 });
 
 worker.on("completed", async (job) => {
@@ -244,7 +242,7 @@ worker.on("error", (error) => {
 });
 
 console.log(
-  `[WORKER] Avante Mail — ouvindo a fila "${EMAIL_QUEUE_NAME}" (concorrência: 5, limite: 2 e-mails/s)`
+  `[WORKER] Avante Mail — ouvindo a fila "${EMAIL_QUEUE_NAME}" (concorrência: 5, limite: ${MAX_SEND_RATE} e-mails/s via SES)`
 );
 
 async function shutdown() {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { Resend } from "resend";
 
 import { campaigns, getDb, templates } from "@/lib/db";
 import { buildEmailHtml, buildTestVariables } from "@/lib/email";
+import { sendEmail } from "@/lib/ses";
 import { EMAIL_REGEX, errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -84,11 +84,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       mjmlContent = template.mjmlContent;
     }
 
-    const fromEmail = process.env.RESEND_FROM_EMAIL;
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!fromEmail || !apiKey) {
+    if (!process.env.SES_FROM_EMAIL) {
       return NextResponse.json(
-        { error: "Envio não configurado (RESEND_API_KEY/RESEND_FROM_EMAIL)." },
+        { error: "Envio não configurado (SES_FROM_EMAIL)." },
         { status: 500 }
       );
     }
@@ -97,22 +95,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const variables = buildTestVariables(campaign);
     const { html } = await buildEmailHtml(mjmlContent, variables);
 
-    const resend = new Resend(apiKey);
     const results = await Promise.allSettled(
       emails.map((to) =>
-        resend.emails
-          .send({
-            from: fromEmail,
-            to,
-            subject: `[TESTE] ${campaign.subject}`,
-            html,
-          })
-          .then((res) => {
-            if (res.error) {
-              throw new Error(res.error.message ?? "Erro do Resend.");
-            }
-            return res;
-          })
+        sendEmail({
+          to,
+          subject: `[TESTE] ${campaign.subject}`,
+          html,
+        })
       )
     );
 

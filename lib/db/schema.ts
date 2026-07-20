@@ -125,7 +125,9 @@ export const campaignSends = pgTable("campaign_sends", {
     .notNull()
     .references(() => contacts.id, { onDelete: "cascade" }),
   status: text("status").$type<SendStatus>().notNull().default("pending"),
-  resendId: text("resend_id"),
+  // MessageId retornado pelo provedor de envio (SES). Usado para casar os
+  // eventos de devolução/reclamação (SNS) com o envio correspondente.
+  providerMessageId: text("provider_message_id"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   openedAt: timestamp("opened_at", { withTimezone: true }),
   clickedAt: timestamp("clicked_at", { withTimezone: true }),
