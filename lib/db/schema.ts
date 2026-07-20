@@ -1,0 +1,156 @@
+import {
+  boolean,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+import type { EmailDesign, EditorType, Row } from "../email-builder/types";
+
+export const SEGMENTS = [
+  "white_label",
+  "indicador",
+  "revenda_fiscal",
+] as const;
+export type Segment = (typeof SEGMENTS)[number];
+
+export const CAMPAIGN_STATUSES = [
+  "draft",
+  "scheduled",
+  "sending",
+  "sent",
+] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+
+export const SEND_STATUSES = [
+  "pending",
+  "sent",
+  "failed",
+  "opened",
+  "clicked",
+  "bounced",
+] as const;
+export type SendStatus = (typeof SEND_STATUSES)[number];
+
+// Tipo de devolução reportado pelo Resend/SES.
+export const BOUNCE_TYPES = ["hard", "soft"] as const;
+export type BounceType = (typeof BOUNCE_TYPES)[number];
+
+// Usuários do sistema (login próprio).
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const contacts = pgTable("contacts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  company: text("company"),
+  tags: text("tags").array(),
+  segment: text("segment"),
+  subscribed: boolean("subscribed").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const templates = pgTable("templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  category: text("category"),
+  mjmlContent: text("mjml_content").notNull(),
+  // Documento do Criador de email (fonte da verdade quando editorType = builder).
+  design: jsonb("design").$type<EmailDesign>(),
+  // 'builder' = editado no criador visual; 'code' = MJML/HTML escrito à mão.
+  editorType: text("editor_type").$type<EditorType>().notNull().default("code"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Seções reutilizáveis do Criador de email (ex.: Header e Footer da Avante).
+export const modules = pgTable("modules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  design: jsonb("design").$type<Row>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const campaigns = pgTable("campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  subject: text("subject").notNull(),
+  preheader: text("preheader"),
+  // Corpo/CTA legados (preenchiam variáveis do template no modelo antigo).
+  // Mantidos por compatibilidade; o conteúdo agora vive no design da campanha.
+  body: text("body"),
+  ctaText: text("cta_text"),
+  ctaUrl: text("cta_url"),
+  // E-mail próprio da campanha (editado no Criador), copiado de um modelo.
+  // design = fonte da verdade quando editorType = builder; mjmlContent = compilado.
+  design: jsonb("design").$type<EmailDesign>(),
+  mjmlContent: text("mjml_content"),
+  editorType: text("editor_type").$type<EditorType>().notNull().default("builder"),
+  // Modelo de origem (informativo); a campanha não depende mais dele no envio.
+  templateId: uuid("template_id").references(() => templates.id, {
+    onDelete: "set null",
+  }),
+  // Segmentos-alvo da campanha (vazio/nulo = todos os segmentos).
+  segments: text("segments").array(),
+  tagsFilter: text("tags_filter").array(),
+  status: text("status").$type<CampaignStatus>().notNull().default("draft"),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const campaignSends = pgTable("campaign_sends", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  campaignId: uuid("campaign_id")
+    .notNull()
+    .references(() => campaigns.id, { onDelete: "cascade" }),
+  contactId: uuid("contact_id")
+    .notNull()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  status: text("status").$type<SendStatus>().notNull().default("pending"),
+  resendId: text("resend_id"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  openedAt: timestamp("opened_at", { withTimezone: true }),
+  clickedAt: timestamp("clicked_at", { withTimezone: true }),
+  // Devolução (webhook do Resend: email.bounced).
+  bouncedAt: timestamp("bounced_at", { withTimezone: true }),
+  bounceType: text("bounce_type").$type<BounceType>(),
+  // Reclamação de spam (webhook do Resend: email.complained).
+  complainedAt: timestamp("complained_at", { withTimezone: true }),
+  // Descadastro atribuído a esta campanha (clique no link deste envio).
+  unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+  // Resposta do contato a este e-mail. Coluna preparada para exibir o
+  // histórico de respostas por contato; a captura (marcação manual ou
+  // inbound automático via Resend) ainda não está ativada.
+  repliedAt: timestamp("replied_at", { withTimezone: true }),
+});
+
+export type Contact = typeof contacts.$inferSelect;
+export type NewContact = typeof contacts.$inferInsert;
+export type Template = typeof templates.$inferSelect;
+export type NewTemplate = typeof templates.$inferInsert;
+export type Campaign = typeof campaigns.$inferSelect;
+export type NewCampaign = typeof campaigns.$inferInsert;
+export type CampaignSend = typeof campaignSends.$inferSelect;
+export type NewCampaignSend = typeof campaignSends.$inferInsert;
+export type Module = typeof modules.$inferSelect;
+export type NewModule = typeof modules.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;

@@ -1,0 +1,170 @@
+<mjml>
+  <mj-head>
+    <mj-title>{{titulo}}</mj-title>
+    <mj-preview>{{subtitulo}}</mj-preview>
+    <mj-attributes>
+      <mj-all font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" />
+      <mj-text font-size="14px" line-height="1.7" color="#4A5E6E" />
+      <mj-section background-color="#FFFFFF" />
+    </mj-attributes>
+    <mj-style>
+      a { color: #1D50DC; }
+    </mj-style>
+  </mj-head>
+  <mj-body background-color="#EEF1F5" width="600px">
+    <mj-section background-color="#EEF1F5" padding="0">
+      <mj-column><mj-spacer height="32px" /></mj-column>
+    </mj-section>
+
+    <!-- Header Avante -->
+    <mj-section padding="0">
+      <mj-column padding="0">
+        <mj-image src="https://files.catbox.moe/plyafb.png" alt="Avante" padding="0" fluid-on-mobile="true" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Hero -->
+    <mj-section padding="0">
+      <mj-column padding="0">
+        <mj-image src="https://placehold.co/600x460/eef2ff/1d50dc?text=Banner+Hero+(600x460)" alt="Bem-vindo à Avante!" padding="0" fluid-on-mobile="true" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Parabéns -->
+    <mj-section padding="34px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" font-size="20px" font-weight="700" color="#1D50DC" letter-spacing="-0.01em" padding="0">
+          Parabéns, {{nome_parceiro}}!
+        </mj-text>
+        <mj-text align="center" font-size="20px" line-height="1.4" color="#14181F" padding="8px 0 0 0">
+          A partir de hoje, você é<br />oficialmente nosso parceiro.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Título e subtítulo da campanha -->
+    <mj-section padding="40px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" font-size="23px" font-weight="700" color="#14181F" line-height="1.3" letter-spacing="-0.01em" padding="0">
+          {{titulo}}
+        </mj-text>
+        <mj-text align="center" padding="16px 0 0 0">
+          {{subtitulo}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="34px 0 0 0">
+      <mj-column><mj-spacer height="0" /></mj-column>
+    </mj-section>
+    <mj-section background-color="#EFF2F6" padding="0">
+      <mj-column><mj-spacer height="10px" /></mj-column>
+    </mj-section>
+
+    <!-- Portfólio -->
+    <mj-section padding="34px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" font-size="23px" font-weight="700" color="#14181F" line-height="1.3" letter-spacing="-0.01em" padding="0">
+          Um portfólio completo <span style="color:#1D50DC;">para você</span>
+        </mj-text>
+        <mj-text align="center" padding="16px 0 0 0">
+          Você tem acesso ao portfólio completo de soluções
+          <strong style="color:#14181F;">White Label da Avante,</strong> com sistemas
+          desenvolvidos para atender às
+          <strong style="color:#14181F;">necessidades específicas de cada segmento.</strong>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="26px 40px 0 40px">
+      <mj-column>
+        <mj-image src="https://placehold.co/520x300/1d50dc/ffffff?text=Card+Avante+Web+(520x300)" alt="Avante Web" border-radius="12px" padding="0" />
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="34px 0 0 0">
+      <mj-column><mj-spacer height="0" /></mj-column>
+    </mj-section>
+    <mj-section background-color="#EFF2F6" padding="0">
+      <mj-column><mj-spacer height="10px" /></mj-column>
+    </mj-section>
+
+    <!-- E muito mais -->
+    <mj-section padding="34px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" font-size="23px" font-weight="700" color="#14181F" line-height="1.3" letter-spacing="-0.01em" padding="0">
+          E muito mais para o <span style="color:#1D50DC;">seu negócio</span>
+        </mj-text>
+        <mj-text align="center" padding="16px 0 0 0">
+          Além dos sistemas, você conta com uma
+          <strong style="color:#14181F;">estrutura completa</strong> de plataformas e
+          serviços para <strong style="color:#14181F;">facilitar a gestão do seu negócio</strong>
+          no dia a dia.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="26px 32px 0 32px">
+      <mj-column padding="0 8px 0 0">
+        <mj-image src="https://placehold.co/252x170/1b1b1c/ffffff?text=Avante+Academy" alt="Avante Academy" border-radius="12px" padding="0 0 16px 0" />
+        <mj-image src="https://placehold.co/252x170/1d50dc/ffffff?text=Materiais+de+Marketing" alt="Materiais de Marketing" border-radius="12px" padding="0" />
+      </mj-column>
+      <mj-column padding="0 0 0 8px">
+        <mj-image src="https://placehold.co/252x170/1b1b1c/ffffff?text=Inteligencia+Artificial" alt="Inteligência Artificial" border-radius="12px" padding="0 0 16px 0" />
+        <mj-image src="https://placehold.co/252x170/1d50dc/ffffff?text=Avante+Gestao" alt="Avante Gestão" border-radius="12px" padding="0" />
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="34px 0 0 0">
+      <mj-column><mj-spacer height="0" /></mj-column>
+    </mj-section>
+    <mj-section background-color="#EFF2F6" padding="0">
+      <mj-column><mj-spacer height="10px" /></mj-column>
+    </mj-section>
+
+    <!-- Corpo da campanha + CTA -->
+    <mj-section padding="38px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" padding="0">
+          {{corpo}}
+        </mj-text>
+        <mj-button background-color="#1D50DC" color="#FFFFFF" font-weight="700" font-size="15px" inner-padding="14px 36px" border-radius="8px" padding="28px 0 0 0" href="{{cta_url}}">
+          {{cta_texto}}
+        </mj-button>
+        <mj-text align="center" font-size="15px" font-weight="700" line-height="1.6" color="#14181F" padding="28px 0 0 0">
+          Equipe Avante 💙
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="38px 0 0 0">
+      <mj-column><mj-spacer height="0" /></mj-column>
+    </mj-section>
+
+    <!-- Rodapé escuro -->
+    <mj-section background-color="#14181C" padding="44px 40px 40px 40px">
+      <mj-column>
+        <mj-social mode="horizontal" icon-size="36px" border-radius="18px" padding="0 0 32px 0">
+          <mj-social-element src="https://files.catbox.moe/pnwz6x.png" href="https://www.youtube.com/@avantesolucoesdigitais" alt="YouTube Avante" padding="0 8px" />
+          <mj-social-element src="https://files.catbox.moe/dyjwgf.png" href="https://www.linkedin.com/company/26489532/" alt="LinkedIn Avante" padding="0 8px" />
+          <mj-social-element src="https://files.catbox.moe/02mx3s.png" href="https://www.instagram.com/avantesolucoesdigitais/" alt="Instagram Avante" padding="0 8px" />
+        </mj-social>
+        <mj-text align="center" font-size="14px" color="#8A98A5" padding="0 0 32px 0">
+          Avante do seu jeito.
+        </mj-text>
+        <mj-divider border-width="1px" border-color="#3A4450" width="468px" padding="0" />
+        <mj-text align="center" font-size="12px" font-weight="700" padding="18px 0 0 0">
+          <a href="https://avantejuntos.com.br" style="color:#FFFFFF;text-decoration:none;">avantejuntos.com.br</a>
+        </mj-text>
+        <mj-text align="center" font-size="12px" color="#8A98A5" padding="16px 0 0 0">
+          Não quer mais receber nossos e-mails?
+          <a href="{{unsubscribe_url}}" style="color:#8A98A5;text-decoration:underline;">Descadastre-se aqui</a>.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#EEF1F5" padding="0">
+      <mj-column><mj-spacer height="32px" /></mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

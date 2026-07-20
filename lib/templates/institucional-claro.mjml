@@ -1,0 +1,93 @@
+<mjml>
+  <mj-head>
+    <mj-title>{{titulo}}</mj-title>
+    <mj-preview>{{subtitulo}}</mj-preview>
+    <mj-attributes>
+      <mj-all font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" />
+      <mj-text font-size="14px" line-height="1.7" color="#4A5E6E" />
+      <mj-section background-color="#FFFFFF" />
+    </mj-attributes>
+    <mj-style>
+      a { color: #1D50DC; }
+    </mj-style>
+  </mj-head>
+  <mj-body background-color="#EEF1F5" width="600px">
+    <mj-section background-color="#EEF1F5" padding="0">
+      <mj-column><mj-spacer height="32px" /></mj-column>
+    </mj-section>
+
+    <!-- Header Avante -->
+    <mj-section padding="0">
+      <mj-column padding="0">
+        <mj-image src="https://files.catbox.moe/plyafb.png" alt="Avante" padding="0" fluid-on-mobile="true" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Saudação + título -->
+    <mj-section padding="40px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" font-size="15px" font-weight="700" color="#1D50DC" letter-spacing="-0.01em" padding="0">
+          Olá, {{nome_parceiro}}!
+        </mj-text>
+        <mj-text align="center" font-size="23px" font-weight="700" color="#14181F" line-height="1.3" letter-spacing="-0.01em" padding="14px 0 0 0">
+          {{titulo}}
+        </mj-text>
+        <mj-text align="center" padding="16px 0 0 0">
+          {{subtitulo}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="34px 0 0 0">
+      <mj-column><mj-spacer height="0" /></mj-column>
+    </mj-section>
+    <mj-section background-color="#EFF2F6" padding="0">
+      <mj-column><mj-spacer height="10px" /></mj-column>
+    </mj-section>
+
+    <!-- Corpo + CTA -->
+    <mj-section padding="38px 48px 0 48px">
+      <mj-column>
+        <mj-text align="center" padding="0">
+          {{corpo}}
+        </mj-text>
+        <mj-button background-color="#1D50DC" color="#FFFFFF" font-weight="700" font-size="15px" inner-padding="14px 36px" border-radius="8px" padding="28px 0 0 0" href="{{cta_url}}">
+          {{cta_texto}}
+        </mj-button>
+        <mj-text align="center" font-size="15px" font-weight="700" line-height="1.6" color="#14181F" padding="28px 0 0 0">
+          Equipe Avante 💙
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="38px 0 0 0">
+      <mj-column><mj-spacer height="0" /></mj-column>
+    </mj-section>
+
+    <!-- Rodapé escuro -->
+    <mj-section background-color="#14181C" padding="44px 40px 40px 40px">
+      <mj-column>
+        <mj-social mode="horizontal" icon-size="36px" border-radius="18px" padding="0 0 32px 0">
+          <mj-social-element src="https://files.catbox.moe/pnwz6x.png" href="https://www.youtube.com/@avantesolucoesdigitais" alt="YouTube Avante" padding="0 8px" />
+          <mj-social-element src="https://files.catbox.moe/dyjwgf.png" href="https://www.linkedin.com/company/26489532/" alt="LinkedIn Avante" padding="0 8px" />
+          <mj-social-element src="https://files.catbox.moe/02mx3s.png" href="https://www.instagram.com/avantesolucoesdigitais/" alt="Instagram Avante" padding="0 8px" />
+        </mj-social>
+        <mj-text align="center" font-size="14px" color="#8A98A5" padding="0 0 32px 0">
+          Avante do seu jeito.
+        </mj-text>
+        <mj-divider border-width="1px" border-color="#3A4450" width="468px" padding="0" />
+        <mj-text align="center" font-size="12px" font-weight="700" padding="18px 0 0 0">
+          <a href="https://avantejuntos.com.br" style="color:#FFFFFF;text-decoration:none;">avantejuntos.com.br</a>
+        </mj-text>
+        <mj-text align="center" font-size="12px" color="#8A98A5" padding="16px 0 0 0">
+          Não quer mais receber nossos e-mails?
+          <a href="{{unsubscribe_url}}" style="color:#8A98A5;text-decoration:underline;">Descadastre-se aqui</a>.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#EEF1F5" padding="0">
+      <mj-column><mj-spacer height="32px" /></mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

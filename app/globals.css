@@ -1,26 +1,136 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ─── Neue Haas Grotesk (Design System Avante) ─────────────────── */
+@font-face {
+  font-family: "NHaasGroteskDS";
+  src: url("/fonts/NHaasGrotesk/NHaasGroteskDSPro-45Lt.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NHaasGroteskDS";
+  src: url("/fonts/NHaasGrotesk/NHaasGroteskDSPro-55Rg.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NHaasGroteskDS";
+  src: url("/fonts/NHaasGrotesk/NHaasGroteskDSPro-56It.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NHaasGroteskDS";
+  src: url("/fonts/NHaasGrotesk/NHaasGroteskDSPro-65Md.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NHaasGroteskDS";
+  src: url("/fonts/NHaasGrotesk/NHaasGroteskDSPro-75Bd.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NHaasGroteskDS";
+  src: url("/fonts/NHaasGrotesk/NHaasGroteskDSPro-95Blk.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* ─── Tokens do Design System Avante (avante-ds) ───────────────── */
+@theme {
+  /* Neutros */
+  --color-background: #edf2f7; /* neutral-50 — app bg */
+  --color-foreground: #282e3f; /* neutral-700 — texto principal */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-card: #ffffff; /* neutral-0 — surfaces */
+  --color-card-foreground: #282e3f;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #282e3f;
+
+  /* Avante Blue */
+  --color-primary: #1d50dc; /* primary-500 */
+  --color-primary-hover: #1844c4; /* primary-600 */
+  --color-primary-active: #1337a0; /* primary-700 */
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #dce6f1; /* neutral-100 */
+  --color-secondary-foreground: #35434f; /* neutral-600 */
+
+  --color-muted: #edf2f7; /* neutral-50 */
+  --color-muted-foreground: #6b8091; /* neutral-400 */
+
+  --color-accent: #eaf0fb; /* primary-50 — seleção/hover */
+  --color-accent-foreground: #1d50dc;
+
+  /* Semânticas */
+  --color-destructive: #f9755a; /* error-base */
+  --color-destructive-hover: #c43b20; /* error-dark */
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #3ecf8e;
+  --color-success-light: #74e4a2;
+  --color-success-dark: #1e8a5a;
+
+  --color-warning: #f4c641;
+  --color-warning-light: #fdd76a;
+  --color-warning-dark: #b8900a;
+
+  --color-info: #2c6eff;
+  --color-info-light: #d6e4ff;
+  --color-info-dark: #1244a0;
+
+  /* Bordas e foco */
+  --color-border: #c5d4e5; /* neutral-200 */
+  --color-input: #95a7b5; /* neutral-300 — stroke de inputs (Figma) */
+  --color-ring: #2c6eff;
+
+  /* Raios (Figma): 5px controles · 8px grupos · 12px cards · 16px indicador */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 5px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+
+  /* Sombras */
+  --shadow-sm:
+    0 1px 3px 0 rgba(40, 46, 63, 0.08), 0 1px 2px -1px rgba(40, 46, 63, 0.06);
+  --shadow-md:
+    0 4px 8px -2px rgba(40, 46, 63, 0.1), 0 2px 4px -2px rgba(40, 46, 63, 0.06);
+  --shadow-lg:
+    0 12px 24px -4px rgba(40, 46, 63, 0.12),
+    0 4px 8px -2px rgba(40, 46, 63, 0.06);
+  --shadow-xl: 0 24px 48px -8px rgba(40, 46, 63, 0.14);
+
+  --font-sans: "NHaasGroteskDS", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c5d4e5;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
