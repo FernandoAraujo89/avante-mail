@@ -11,7 +11,10 @@ echo "→ Enviando arquivos..."
 # em produção (.env.local = envs do app; .env = segredos de interpolação do
 # compose). O exclude de uploads é ANCORADO (/uploads) — sem a âncora o rsync
 # também pularia app/uploads/ e app/api/uploads/ (rotas do código!).
-rsync -az --exclude node_modules --exclude .next --exclude .git \
+# --delete: o servidor espelha o fonte, removendo arquivos que foram apagados
+# no repositório (senão órfãos, ex.: rotas removidas, quebram o build). Os
+# caminhos com --exclude ficam protegidos e nunca são apagados.
+rsync -az --delete --exclude node_modules --exclude .next --exclude .git \
   --exclude .env.local --exclude .env --exclude /uploads ./ "$SERVER:$DIR/"
 
 echo "→ Build da imagem, migrações e subida dos contêineres..."
