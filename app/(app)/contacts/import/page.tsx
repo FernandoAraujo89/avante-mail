@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Papa from "papaparse";
 import { CheckCircle2, FileUp, Upload } from "lucide-react";
@@ -46,12 +46,6 @@ const FIELDS = [
     synonyms: ["company", "empresa", "loja"],
   },
   {
-    key: "segment",
-    label: "Segmento",
-    required: false,
-    synonyms: ["segment", "segmento"],
-  },
-  {
     key: "tags",
     label: "Tags",
     required: false,
@@ -62,13 +56,17 @@ const FIELDS = [
 type FieldKey = (typeof FIELDS)[number]["key"];
 
 const IGNORE = "__ignore__";
+const NO_LIST = "__none__";
 
 type ImportResult = {
   total: number;
   imported: number;
   duplicated: number;
   invalid: number;
+  addedToList: number;
 };
+
+type ListRef = { id: string; name: string };
 
 export default function ImportContactsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -80,12 +78,27 @@ export default function ImportContactsPage() {
     name: IGNORE,
     email: IGNORE,
     company: IGNORE,
-    segment: IGNORE,
     tags: IGNORE,
   });
+  const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
+  const [targetListId, setTargetListId] = useState(NO_LIST);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/lists");
+        if (res.ok) setAvailableLists(await res.json());
+      } catch {
+        // silencioso: importação sem lista continua funcionando
+      }
+    })();
+    // Pré-seleciona a lista quando vem de /lists/[id] (?listId=...).
+    const preset = new URLSearchParams(window.location.search).get("listId");
+    if (preset) setTargetListId(preset);
+  }, []);
 
   function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -145,7 +158,11 @@ export default function ImportContactsPage() {
       const res = await fetch("/api/contacts/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv, mapping: cleanMapping }),
+        body: JSON.stringify({
+          csv,
+          mapping: cleanMapping,
+          listId: targetListId !== NO_LIST ? targetListId : undefined,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao importar contatos.");
@@ -208,6 +225,14 @@ export default function ImportContactsPage() {
                 <span className="font-semibold">{result.invalid}</span>{" "}
                 linhas inválidas (sem nome ou e-mail válido)
               </li>
+              {result.addedToList > 0 ? (
+                <li>
+                  <span className="font-semibold text-primary">
+                    {result.addedToList}
+                  </span>{" "}
+                  adicionados à lista escolhida
+                </li>
+              ) : null}
               <li className="text-muted-foreground">
                 {result.total} linhas no arquivo
               </li>
@@ -231,7 +256,7 @@ export default function ImportContactsPage() {
             <div>
               <p className="font-medium">Selecione o arquivo CSV</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Colunas esperadas: name, email, company, segment, tags
+                Colunas esperadas: name, email, company, tags
                 <br />
                 (tags separadas por vírgula dentro da célula)
               </p>
@@ -260,8 +285,8 @@ export default function ImportContactsPage() {
                 associe cada campo a uma coluna do CSV.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <CardContent className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {FIELDS.map((field) => (
                   <div key={field.key} className="grid gap-2">
                     <Label>
@@ -288,6 +313,27 @@ export default function ImportContactsPage() {
                     </Select>
                   </div>
                 ))}
+              </div>
+
+              <div className="grid gap-2 border-t border-border pt-5 sm:max-w-sm">
+                <Label>Adicionar à lista</Label>
+                <Select value={targetListId} onValueChange={setTargetListId}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LIST}>— Nenhuma lista —</SelectItem>
+                    {availableLists.map((list) => (
+                      <SelectItem key={list.id} value={list.id}>
+                        {list.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Os contatos do arquivo (novos e já existentes) entram nesta
+                  lista.
+                </p>
               </div>
             </CardContent>
           </Card>

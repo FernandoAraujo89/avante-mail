@@ -27,28 +27,16 @@ export function normalizeTags(value: unknown): string[] {
   return [];
 }
 
-/** Segmentos válidos de contato/campanha. */
-export const VALID_SEGMENTS = [
-  "white_label",
-  "indicador",
-  "revenda_fiscal",
-] as const;
-
 /**
- * Normaliza segmentos de uma campanha para string[] com valores válidos,
- * sem duplicatas. Aceita string ("a,b"), array ou "todos" (→ vazio = todos).
- * Vazio significa "todos os segmentos".
+ * Normaliza uma lista de IDs (uuid) vinda de string ("a,b") ou array, sem
+ * duplicatas nem vazios. Usada para as listas-alvo de uma campanha.
+ * Vazio significa "todas as listas".
  */
-export function normalizeSegments(value: unknown): string[] {
+export function normalizeIds(value: unknown): string[] {
   const raw = Array.isArray(value)
     ? value.map((s) => String(s).trim())
     : typeof value === "string"
       ? value.split(",").map((s) => s.trim())
       : [];
-
-  const valid = raw.filter(
-    (s): s is (typeof VALID_SEGMENTS)[number] =>
-      (VALID_SEGMENTS as readonly string[]).includes(s)
-  );
-  return [...new Set(valid)];
+  return [...new Set(raw.filter(Boolean))];
 }

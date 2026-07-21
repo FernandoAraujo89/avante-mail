@@ -15,8 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { campaigns, getDb, templates } from "@/lib/db";
-import { formatDateTime, segmentsLabel } from "@/lib/format";
+import { campaigns, getDb, lists as listsTable, templates } from "@/lib/db";
+import { formatDateTime, listsLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +28,13 @@ export default async function CampaignsPage() {
     .from(campaigns)
     .leftJoin(templates, eq(campaigns.templateId, templates.id))
     .orderBy(desc(campaigns.createdAt));
+
+  const allLists = await db
+    .select({ id: listsTable.id, name: listsTable.name })
+    .from(listsTable);
+  const listMap = new Map(allLists.map((l) => [l.id, l.name]));
+  const listNames = (ids: string[] | null) =>
+    (ids ?? []).map((id) => listMap.get(id) ?? id);
 
   return (
     <>
@@ -55,7 +62,7 @@ export default async function CampaignsPage() {
               <TableRow>
                 <TableHead>Campanha</TableHead>
                 <TableHead>Template</TableHead>
-                <TableHead>Segmento</TableHead>
+                <TableHead>Listas</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Criada em</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -78,7 +85,7 @@ export default async function CampaignsPage() {
                       {templateName ?? "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {segmentsLabel(campaign.segments)}
+                      {listsLabel(listNames(campaign.lists))}
                     </TableCell>
                     <TableCell>
                       <CampaignStatusBadge status={campaign.status} />

@@ -41,8 +41,10 @@ import { compileDesignToMjml } from "@/lib/email-builder/compile";
 import { materializeDesignForEditing } from "@/lib/email-builder/materialize";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EditorType, EmailDesign } from "@/lib/email-builder/types";
-import { segmentsLabel } from "@/lib/format";
+import { listsLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+type ListRef = { id: string; name: string };
 
 type TemplateDto = {
   id: string;
@@ -61,7 +63,7 @@ type WizardData = {
   templateId: string;
   design: EmailDesign | null;
   editorType: EditorType;
-  segments: string[];
+  lists: string[];
   tagsFilter: string;
 };
 
@@ -73,7 +75,7 @@ const EMPTY_DATA: WizardData = {
   templateId: "",
   design: null,
   editorType: "builder",
-  segments: [],
+  lists: [],
   tagsFilter: "",
 };
 
@@ -82,13 +84,6 @@ const STEPS = [
   { number: 2, title: "E-mail" },
   { number: 3, title: "Destinatários" },
   { number: 4, title: "Revisar" },
-];
-
-// Segmentos reais (sem "todos" — nenhum selecionado já significa todos).
-const SEGMENT_CHOICES = [
-  { value: "white_label", label: "White Label" },
-  { value: "indicador", label: "Indicador" },
-  { value: "revenda_fiscal", label: "Revenda Fiscal" },
 ];
 
 const MAX_TEST_EMAILS = 3;
@@ -128,6 +123,7 @@ export function CampaignWizard({
     Boolean(editId || duplicateId)
   );
   const [templates, setTemplates] = useState<TemplateDto[] | null>(null);
+  const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -157,6 +153,18 @@ export function CampaignWizard({
       } catch (err) {
         setTemplates([]);
         setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+  }, []);
+
+  // Carrega as listas disponíveis para segmentar os destinatários.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/lists");
+        if (res.ok) setAvailableLists(await res.json());
+      } catch {
+        // silencioso: sem listas, a campanha vai para todos
       }
     })();
   }, []);
@@ -193,11 +201,7 @@ export function CampaignWizard({
           templateId: json.templateId ?? "",
           design,
           editorType: json.editorType ?? "builder",
-          segments: Array.isArray(json.segments)
-            ? json.segments
-            : json.segment && json.segment !== "todos"
-              ? [json.segment]
-              : [],
+          lists: Array.isArray(json.lists) ? json.lists : [],
           tagsFilter: Array.isArray(json.tagsFilter)
             ? json.tagsFilter.join(", ")
             : "",
@@ -272,8 +276,8 @@ export function CampaignWizard({
           count: "true",
           subscribed: "true",
         });
-        if (data.segments.length > 0) {
-          params.set("segments", data.segments.join(","));
+        if (data.lists.length > 0) {
+          params.set("lists", data.lists.join(","));
         }
         const tags = parseTags(data.tagsFilter);
         if (tags.length > 0) params.set("tags", tags.join(","));
@@ -289,18 +293,18 @@ export function CampaignWizard({
     return () => {
       cancelled = true;
     };
-  }, [step, data.segments, data.tagsFilter]);
+  }, [step, data.lists, data.tagsFilter]);
 
   function update(patch: Partial<WizardData>) {
     setData((current) => ({ ...current, ...patch }));
   }
 
-  function toggleSegment(value: string) {
+  function toggleList(value: string) {
     setData((current) => ({
       ...current,
-      segments: current.segments.includes(value)
-        ? current.segments.filter((s) => s !== value)
-        : [...current.segments, value],
+      lists: current.lists.includes(value)
+        ? current.lists.filter((s) => s !== value)
+        : [...current.lists, value],
     }));
   }
 
@@ -358,7 +362,7 @@ export function CampaignWizard({
       templateId: data.templateId || null,
       design: data.design,
       editorType: data.editorType,
-      segments: data.segments,
+      lists: data.lists,
       tagsFilter: data.tagsFilter,
       scheduledAt: data.scheduledAt
         ? new Date(data.scheduledAt).toISOString()
@@ -764,32 +768,40 @@ export function CampaignWizard({
           <Card>
             <CardContent className="grid gap-6 p-6">
               <div className="grid gap-2.5">
-                <Label>Segmentos</Label>
-                <div className="flex flex-wrap gap-2">
-                  {SEGMENT_CHOICES.map((option) => {
-                    const active = data.segments.includes(option.value);
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => toggleSegment(option.value)}
-                        aria-pressed={active}
-                        className={cn(
-                          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
-                          active
-                            ? "border-primary bg-primary/10 font-medium text-primary"
-                            : "border-border bg-card text-muted-foreground hover:border-muted-foreground/40"
-                        )}
-                      >
-                        {active ? <Check className="size-3.5" /> : null}
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                <Label>Listas</Label>
+                {availableLists.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma lista criada ainda. Crie listas em{" "}
+                    <span className="font-medium">Listas</span> para segmentar os
+                    envios.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {availableLists.map((list) => {
+                      const active = data.lists.includes(list.id);
+                      return (
+                        <button
+                          key={list.id}
+                          type="button"
+                          onClick={() => toggleList(list.id)}
+                          aria-pressed={active}
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
+                            active
+                              ? "border-primary bg-primary/10 font-medium text-primary"
+                              : "border-border bg-card text-muted-foreground hover:border-muted-foreground/40"
+                          )}
+                        >
+                          {active ? <Check className="size-3.5" /> : null}
+                          {list.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  Selecione um ou mais segmentos. Nenhum selecionado = todos os
-                  segmentos.
+                  Selecione uma ou mais listas. Nenhuma selecionada = todas as
+                  listas.
                 </p>
               </div>
 
@@ -859,8 +871,13 @@ export function CampaignWizard({
                       value: originTemplate?.name ?? "Começado do zero",
                     },
                     {
-                      label: "Segmentos",
-                      value: segmentsLabel(data.segments),
+                      label: "Listas",
+                      value: listsLabel(
+                        data.lists.map(
+                          (id) =>
+                            availableLists.find((l) => l.id === id)?.name ?? id
+                        )
+                      ),
                     },
                     {
                       label: "Tags",

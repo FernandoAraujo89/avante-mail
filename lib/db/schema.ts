@@ -2,19 +2,13 @@ import {
   boolean,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
 
 import type { EmailDesign, EditorType, Row } from "../email-builder/types";
-
-export const SEGMENTS = [
-  "white_label",
-  "indicador",
-  "revenda_fiscal",
-] as const;
-export type Segment = (typeof SEGMENTS)[number];
 
 export const CAMPAIGN_STATUSES = [
   "draft",
@@ -55,12 +49,35 @@ export const contacts = pgTable("contacts", {
   email: text("email").notNull().unique(),
   company: text("company"),
   tags: text("tags").array(),
-  segment: text("segment"),
   subscribed: boolean("subscribed").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
+
+// Listas de contato criadas pelo usuário (substituem os antigos segmentos).
+export const lists = pgTable("lists", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Associação N:N — um contato pode estar em várias listas e vice-versa.
+export const contactLists = pgTable(
+  "contact_lists",
+  {
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    listId: uuid("list_id")
+      .notNull()
+      .references(() => lists.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.contactId, t.listId] })]
+);
 
 export const templates = pgTable("templates", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -105,8 +122,8 @@ export const campaigns = pgTable("campaigns", {
   templateId: uuid("template_id").references(() => templates.id, {
     onDelete: "set null",
   }),
-  // Segmentos-alvo da campanha (vazio/nulo = todos os segmentos).
-  segments: text("segments").array(),
+  // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas.
+  lists: uuid("lists").array(),
   tagsFilter: text("tags_filter").array(),
   status: text("status").$type<CampaignStatus>().notNull().default("draft"),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
@@ -146,6 +163,10 @@ export const campaignSends = pgTable("campaign_sends", {
 
 export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
+export type List = typeof lists.$inferSelect;
+export type NewList = typeof lists.$inferInsert;
+export type ContactList = typeof contactLists.$inferSelect;
+export type NewContactList = typeof contactLists.$inferInsert;
 export type Template = typeof templates.$inferSelect;
 export type NewTemplate = typeof templates.$inferInsert;
 export type Campaign = typeof campaigns.$inferSelect;

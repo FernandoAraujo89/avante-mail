@@ -10,7 +10,7 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -29,8 +29,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { campaigns, campaignSends, contacts, getDb } from "@/lib/db";
-import { formatDateTime, formatPercent, segmentsLabel } from "@/lib/format";
+import {
+  campaigns,
+  campaignSends,
+  contacts,
+  getDb,
+  lists as listsTable,
+} from "@/lib/db";
+import { formatDateTime, formatPercent, listsLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +54,16 @@ export default async function CampaignReportPage({
     .where(eq(campaigns.id, id));
 
   if (!campaign) notFound();
+
+  const campaignListNames =
+    campaign.lists && campaign.lists.length > 0
+      ? (
+          await db
+            .select({ name: listsTable.name })
+            .from(listsTable)
+            .where(inArray(listsTable.id, campaign.lists))
+        ).map((l) => l.name)
+      : [];
 
   const sends = await db
     .select({
@@ -90,7 +106,7 @@ export default async function CampaignReportPage({
         </Button>
         <PageHeader
           title={campaign.name}
-          description={`Assunto: ${campaign.subject} · ${segmentsLabel(campaign.segments)}${
+          description={`Assunto: ${campaign.subject} · ${listsLabel(campaignListNames)}${
             campaign.sentAt
               ? ` · Concluída em ${formatDateTime(campaign.sentAt)}`
               : ""

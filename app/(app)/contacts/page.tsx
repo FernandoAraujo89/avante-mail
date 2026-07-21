@@ -32,7 +32,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDate, segmentLabel } from "@/lib/format";
+import { formatDate } from "@/lib/format";
+
+type ListRef = { id: string; name: string };
 
 type ContactDto = {
   id: string;
@@ -40,7 +42,7 @@ type ContactDto = {
   email: string;
   company: string | null;
   tags: string[] | null;
-  segment: string | null;
+  lists: ListRef[];
   subscribed: boolean;
   createdAt: string;
 };
@@ -49,7 +51,8 @@ export default function ContactsPage() {
   const [contacts, setContacts] = useState<ContactDto[] | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [segment, setSegment] = useState("all");
+  const [listFilter, setListFilter] = useState("all");
+  const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [tag, setTag] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ContactDto | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -63,7 +66,7 @@ export default function ContactsPage() {
       setSelected(new Set());
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
-      if (segment !== "all") params.set("segment", segment);
+      if (listFilter !== "all") params.set("listId", listFilter);
       if (tag.trim()) params.set("tag", tag.trim().toLowerCase());
 
       const res = await fetch(`/api/contacts?${params.toString()}`);
@@ -74,12 +77,24 @@ export default function ContactsPage() {
       setContacts([]);
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [search, segment, tag]);
+  }, [search, listFilter, tag]);
 
   useEffect(() => {
     const timer = setTimeout(load, 300);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // Listas disponíveis para o filtro.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/lists");
+        if (res.ok) setAvailableLists(await res.json());
+      } catch {
+        // silencioso: filtro de lista fica só com "todas"
+      }
+    })();
+  }, []);
 
   async function confirmDelete() {
     if (!deleteTarget) return;
@@ -169,15 +184,17 @@ export default function ContactsPage() {
             className="pl-9"
           />
         </div>
-        <Select value={segment} onValueChange={setSegment}>
+        <Select value={listFilter} onValueChange={setListFilter}>
           <SelectTrigger className="w-52">
-            <SelectValue placeholder="Segmento" />
+            <SelectValue placeholder="Lista" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todos os segmentos</SelectItem>
-            <SelectItem value="white_label">White Label</SelectItem>
-            <SelectItem value="indicador">Indicador</SelectItem>
-            <SelectItem value="revenda_fiscal">Revenda Fiscal</SelectItem>
+            <SelectItem value="all">Todas as listas</SelectItem>
+            {availableLists.map((list) => (
+              <SelectItem key={list.id} value={list.id}>
+                {list.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Input
@@ -243,7 +260,7 @@ export default function ContactsPage() {
                   />
                 </TableHead>
                 <TableHead>Contato</TableHead>
-                <TableHead>Segmento</TableHead>
+                <TableHead>Listas</TableHead>
                 <TableHead>Tags</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Criado em</TableHead>
@@ -274,8 +291,18 @@ export default function ContactsPage() {
                       {contact.company ? ` · ${contact.company}` : ""}
                     </p>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {segmentLabel(contact.segment)}
+                  <TableCell>
+                    <div className="flex max-w-56 flex-wrap gap-1">
+                      {contact.lists.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        contact.lists.map((l) => (
+                          <Badge key={l.id} variant="secondary">
+                            {l.name}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex max-w-56 flex-wrap gap-1">

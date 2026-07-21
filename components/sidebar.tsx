@@ -7,6 +7,7 @@ import {
   BarChart3,
   FileCode2,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Menu,
   Send,
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { href: "/campaigns", label: "Campanhas", icon: Send },
   { href: "/reports", label: "Relatórios", icon: BarChart3 },
   { href: "/contacts", label: "Contatos", icon: Users },
+  { href: "/lists", label: "Listas", icon: ListChecks },
   { href: "/templates", label: "Templates", icon: FileCode2 },
   { href: "/users", label: "Usuários", icon: UserCog },
 ];

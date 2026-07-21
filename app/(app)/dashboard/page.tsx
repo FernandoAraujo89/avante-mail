@@ -13,8 +13,14 @@ import { PageHeader } from "@/components/page-header";
 import { CampaignStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { campaigns, campaignSends, contacts, getDb } from "@/lib/db";
-import { formatDateTime, formatPercent, segmentsLabel } from "@/lib/format";
+import {
+  campaigns,
+  campaignSends,
+  contacts,
+  getDb,
+  lists as listsTable,
+} from "@/lib/db";
+import { formatDateTime, formatPercent, listsLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +54,13 @@ export default async function DashboardPage() {
       .where(isNotNull(campaignSends.clickedAt)),
     db.select().from(campaigns).orderBy(desc(campaigns.createdAt)).limit(5),
   ]);
+
+  const allLists = await db
+    .select({ id: listsTable.id, name: listsTable.name })
+    .from(listsTable);
+  const listMap = new Map(allLists.map((l) => [l.id, l.name]));
+  const listNames = (ids: string[] | null) =>
+    (ids ?? []).map((id) => listMap.get(id) ?? id);
 
   return (
     <>
@@ -118,7 +131,7 @@ export default async function DashboardPage() {
                       {campaign.name}
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {segmentsLabel(campaign.segments)} ·{" "}
+                      {listsLabel(listNames(campaign.lists))} ·{" "}
                       {formatDateTime(campaign.createdAt)}
                     </p>
                   </div>

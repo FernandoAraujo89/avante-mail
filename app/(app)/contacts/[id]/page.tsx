@@ -25,8 +25,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { campaigns, campaignSends, contacts, getDb } from "@/lib/db";
-import { formatDate, formatDateTime, segmentLabel } from "@/lib/format";
+import {
+  campaigns,
+  campaignSends,
+  contactLists,
+  contacts,
+  getDb,
+  lists as listsTable,
+} from "@/lib/db";
+import { formatDate, formatDateTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +48,14 @@ export default async function ContactHistoryPage({
   const [contact] = await db.select().from(contacts).where(eq(contacts.id, id));
 
   if (!contact) notFound();
+
+  const contactListNames = (
+    await db
+      .select({ name: listsTable.name })
+      .from(contactLists)
+      .innerJoin(listsTable, eq(listsTable.id, contactLists.listId))
+      .where(eq(contactLists.contactId, id))
+  ).map((l) => l.name);
 
   // Histórico de campanhas/e-mails recebidos por este contato, do mais
   // recente para o mais antigo.
@@ -81,9 +96,11 @@ export default async function ContactHistoryPage({
           title={contact.name}
           description={`${contact.email}${
             contact.company ? ` · ${contact.company}` : ""
-          } · ${segmentLabel(contact.segment)} · Cadastrado em ${formatDate(
-            contact.createdAt
-          )}`}
+          } · ${
+            contactListNames.length > 0
+              ? `Listas: ${contactListNames.join(", ")}`
+              : "Sem lista"
+          } · Cadastrado em ${formatDate(contact.createdAt)}`}
         >
           {contact.subscribed ? (
             <Badge variant="success">Ativo</Badge>

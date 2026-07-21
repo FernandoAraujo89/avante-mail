@@ -4,6 +4,7 @@ import { and, arrayOverlaps, eq, inArray, type SQL } from "drizzle-orm";
 import {
   campaigns,
   campaignSends,
+  contactLists,
   contacts,
   getDb,
   templates,
@@ -59,10 +60,18 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       }
     }
 
-    // 1. Contatos elegíveis: inscritos + segmentos + tags.
+    // 1. Contatos elegíveis: inscritos + listas + tags.
     const conditions: SQL[] = [eq(contacts.subscribed, true)];
-    if (campaign.segments && campaign.segments.length > 0) {
-      conditions.push(inArray(contacts.segment, campaign.segments));
+    if (campaign.lists && campaign.lists.length > 0) {
+      conditions.push(
+        inArray(
+          contacts.id,
+          db
+            .select({ id: contactLists.contactId })
+            .from(contactLists)
+            .where(inArray(contactLists.listId, campaign.lists))
+        )
+      );
     }
     if (campaign.tagsFilter && campaign.tagsFilter.length > 0) {
       conditions.push(arrayOverlaps(contacts.tags, campaign.tagsFilter));

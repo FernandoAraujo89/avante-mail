@@ -48,23 +48,11 @@ export function ratePct(numerator: number, denominator: number): number | null {
   return (numerator / denominator) * 100;
 }
 
-export const SEGMENT_LABELS: Record<string, string> = {
-  todos: "Todos os segmentos",
-  white_label: "White Label",
-  indicador: "Indicador",
-  revenda_fiscal: "Revenda Fiscal",
-};
-
-export function segmentLabel(segment: string | null): string {
-  if (!segment) return "—";
-  return SEGMENT_LABELS[segment] ?? segment;
-}
-
 /**
- * Rótulo de uma lista de segmentos de campanha.
- * Vazio/nulo = "Todos os segmentos".
+ * Rótulo de uma lista de nomes de listas-alvo de campanha.
+ * Vazio/nulo = "Todas as listas".
  */
-export function segmentsLabel(segments: string[] | null | undefined): string {
-  if (!segments || segments.length === 0) return "Todos os segmentos";
-  return segments.map((s) => SEGMENT_LABELS[s] ?? s).join(", ");
+export function listsLabel(names: string[] | null | undefined): string {
+  if (!names || names.length === 0) return "Todas as listas";
+  return names.join(", ");
 }

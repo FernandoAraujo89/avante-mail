@@ -3,7 +3,7 @@ import { desc, eq } from "drizzle-orm";
 
 import { campaigns, getDb, templates } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
-import { errorMessage, normalizeSegments, normalizeTags } from "@/lib/utils";
+import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -93,9 +93,9 @@ export async function POST(request: NextRequest) {
           typeof body.templateId === "string" && body.templateId
             ? body.templateId
             : null,
-        segments: (() => {
-          const list = normalizeSegments(body.segments ?? body.segment);
-          return list.length > 0 ? list : null;
+        lists: (() => {
+          const ids = normalizeIds(body.lists);
+          return ids.length > 0 ? ids : null;
         })(),
         tagsFilter: normalizeTags(body.tagsFilter),
         design,

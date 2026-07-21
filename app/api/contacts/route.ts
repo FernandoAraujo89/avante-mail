@@ -12,8 +12,13 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import { contacts, getDb } from "@/lib/db";
-import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
+import { contactLists, contacts, getDb, lists } from "@/lib/db";
+import {
+  EMAIL_REGEX,
+  errorMessage,
+  normalizeIds,
+  normalizeTags,
+} from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +28,6 @@ export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
 
     const search = params.get("search")?.trim();
-    const segment = params.get("segment");
-    const segments = params
-      .get("segments")
-      ?.split(",")
-      .map((s) => s.trim())
-      .filter((s) => s && s !== "todos");
     const tag = params.get("tag")?.trim();
     const tags = params
       .get("tags")
@@ -37,6 +36,14 @@ export async function GET(request: NextRequest) {
       .filter(Boolean);
     const subscribed = params.get("subscribed");
     const countOnly = params.get("count") === "true";
+
+    // Filtro por lista: listId (uma) e/ou lists (várias, separadas por vírgula).
+    const listFilterIds = [
+      ...new Set([
+        ...(params.get("listId") ? [params.get("listId") as string] : []),
+        ...normalizeIds(params.get("lists")),
+      ]),
+    ];
 
     const conditions: SQL[] = [];
 
@@ -49,11 +56,6 @@ export async function GET(request: NextRequest) {
       );
       if (searchCondition) conditions.push(searchCondition);
     }
-    if (segments && segments.length > 0) {
-      conditions.push(inArray(contacts.segment, segments));
-    } else if (segment && segment !== "todos") {
-      conditions.push(eq(contacts.segment, segment));
-    }
     if (tag) {
       conditions.push(arrayContains(contacts.tags, [tag]));
     }
@@ -62,6 +64,17 @@ export async function GET(request: NextRequest) {
     }
     if (subscribed === "true") conditions.push(eq(contacts.subscribed, true));
     if (subscribed === "false") conditions.push(eq(contacts.subscribed, false));
+    if (listFilterIds.length > 0) {
+      conditions.push(
+        inArray(
+          contacts.id,
+          db
+            .select({ id: contactLists.contactId })
+            .from(contactLists)
+            .where(inArray(contactLists.listId, listFilterIds))
+        )
+      );
+    }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -79,7 +92,29 @@ export async function GET(request: NextRequest) {
       .where(where)
       .orderBy(desc(contacts.createdAt));
 
-    return NextResponse.json(data);
+    // Anexa as listas de cada contato (para exibir como badges).
+    const ids = data.map((c) => c.id);
+    const byContact = new Map<string, { id: string; name: string }[]>();
+    if (ids.length > 0) {
+      const membership = await db
+        .select({
+          contactId: contactLists.contactId,
+          listId: lists.id,
+          listName: lists.name,
+        })
+        .from(contactLists)
+        .innerJoin(lists, eq(lists.id, contactLists.listId))
+        .where(inArray(contactLists.contactId, ids));
+      for (const m of membership) {
+        const arr = byContact.get(m.contactId) ?? [];
+        arr.push({ id: m.listId, name: m.listName });
+        byContact.set(m.contactId, arr);
+      }
+    }
+
+    return NextResponse.json(
+      data.map((c) => ({ ...c, lists: byContact.get(c.id) ?? [] }))
+    );
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -89,13 +124,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const db = getDb();
     const body = await request.json().catch(() => ({}));
-
-    const rawIds: unknown[] = Array.isArray(body.ids) ? body.ids : [];
-    const ids = [
-      ...new Set(
-        rawIds.filter((id): id is string => typeof id === "string")
-      ),
-    ];
+    const ids = normalizeIds(body.ids);
 
     if (ids.length === 0) {
       return NextResponse.json(
@@ -127,9 +156,8 @@ export async function POST(request: NextRequest) {
       typeof body.company === "string" && body.company.trim()
         ? body.company.trim()
         : null;
-    const segment =
-      typeof body.segment === "string" && body.segment ? body.segment : null;
     const tags = normalizeTags(body.tags);
+    const listIds = normalizeIds(body.listIds);
 
     if (!name) {
       return NextResponse.json(
@@ -162,11 +190,17 @@ export async function POST(request: NextRequest) {
         name,
         email,
         company,
-        segment,
         tags,
         subscribed: body.subscribed !== false,
       })
       .returning();
+
+    if (listIds.length > 0) {
+      await db
+        .insert(contactLists)
+        .values(listIds.map((listId) => ({ contactId: created.id, listId })))
+        .onConflictDoNothing();
+    }
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {

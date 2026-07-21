@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { campaigns, getDb, templates } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
-import { errorMessage, normalizeSegments, normalizeTags } from "@/lib/utils";
+import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -111,9 +111,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         );
       }
     }
-    if ("segments" in body || "segment" in body) {
-      const list = normalizeSegments(body.segments ?? body.segment);
-      updates.segments = list.length > 0 ? list : null;
+    if ("lists" in body) {
+      const ids = normalizeIds(body.lists);
+      updates.lists = ids.length > 0 ? ids : null;
     }
     if ("tagsFilter" in body) {
       updates.tagsFilter = normalizeTags(body.tagsFilter);

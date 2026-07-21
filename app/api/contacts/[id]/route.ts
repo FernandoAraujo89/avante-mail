@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { contacts, getDb } from "@/lib/db";
-import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
+import { contactLists, contacts, getDb } from "@/lib/db";
+import {
+  EMAIL_REGEX,
+  errorMessage,
+  normalizeIds,
+  normalizeTags,
+} from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +30,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       );
     }
 
-    return NextResponse.json(contact);
+    const memberships = await db
+      .select({ listId: contactLists.listId })
+      .from(contactLists)
+      .where(eq(contactLists.contactId, id));
+
+    return NextResponse.json({
+      ...contact,
+      listIds: memberships.map((m) => m.listId),
+    });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -64,10 +77,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           ? body.company.trim()
           : null;
     }
-    if ("segment" in body) {
-      updates.segment =
-        typeof body.segment === "string" && body.segment ? body.segment : null;
-    }
     if ("tags" in body) {
       updates.tags = normalizeTags(body.tags);
     }
@@ -75,27 +84,51 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       updates.subscribed = body.subscribed;
     }
 
-    if (Object.keys(updates).length === 0) {
+    const changesLists = "listIds" in body;
+
+    if (Object.keys(updates).length === 0 && !changesLists) {
       return NextResponse.json(
         { error: "Nenhum campo para atualizar." },
         { status: 400 }
       );
     }
 
-    const [updated] = await db
-      .update(contacts)
-      .set(updates)
-      .where(eq(contacts.id, id))
-      .returning();
+    let contact = null;
+    if (Object.keys(updates).length > 0) {
+      const [updated] = await db
+        .update(contacts)
+        .set(updates)
+        .where(eq(contacts.id, id))
+        .returning();
+      contact = updated ?? null;
+    } else {
+      const [existing] = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, id));
+      contact = existing ?? null;
+    }
 
-    if (!updated) {
+    if (!contact) {
       return NextResponse.json(
         { error: "Contato não encontrado." },
         { status: 404 }
       );
     }
 
-    return NextResponse.json(updated);
+    // Substitui as associações de lista pelo conjunto informado.
+    if (changesLists) {
+      const listIds = normalizeIds(body.listIds);
+      await db.delete(contactLists).where(eq(contactLists.contactId, id));
+      if (listIds.length > 0) {
+        await db
+          .insert(contactLists)
+          .values(listIds.map((listId) => ({ contactId: id, listId })))
+          .onConflictDoNothing();
+      }
+    }
+
+    return NextResponse.json(contact);
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
