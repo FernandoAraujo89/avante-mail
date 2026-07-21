@@ -53,10 +53,14 @@ export default function ContactsPage() {
   const [tag, setTag] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ContactDto | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const load = useCallback(async () => {
     try {
       setError("");
+      setSelected(new Set());
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
       if (segment !== "all") params.set("segment", segment);
@@ -93,6 +97,45 @@ export default function ContactsPage() {
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  const allSelected =
+    !!contacts && contacts.length > 0 && contacts.every((c) => selected.has(c.id));
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(() =>
+      allSelected ? new Set() : new Set((contacts ?? []).map((c) => c.id))
+    );
+  }
+
+  async function confirmBulkDelete() {
+    if (selected.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selected] }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao remover contatos.");
+      setBulkOpen(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBulkOpen(false);
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -151,6 +194,32 @@ export default function ContactsPage() {
         </div>
       ) : null}
 
+      {selected.size > 0 ? (
+        <div className="mb-3 flex items-center justify-between rounded-lg border bg-accent/50 px-4 py-2">
+          <span className="text-sm font-medium">
+            {selected.size} contato{selected.size === 1 ? "" : "s"} selecionado
+            {selected.size === 1 ? "" : "s"}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelected(new Set())}
+            >
+              Limpar seleção
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setBulkOpen(true)}
+            >
+              <Trash2 />
+              Excluir selecionados
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Card>
         {contacts === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
@@ -164,6 +233,15 @@ export default function ContactsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="Selecionar todos"
+                    className="size-4 cursor-pointer accent-primary align-middle"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                  />
+                </TableHead>
                 <TableHead>Contato</TableHead>
                 <TableHead>Segmento</TableHead>
                 <TableHead>Tags</TableHead>
@@ -175,6 +253,15 @@ export default function ContactsPage() {
             <TableBody>
               {contacts.map((contact) => (
                 <TableRow key={contact.id}>
+                  <TableCell className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label={`Selecionar ${contact.name}`}
+                      className="size-4 cursor-pointer accent-primary align-middle"
+                      checked={selected.has(contact.id)}
+                      onChange={() => toggleOne(contact.id)}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Link
                       href={`/contacts/${contact.id}`}
@@ -286,6 +373,43 @@ export default function ContactsPage() {
               disabled={deleting}
             >
               {deleting ? "Removendo..." : "Remover"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={bulkOpen}
+        onOpenChange={(open) => {
+          if (!open) setBulkOpen(false);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover contatos</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja remover{" "}
+              <span className="font-medium text-foreground">
+                {selected.size} contato{selected.size === 1 ? "" : "s"}
+              </span>
+              ? O histórico de envios deles também será apagado. Esta ação não
+              pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBulkOpen(false)}
+              disabled={bulkDeleting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmBulkDelete}
+              disabled={bulkDeleting}
+            >
+              {bulkDeleting ? "Removendo..." : "Remover selecionados"}
             </Button>
           </DialogFooter>
         </DialogContent>

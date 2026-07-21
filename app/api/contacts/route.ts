@@ -85,6 +85,36 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  try {
+    const db = getDb();
+    const body = await request.json().catch(() => ({}));
+
+    const rawIds: unknown[] = Array.isArray(body.ids) ? body.ids : [];
+    const ids = [
+      ...new Set(
+        rawIds.filter((id): id is string => typeof id === "string")
+      ),
+    ];
+
+    if (ids.length === 0) {
+      return NextResponse.json(
+        { error: "Nenhum contato selecionado." },
+        { status: 400 }
+      );
+    }
+
+    const deleted = await db
+      .delete(contacts)
+      .where(inArray(contacts.id, ids))
+      .returning({ id: contacts.id });
+
+    return NextResponse.json({ deleted: deleted.length });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const db = getDb();
