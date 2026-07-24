@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import MessageValidator from "sns-validator";
 
 import { campaignSends, contacts, getDb, type BounceType } from "@/lib/db";
 import { errorMessage } from "@/lib/utils";
@@ -14,10 +15,33 @@ export const runtime = "nodejs";
  *  - SubscriptionConfirmation: primeira mão, confirma a inscrição do endpoint;
  *  - Notification: o evento de fato (Bounce/Complaint/Delivery/...);
  *  - UnsubscribeConfirmation: quando o tópico é desinscrito.
+ *
+ * Segurança: a assinatura da mensagem é verificada criptograficamente
+ * (sns-validator baixa o certificado de SigningCertURL — restrito a hosts
+ * *.amazonaws.com pela própria lib — e confere a assinatura RSA). Sem isso,
+ * qualquer um que soubesse o ARN do tópico (não é segredo) poderia forjar
+ * bounce/reclamação pra qualquer contato, ou apontar SubscribeURL pra uma
+ * URL arbitrária (SSRF). O ARN esperado é conferido como camada extra.
  */
 
+interface SnsMessage {
+  Type?: string;
+  TopicArn?: string;
+  SubscribeURL?: string;
+  Message?: string;
+  [key: string]: unknown;
+}
+
+const validator = new MessageValidator();
+
+function validateSignature(message: SnsMessage): Promise<void> {
+  return new Promise((resolve, reject) => {
+    validator.validate(message, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
 // Só aceita mensagens do tópico esperado (quando SES_SNS_TOPIC_ARN está
-// definido). Barra POSTs de terceiros tentando forjar bounces/reclamações.
+// definido) — camada extra além da assinatura.
 function topicAllowed(topicArn: string | undefined): boolean {
   const expected = process.env.SES_SNS_TOPIC_ARN;
   if (!expected) return true; // sem restrição em dev/local
@@ -27,12 +51,16 @@ function topicAllowed(topicArn: string | undefined): boolean {
 export async function POST(request: NextRequest) {
   try {
     const payload = await request.text();
-    const envelope = JSON.parse(payload) as {
-      Type?: string;
-      TopicArn?: string;
-      SubscribeURL?: string;
-      Message?: string;
-    };
+    const envelope = JSON.parse(payload) as SnsMessage;
+
+    try {
+      await validateSignature(envelope);
+    } catch (error) {
+      return NextResponse.json(
+        { error: `Assinatura SNS inválida: ${errorMessage(error)}` },
+        { status: 401 }
+      );
+    }
 
     const snsType =
       request.headers.get("x-amz-sns-message-type") ?? envelope.Type ?? "";
@@ -44,7 +72,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Confirmação de inscrição: basta acessar a SubscribeURL uma vez.
+    // Confirmação de inscrição: a assinatura já garante que a SubscribeURL
+    // veio do SNS de verdade, então é seguro acessá-la.
     if (snsType === "SubscriptionConfirmation" && envelope.SubscribeURL) {
       await fetch(envelope.SubscribeURL);
       return NextResponse.json({ ok: true, confirmed: true });
