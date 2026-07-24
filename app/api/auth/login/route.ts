@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { getDb, users } from "@/lib/db";
 import { verifyPassword } from "@/lib/passwords";
+import { clientIp, rateLimitAllow } from "@/lib/rate-limit";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -23,6 +24,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Informe e-mail e senha." },
         { status: 400 }
+      );
+    }
+
+    // Contém força bruta: 10 tentativas por 5 minutos por IP+e-mail.
+    const allowed = await rateLimitAllow(
+      `login:${clientIp(request)}:${email}`,
+      10,
+      5 * 60
+    );
+    if (!allowed) {
+      return NextResponse.json(
+        { error: "Muitas tentativas. Aguarde alguns minutos e tente de novo." },
+        { status: 429 }
       );
     }
 

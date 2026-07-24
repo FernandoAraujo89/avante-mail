@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogIn } from "lucide-react";
 
@@ -77,6 +78,13 @@ export function LoginForm() {
             <LogIn />
             {loading ? "Entrando..." : "Entrar"}
           </Button>
+
+          <Link
+            href="/forgot-password"
+            className="text-center text-xs text-muted-foreground hover:text-foreground"
+          >
+            Esqueci minha senha
+          </Link>
         </form>
       </CardContent>
     </Card>

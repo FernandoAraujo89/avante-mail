@@ -6,7 +6,11 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 // e-mails (tracking, descadastro, webhook, imagens) e healthcheck.
 const PUBLIC_PREFIXES = [
   "/login",
+  "/forgot-password",
+  "/reset-password",
   "/api/auth/login",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/health",
   "/unsubscribe",
   "/api/unsubscribe",
