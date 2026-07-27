@@ -3,7 +3,7 @@ import { inArray } from "drizzle-orm";
 import Papa from "papaparse";
 
 import { contactLists, contacts, getDb, lists, type NewContact } from "@/lib/db";
-import { normalizePhone } from "@/lib/phone";
+import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -90,11 +90,13 @@ export async function POST(request: NextRequest) {
 
       if (!byEmail.has(email)) {
         // Telefone inválido não descarta a linha — o contato entra sem ele.
+        // Célula com vários números (ex.: "91 9...-..., (91) 9...-...") usa o
+        // primeiro válido; qualquer formato com DDD é normalizado para E.164.
         let phone: string | null = null;
         if (mapping.phone) {
           const rawPhone = (row[mapping.phone] ?? "").trim();
           if (rawPhone) {
-            phone = normalizePhone(rawPhone);
+            phone = firstValidPhone(rawPhone);
             if (!phone) phoneInvalid++;
           }
         }

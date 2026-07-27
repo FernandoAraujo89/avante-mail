@@ -288,6 +288,10 @@ export default function ImportContactsPage() {
                 <br />
                 (tags separadas por vírgula; aceita_whatsapp = sim/não, marque
                 sim só com consentimento do contato)
+                <br />
+                O telefone pode vir em qualquer formato com DDD (ex.: (31)
+                99576-8114 ou 31995768114). Se a célula tiver vários números
+                separados por vírgula, o primeiro válido é usado.
               </p>
             </div>
             <input
