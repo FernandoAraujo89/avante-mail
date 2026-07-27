@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 
-import { campaigns, getDb, templates } from "@/lib/db";
+import { campaigns, getDb, templates, whatsappTemplates } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
 import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
+import { parseVariableMap } from "@/lib/whatsapp/template-input";
 
 export const dynamic = "force-dynamic";
 
@@ -34,12 +35,40 @@ export async function POST(request: NextRequest) {
 
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const subject = typeof body.subject === "string" ? body.subject.trim() : "";
+    const channel = body.channel === "whatsapp" ? "whatsapp" : "email";
 
-    if (!name || !subject) {
+    if (channel === "email" && (!name || !subject)) {
       return NextResponse.json(
         { error: "Nome e assunto são obrigatórios." },
         { status: 400 }
       );
+    }
+    if (channel === "whatsapp" && !name) {
+      return NextResponse.json(
+        { error: "O nome da campanha é obrigatório." },
+        { status: 400 }
+      );
+    }
+
+    // Campos do canal WhatsApp: modelo (validado se informado) e mapa de
+    // variáveis. O modelo pode ficar pendente no rascunho.
+    let whatsappTemplateId: string | null = null;
+    if (
+      channel === "whatsapp" &&
+      typeof body.whatsappTemplateId === "string" &&
+      body.whatsappTemplateId
+    ) {
+      const [template] = await db
+        .select({ id: whatsappTemplates.id })
+        .from(whatsappTemplates)
+        .where(eq(whatsappTemplates.id, body.whatsappTemplateId));
+      if (!template) {
+        return NextResponse.json(
+          { error: "Modelo de WhatsApp não encontrado." },
+          { status: 400 }
+        );
+      }
+      whatsappTemplateId = template.id;
     }
 
     const scheduledAt =
@@ -75,7 +104,15 @@ export async function POST(request: NextRequest) {
       .insert(campaigns)
       .values({
         name,
-        subject,
+        // subject é NOT NULL no schema; no WhatsApp não existe assunto, então
+        // o nome da campanha preenche a coluna (não aparece na mensagem).
+        subject: channel === "whatsapp" ? name : subject,
+        channel,
+        whatsappTemplateId,
+        whatsappVariables:
+          channel === "whatsapp"
+            ? parseVariableMap(body.whatsappVariables)
+            : null,
         preheader:
           typeof body.preheader === "string" && body.preheader.trim()
             ? body.preheader.trim()

@@ -10,6 +10,7 @@ import {
   ListChecks,
   LogOut,
   Menu,
+  MessageCircle,
   Send,
   UserCog,
   Users,
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { href: "/contacts", label: "Contatos", icon: Users },
   { href: "/lists", label: "Listas", icon: ListChecks },
   { href: "/templates", label: "Templates", icon: FileCode2 },
+  { href: "/whatsapp-templates", label: "WhatsApp", icon: MessageCircle },
   { href: "/users", label: "Usuários", icon: UserCog },
 ];
 

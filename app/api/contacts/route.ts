@@ -8,11 +8,13 @@ import {
   eq,
   ilike,
   inArray,
+  isNotNull,
   or,
   type SQL,
 } from "drizzle-orm";
 
 import { contactLists, contacts, getDb, lists } from "@/lib/db";
+import { normalizePhone } from "@/lib/phone";
 import {
   EMAIL_REGEX,
   errorMessage,
@@ -64,6 +66,13 @@ export async function GET(request: NextRequest) {
     }
     if (subscribed === "true") conditions.push(eq(contacts.subscribed, true));
     if (subscribed === "false") conditions.push(eq(contacts.subscribed, false));
+    // Elegível para WhatsApp: telefone cadastrado + consentimento do canal.
+    if (params.get("whatsappEligible") === "true") {
+      conditions.push(
+        eq(contacts.whatsappSubscribed, true),
+        isNotNull(contacts.phone)
+      );
+    }
     if (listFilterIds.length > 0) {
       conditions.push(
         inArray(
@@ -172,6 +181,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Telefone é opcional; quando informado, é validado e guardado em E.164.
+    const phoneRaw = typeof body.phone === "string" ? body.phone.trim() : "";
+    let phone: string | null = null;
+    if (phoneRaw) {
+      phone = normalizePhone(phoneRaw);
+      if (!phone) {
+        return NextResponse.json(
+          { error: "Informe um telefone válido com DDD (ex.: 48 99999-9999)." },
+          { status: 400 }
+        );
+      }
+    }
+
     const existing = await db
       .select({ id: contacts.id })
       .from(contacts)
@@ -184,14 +206,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (phone) {
+      const samePhone = await db
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(eq(contacts.phone, phone));
+      if (samePhone.length > 0) {
+        return NextResponse.json(
+          { error: "Já existe um contato com este telefone." },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Opt-in de WhatsApp só com telefone; registra a data (prova LGPD).
+    const whatsappSubscribed = body.whatsappSubscribed === true && phone !== null;
+
     const [created] = await db
       .insert(contacts)
       .values({
         name,
         email,
+        phone,
         company,
         tags,
         subscribed: body.subscribed !== false,
+        whatsappSubscribed,
+        whatsappOptInAt: whatsappSubscribed ? new Date() : null,
       })
       .returning();
 

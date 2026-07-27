@@ -51,6 +51,24 @@ const FIELDS = [
     required: false,
     synonyms: ["tags", "tag", "etiquetas"],
   },
+  {
+    key: "phone",
+    label: "Telefone (WhatsApp)",
+    required: false,
+    synonyms: ["phone", "telefone", "celular", "whatsapp", "fone"],
+  },
+  {
+    key: "whatsappOptIn",
+    label: "Aceita WhatsApp",
+    required: false,
+    synonyms: [
+      "aceita_whatsapp",
+      "whatsapp_opt_in",
+      "opt_in_whatsapp",
+      "optin",
+      "consentimento",
+    ],
+  },
 ] as const;
 
 type FieldKey = (typeof FIELDS)[number]["key"];
@@ -63,6 +81,7 @@ type ImportResult = {
   imported: number;
   duplicated: number;
   invalid: number;
+  phoneInvalid: number;
   addedToList: number;
 };
 
@@ -79,6 +98,8 @@ export default function ImportContactsPage() {
     email: IGNORE,
     company: IGNORE,
     tags: IGNORE,
+    phone: IGNORE,
+    whatsappOptIn: IGNORE,
   });
   const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [targetListId, setTargetListId] = useState(NO_LIST);
@@ -225,6 +246,12 @@ export default function ImportContactsPage() {
                 <span className="font-semibold">{result.invalid}</span>{" "}
                 linhas inválidas (sem nome ou e-mail válido)
               </li>
+              {result.phoneInvalid > 0 ? (
+                <li>
+                  <span className="font-semibold">{result.phoneInvalid}</span>{" "}
+                  telefones inválidos (contato importado sem telefone)
+                </li>
+              ) : null}
               {result.addedToList > 0 ? (
                 <li>
                   <span className="font-semibold text-primary">
@@ -256,9 +283,11 @@ export default function ImportContactsPage() {
             <div>
               <p className="font-medium">Selecione o arquivo CSV</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Colunas esperadas: name, email, company, tags
+                Colunas esperadas: name, email, company, tags, telefone,
+                aceita_whatsapp
                 <br />
-                (tags separadas por vírgula dentro da célula)
+                (tags separadas por vírgula; aceita_whatsapp = sim/não, marque
+                sim só com consentimento do contato)
               </p>
             </div>
             <input

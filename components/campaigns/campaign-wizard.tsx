@@ -9,6 +9,7 @@ import {
   Eye,
   LayoutTemplate,
   Mail,
+  MessageCircle,
   Plus,
   RotateCcw,
   Save,
@@ -17,6 +18,11 @@ import {
 } from "lucide-react";
 
 import { DesignEditor } from "@/components/builder/design-editor";
+import {
+  WhatsAppMessageStep,
+  type WaTemplateOption,
+} from "@/components/campaigns/whatsapp-message-step";
+import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +49,13 @@ import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EditorType, EmailDesign } from "@/lib/email-builder/types";
 import { listsLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  extractVariables,
+  fillVariables,
+  WHATSAPP_BRAZIL_PRICE_USD,
+  type WhatsAppVariableMap,
+} from "@/lib/whatsapp/types";
+import { resolveVariables } from "@/lib/whatsapp/variables";
 
 type ListRef = { id: string; name: string };
 
@@ -55,6 +68,14 @@ type TemplateDto = {
   editorType: EditorType;
 };
 
+type CampaignChannel = "email" | "whatsapp";
+
+type WaConfig = {
+  configured: boolean;
+  dailyLimit: number | null;
+  pricesUsd: Record<string, number>;
+};
+
 type WizardData = {
   name: string;
   subject: string;
@@ -65,6 +86,9 @@ type WizardData = {
   editorType: EditorType;
   lists: string[];
   tagsFilter: string;
+  channel: CampaignChannel;
+  whatsappTemplateId: string;
+  whatsappVariables: WhatsAppVariableMap;
 };
 
 const EMPTY_DATA: WizardData = {
@@ -77,6 +101,9 @@ const EMPTY_DATA: WizardData = {
   editorType: "builder",
   lists: [],
   tagsFilter: "",
+  channel: "email",
+  whatsappTemplateId: "",
+  whatsappVariables: {},
 };
 
 const STEPS = [
@@ -123,6 +150,11 @@ export function CampaignWizard({
     Boolean(editId || duplicateId)
   );
   const [templates, setTemplates] = useState<TemplateDto[] | null>(null);
+  const [waTemplates, setWaTemplates] = useState<WaTemplateOption[] | null>(
+    null
+  );
+  const [waConfig, setWaConfig] = useState<WaConfig | null>(null);
+  const [testPhones, setTestPhones] = useState("");
   const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -169,6 +201,24 @@ export function CampaignWizard({
     })();
   }, []);
 
+  // Modelos de WhatsApp e estado do canal (para o passo Mensagem e o Revisar).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/whatsapp-templates");
+        setWaTemplates(res.ok ? await res.json() : []);
+      } catch {
+        setWaTemplates([]);
+      }
+      try {
+        const res = await fetch("/api/whatsapp/config");
+        if (res.ok) setWaConfig(await res.json());
+      } catch {
+        // silencioso: sem config, o Revisar mostra o aviso de não configurado
+      }
+    })();
+  }, []);
+
   // Carrega a campanha em edição ou duplicação.
   useEffect(() => {
     const sourceId = editId ?? duplicateId;
@@ -205,6 +255,12 @@ export function CampaignWizard({
           tagsFilter: Array.isArray(json.tagsFilter)
             ? json.tagsFilter.join(", ")
             : "",
+          channel: json.channel === "whatsapp" ? "whatsapp" : "email",
+          whatsappTemplateId: json.whatsappTemplateId ?? "",
+          whatsappVariables:
+            json.whatsappVariables && typeof json.whatsappVariables === "object"
+              ? json.whatsappVariables
+              : {},
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -218,6 +274,32 @@ export function CampaignWizard({
     () => templates?.find((t) => t.id === data.templateId) ?? null,
     [templates, data.templateId]
   );
+
+  const selectedWaTemplate = useMemo(
+    () => waTemplates?.find((t) => t.id === data.whatsappTemplateId) ?? null,
+    [waTemplates, data.whatsappTemplateId]
+  );
+
+  // Variáveis do modelo ainda sem fonte definida (bloqueiam o avanço).
+  const waMissingVariables = useMemo(() => {
+    if (!selectedWaTemplate) return [];
+    return extractVariables(selectedWaTemplate.bodyText).filter((n) => {
+      const source = data.whatsappVariables[String(n)];
+      if (!source) return true;
+      return source.source === "static" && !source.value?.trim();
+    });
+  }, [selectedWaTemplate, data.whatsappVariables]);
+
+  // Valores da prévia do Revisar (contato de exemplo).
+  const waPreviewValues = useMemo(() => {
+    if (!selectedWaTemplate) return {};
+    return resolveVariables({
+      bodyText: selectedWaTemplate.bodyText,
+      variables: data.whatsappVariables,
+      examples: selectedWaTemplate.variableExamples,
+      contact: { name: "Parceiro Exemplo", company: "Empresa Exemplo" },
+    });
+  }, [selectedWaTemplate, data.whatsappVariables]);
 
   // Modelos que podem ser abertos no Criador (têm design).
   const editableModels = useMemo(
@@ -272,10 +354,14 @@ export function CampaignWizard({
 
     (async () => {
       try {
-        const params = new URLSearchParams({
-          count: "true",
-          subscribed: "true",
-        });
+        // Elegibilidade por canal: e-mail = inscritos; WhatsApp = telefone +
+        // consentimento do canal.
+        const params = new URLSearchParams({ count: "true" });
+        if (data.channel === "whatsapp") {
+          params.set("whatsappEligible", "true");
+        } else {
+          params.set("subscribed", "true");
+        }
         if (data.lists.length > 0) {
           params.set("lists", data.lists.join(","));
         }
@@ -293,7 +379,7 @@ export function CampaignWizard({
     return () => {
       cancelled = true;
     };
-  }, [step, data.lists, data.tagsFilter]);
+  }, [step, data.lists, data.tagsFilter, data.channel]);
 
   function update(patch: Partial<WizardData>) {
     setData((current) => ({ ...current, ...patch }));
@@ -330,11 +416,26 @@ export function CampaignWizard({
   }
 
   function validateStep(current: number): string {
-    if (current === 1 && (!data.name.trim() || !data.subject.trim())) {
-      return "Preencha ao menos o nome da campanha e o assunto do e-mail.";
+    if (current === 1) {
+      if (data.channel === "whatsapp") {
+        if (!data.name.trim()) return "Preencha o nome da campanha.";
+      } else if (!data.name.trim() || !data.subject.trim()) {
+        return "Preencha ao menos o nome da campanha e o assunto do e-mail.";
+      }
     }
-    if (current === 2 && !data.design) {
-      return "Monte o e-mail da campanha: escolha um modelo ou comece do zero.";
+    if (current === 2) {
+      if (data.channel === "whatsapp") {
+        if (!data.whatsappTemplateId || !selectedWaTemplate) {
+          return "Escolha um modelo aprovado para a mensagem.";
+        }
+        if (waMissingVariables.length > 0) {
+          return `Defina o valor das variáveis ${waMissingVariables
+            .map((n) => `{{${n}}}`)
+            .join(", ")}.`;
+        }
+      } else if (!data.design) {
+        return "Monte o e-mail da campanha: escolha um modelo ou comece do zero.";
+      }
     }
     return "";
   }
@@ -357,7 +458,9 @@ export function CampaignWizard({
   function buildPayload() {
     return {
       name: data.name.trim(),
-      subject: data.subject.trim(),
+      // No WhatsApp não há assunto — o nome preenche a coluna (não aparece).
+      subject:
+        data.channel === "whatsapp" ? data.name.trim() : data.subject.trim(),
       preheader: data.preheader,
       templateId: data.templateId || null,
       design: data.design,
@@ -367,6 +470,9 @@ export function CampaignWizard({
       scheduledAt: data.scheduledAt
         ? new Date(data.scheduledAt).toISOString()
         : null,
+      channel: data.channel,
+      whatsappTemplateId: data.whatsappTemplateId || null,
+      whatsappVariables: data.whatsappVariables,
     };
   }
 
@@ -385,8 +491,9 @@ export function CampaignWizard({
   }
 
   async function handleSaveDraft() {
-    if (!data.name.trim() || !data.subject.trim()) {
-      setError("Preencha ao menos o nome da campanha e o assunto do e-mail.");
+    const message = validateStep(1);
+    if (message) {
+      setError(message);
       return;
     }
     setSaving(true);
@@ -481,8 +588,59 @@ export function CampaignWizard({
     [testEmails]
   );
 
+  const parsedTestPhones = useMemo(
+    () =>
+      [
+        ...new Set(
+          testPhones
+            .split(",")
+            .map((p) => p.trim())
+            .filter(Boolean)
+        ),
+      ].slice(0, MAX_TEST_EMAILS + 1),
+    [testPhones]
+  );
+
   async function handleSendTest() {
     setTestMessage("");
+
+    if (data.channel === "whatsapp") {
+      if (!data.whatsappTemplateId) {
+        setTestMessage("Escolha o modelo da mensagem antes de enviar o teste.");
+        return;
+      }
+      if (parsedTestPhones.length === 0) {
+        setTestMessage("Informe ao menos um telefone de teste.");
+        return;
+      }
+      if (parsedTestPhones.length > MAX_TEST_EMAILS) {
+        setTestMessage(`Máximo de ${MAX_TEST_EMAILS} telefones de teste.`);
+        return;
+      }
+      setSendingTest(true);
+      try {
+        const campaign = await persist();
+        const res = await fetch(`/api/campaigns/${campaign.id}/test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phones: parsedTestPhones }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Erro ao enviar o teste.");
+        const failed = Array.isArray(json.failed) ? json.failed : [];
+        setTestMessage(
+          failed.length > 0
+            ? `Enviado para ${json.sent}. Falhou: ${failed.join(", ")}`
+            : `Mensagem de teste enviada para ${json.recipients.join(", ")}. Confira o WhatsApp.`
+        );
+      } catch (err) {
+        setTestMessage(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSendingTest(false);
+      }
+      return;
+    }
+
     if (!data.design) {
       setTestMessage("Monte o e-mail da campanha antes de enviar o teste.");
       return;
@@ -537,12 +695,20 @@ export function CampaignWizard({
       <div className="pb-24">
       <PageHeader
         title={editId ? "Editar campanha" : "Nova campanha"}
-        description="Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
+        description={
+          data.channel === "whatsapp"
+            ? "Configure, escolha o modelo aprovado da mensagem, selecione os destinatários e revise antes de disparar."
+            : "Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
+        }
       />
 
       {/* Stepper */}
       <div className="mb-8 flex flex-wrap items-center gap-2">
-        {STEPS.map((s, index) => (
+        {STEPS.map((raw) =>
+          raw.number === 2 && data.channel === "whatsapp"
+            ? { ...raw, title: "Mensagem" }
+            : raw
+        ).map((s, index) => (
           <div key={s.number} className="flex items-center gap-2">
             <button
               type="button"
@@ -593,6 +759,64 @@ export function CampaignWizard({
         <Card className="max-w-3xl">
           <CardContent className="grid gap-5 p-6">
             <div className="grid gap-2">
+              <Label>Canal de envio</Label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(
+                  [
+                    {
+                      value: "email",
+                      label: "E-mail",
+                      description: "Newsletter montada no Criador de e-mails",
+                      icon: Mail,
+                    },
+                    {
+                      value: "whatsapp",
+                      label: "WhatsApp",
+                      description: "Modelo aprovado pela Meta, via Cloud API",
+                      icon: MessageCircle,
+                    },
+                  ] as const
+                ).map((option) => {
+                  const active = data.channel === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      disabled={Boolean(editId)}
+                      onClick={() => update({ channel: option.value })}
+                      aria-pressed={active}
+                      className={cn(
+                        "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
+                        active
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-card hover:border-muted-foreground/40",
+                        editId ? "cursor-not-allowed opacity-60" : ""
+                      )}
+                    >
+                      <option.icon
+                        className={cn(
+                          "mt-0.5 size-5 shrink-0",
+                          active ? "text-primary" : "text-muted-foreground"
+                        )}
+                      />
+                      <span>
+                        <span className="block font-medium">{option.label}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {option.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {editId ? (
+                <p className="text-xs text-muted-foreground">
+                  O canal não pode ser alterado depois que a campanha é criada.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2">
               <Label htmlFor="campaign-name">Nome da campanha *</Label>
               <Input
                 id="campaign-name"
@@ -601,29 +825,35 @@ export function CampaignWizard({
                 placeholder="Ex.: Lançamento do módulo financeiro"
               />
               <p className="text-xs text-muted-foreground">
-                Uso interno e título do e-mail (aba do navegador / cliente).
+                {data.channel === "whatsapp"
+                  ? "Uso interno — não aparece na mensagem."
+                  : "Uso interno e título do e-mail (aba do navegador / cliente)."}
               </p>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="campaign-subject">Assunto do e-mail *</Label>
-              <Input
-                id="campaign-subject"
-                value={data.subject}
-                onChange={(e) => update({ subject: e.target.value })}
-                placeholder="Ex.: Chegou o novo módulo financeiro do seu sistema"
-              />
-            </div>
+            {data.channel === "email" ? (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="campaign-subject">Assunto do e-mail *</Label>
+                  <Input
+                    id="campaign-subject"
+                    value={data.subject}
+                    onChange={(e) => update({ subject: e.target.value })}
+                    placeholder="Ex.: Chegou o novo módulo financeiro do seu sistema"
+                  />
+                </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="campaign-preheader">Preheader</Label>
-              <Input
-                id="campaign-preheader"
-                value={data.preheader}
-                onChange={(e) => update({ preheader: e.target.value })}
-                placeholder="Texto curto exibido após o assunto na caixa de entrada"
-              />
-            </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="campaign-preheader">Preheader</Label>
+                  <Input
+                    id="campaign-preheader"
+                    value={data.preheader}
+                    onChange={(e) => update({ preheader: e.target.value })}
+                    placeholder="Texto curto exibido após o assunto na caixa de entrada"
+                  />
+                </div>
+              </>
+            ) : null}
 
             <div className="grid gap-2 sm:max-w-xs">
               <Label htmlFor="campaign-scheduled">Agendar para</Label>
@@ -639,15 +869,29 @@ export function CampaignWizard({
             </div>
 
             <p className="rounded-lg bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
-              O conteúdo do e-mail (textos, imagens, botões) é montado no próximo
-              passo, no Criador de e-mails.
+              {data.channel === "whatsapp"
+                ? "O conteúdo da mensagem é um modelo pré-aprovado pela Meta, escolhido no próximo passo."
+                : "O conteúdo do e-mail (textos, imagens, botões) é montado no próximo passo, no Criador de e-mails."}
             </p>
           </CardContent>
         </Card>
       ) : null}
 
+      {/* Passo 2 — Mensagem (WhatsApp) */}
+      {step === 2 && data.channel === "whatsapp" ? (
+        <WhatsAppMessageStep
+          templates={waTemplates}
+          selectedId={data.whatsappTemplateId}
+          variables={data.whatsappVariables}
+          onSelect={(id) => update({ whatsappTemplateId: id })}
+          onVariablesChange={(whatsappVariables) =>
+            update({ whatsappVariables })
+          }
+        />
+      ) : null}
+
       {/* Passo 2 — E-mail */}
-      {step === 2 ? (
+      {step === 2 && data.channel === "email" ? (
         !data.design ? (
           // Galeria de modelos
           templates === null ? (
@@ -840,8 +1084,9 @@ export function CampaignWizard({
                   {recipientCount === null ? "..." : recipientCount}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  destinatários elegíveis (contatos descadastrados são
-                  excluídos automaticamente)
+                  {data.channel === "whatsapp"
+                    ? "destinatários elegíveis (apenas contatos com telefone e consentimento de WhatsApp)"
+                    : "destinatários elegíveis (contatos descadastrados são excluídos automaticamente)"}
                 </p>
               </div>
             </CardContent>
@@ -864,12 +1109,28 @@ export function CampaignWizard({
                 <dl className="space-y-3 text-sm">
                   {[
                     { label: "Nome", value: data.name },
-                    { label: "Assunto", value: data.subject },
-                    { label: "Preheader", value: data.preheader || "—" },
-                    {
-                      label: "Modelo de origem",
-                      value: originTemplate?.name ?? "Começado do zero",
-                    },
+                    ...(data.channel === "whatsapp"
+                      ? [
+                          {
+                            label: "Modelo",
+                            value: selectedWaTemplate?.name ?? "—",
+                          },
+                          {
+                            label: "Categoria",
+                            value:
+                              selectedWaTemplate?.category === "UTILITY"
+                                ? "Utilidade"
+                                : "Marketing",
+                          },
+                        ]
+                      : [
+                          { label: "Assunto", value: data.subject },
+                          { label: "Preheader", value: data.preheader || "—" },
+                          {
+                            label: "Modelo de origem",
+                            value: originTemplate?.name ?? "Começado do zero",
+                          },
+                        ]),
                     {
                       label: "Listas",
                       value: listsLabel(
@@ -907,48 +1168,134 @@ export function CampaignWizard({
                       {recipientCount === null ? "..." : recipientCount}
                     </dd>
                   </div>
+                  {data.channel === "whatsapp" ? (
+                    <div className="flex justify-between gap-4">
+                      <dt className="shrink-0 text-muted-foreground">
+                        Custo estimado (Meta)
+                      </dt>
+                      <dd className="text-right font-medium">
+                        {recipientCount === null
+                          ? "..."
+                          : `~US$ ${(
+                              recipientCount *
+                              ((waConfig?.pricesUsd ??
+                                WHATSAPP_BRAZIL_PRICE_USD)[
+                                selectedWaTemplate?.category ?? "MARKETING"
+                              ] ?? WHATSAPP_BRAZIL_PRICE_USD.MARKETING)
+                            ).toFixed(2)}`}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
               </CardContent>
             </Card>
 
+            {data.channel === "whatsapp" && waConfig && !waConfig.configured ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+                O canal WhatsApp ainda não foi configurado no servidor (Fase 0
+                do plano). Salve como rascunho — o disparo fica bloqueado até
+                lá.
+              </div>
+            ) : null}
+
+            {data.channel === "whatsapp" &&
+            waConfig?.dailyLimit != null &&
+            recipientCount !== null &&
+            recipientCount > waConfig.dailyLimit ? (
+              <div className="rounded-lg border border-border bg-accent/50 px-4 py-3 text-sm">
+                Atenção: seu limite atual é de{" "}
+                <span className="font-medium">
+                  {waConfig.dailyLimit} conversas/24h
+                </span>{" "}
+                e a campanha tem {recipientCount} destinatários — o excedente
+                pode falhar no envio. Considere dividir por listas ou aguardar
+                o limite subir.
+              </div>
+            ) : null}
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Mail className="size-4 text-primary" />
-                  Enviar e-mail de teste
+                  {data.channel === "whatsapp" ? (
+                    <MessageCircle className="size-4 text-primary" />
+                  ) : (
+                    <Mail className="size-4 text-primary" />
+                  )}
+                  {data.channel === "whatsapp"
+                    ? "Enviar teste por WhatsApp"
+                    : "Enviar e-mail de teste"}
                 </CardTitle>
                 <CardDescription>
-                  Envie para você antes do disparo real. Até {MAX_TEST_EMAILS}{" "}
-                  e-mails, separados por vírgula.
+                  {data.channel === "whatsapp"
+                    ? `Envia o modelo real (cobrado pela Meta) para até ${MAX_TEST_EMAILS} números, separados por vírgula.`
+                    : `Envie para você antes do disparo real. Até ${MAX_TEST_EMAILS} e-mails, separados por vírgula.`}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3">
-                <Input
-                  value={testEmails}
-                  onChange={(e) => {
-                    setTestEmails(e.target.value);
-                    setTestMessage("");
-                  }}
-                  placeholder="voce@empresa.com, colega@empresa.com"
-                />
-                {parsedTestEmails.length > MAX_TEST_EMAILS ? (
-                  <p className="text-xs text-destructive-hover">
-                    Máximo de {MAX_TEST_EMAILS} e-mails.
-                  </p>
-                ) : null}
-                <Button
-                  variant="outline"
-                  onClick={handleSendTest}
-                  disabled={
-                    sendingTest ||
-                    !data.design ||
-                    parsedTestEmails.length === 0 ||
-                    parsedTestEmails.length > MAX_TEST_EMAILS
-                  }
-                >
-                  <Send />
-                  {sendingTest ? "Enviando teste..." : "Enviar teste"}
-                </Button>
+                {data.channel === "whatsapp" ? (
+                  <>
+                    <Input
+                      value={testPhones}
+                      onChange={(e) => {
+                        setTestPhones(e.target.value);
+                        setTestMessage("");
+                      }}
+                      placeholder="(48) 99999-9999, (11) 98888-7777"
+                    />
+                    {parsedTestPhones.length > MAX_TEST_EMAILS ? (
+                      <p className="text-xs text-destructive-hover">
+                        Máximo de {MAX_TEST_EMAILS} telefones.
+                      </p>
+                    ) : null}
+                    <Button
+                      variant="outline"
+                      onClick={handleSendTest}
+                      disabled={
+                        sendingTest ||
+                        !waConfig?.configured ||
+                        parsedTestPhones.length === 0 ||
+                        parsedTestPhones.length > MAX_TEST_EMAILS
+                      }
+                    >
+                      <Send />
+                      {sendingTest ? "Enviando teste..." : "Enviar teste"}
+                    </Button>
+                    {waConfig && !waConfig.configured ? (
+                      <p className="text-xs text-muted-foreground">
+                        Disponível depois de configurar o canal (Fase 0).
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      value={testEmails}
+                      onChange={(e) => {
+                        setTestEmails(e.target.value);
+                        setTestMessage("");
+                      }}
+                      placeholder="voce@empresa.com, colega@empresa.com"
+                    />
+                    {parsedTestEmails.length > MAX_TEST_EMAILS ? (
+                      <p className="text-xs text-destructive-hover">
+                        Máximo de {MAX_TEST_EMAILS} e-mails.
+                      </p>
+                    ) : null}
+                    <Button
+                      variant="outline"
+                      onClick={handleSendTest}
+                      disabled={
+                        sendingTest ||
+                        !data.design ||
+                        parsedTestEmails.length === 0 ||
+                        parsedTestEmails.length > MAX_TEST_EMAILS
+                      }
+                    >
+                      <Send />
+                      {sendingTest ? "Enviando teste..." : "Enviar teste"}
+                    </Button>
+                  </>
+                )}
                 {testMessage ? (
                   <p className="text-xs text-muted-foreground">{testMessage}</p>
                 ) : null}
@@ -957,7 +1304,29 @@ export function CampaignWizard({
           </div>
 
           <Card className="overflow-hidden">
-            {!data.design ? (
+            {data.channel === "whatsapp" ? (
+              selectedWaTemplate ? (
+                <div className="mx-auto w-full max-w-md p-6">
+                  <WhatsAppBubblePreview
+                    headerText={
+                      selectedWaTemplate.headerType === "text"
+                        ? selectedWaTemplate.headerText
+                        : null
+                    }
+                    bodyText={fillVariables(
+                      selectedWaTemplate.bodyText,
+                      waPreviewValues
+                    )}
+                    footerText={selectedWaTemplate.footerText}
+                    buttons={selectedWaTemplate.buttons ?? []}
+                  />
+                </div>
+              ) : (
+                <p className="py-24 text-center text-sm text-muted-foreground">
+                  Nenhum modelo selecionado.
+                </p>
+              )
+            ) : !data.design ? (
               <p className="py-24 text-center text-sm text-muted-foreground">
                 Nenhum e-mail montado.
               </p>
@@ -1015,7 +1384,13 @@ export function CampaignWizard({
                 }
                 setConfirmOpen(true);
               }}
-              disabled={dispatching || recipientCount === 0}
+              disabled={
+                dispatching ||
+                recipientCount === 0 ||
+                (data.channel === "whatsapp" &&
+                  waConfig !== null &&
+                  !waConfig.configured)
+              }
             >
               <Send />
               {isScheduled ? "Agendar disparo" : "Disparar"}
@@ -1101,7 +1476,11 @@ export function CampaignWizard({
                   } contatos em ${new Date(data.scheduledAt).toLocaleString(
                     "pt-BR"
                   )}.`
-                : `O e-mail será enviado agora para ${
+                : `${
+                    data.channel === "whatsapp"
+                      ? "A mensagem de WhatsApp será enviada"
+                      : "O e-mail será enviado"
+                  } agora para ${
                     recipientCount ?? "—"
                   } contatos. Essa ação não pode ser desfeita.`}
             </DialogDescription>

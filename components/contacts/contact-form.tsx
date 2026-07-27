@@ -20,9 +20,11 @@ export function ContactForm({ contactId }: { contactId?: string }) {
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [company, setCompany] = useState("");
   const [tags, setTags] = useState("");
   const [subscribed, setSubscribed] = useState(true);
+  const [whatsappSubscribed, setWhatsappSubscribed] = useState(false);
   const [availableLists, setAvailableLists] = useState<ListOption[]>([]);
   const [listIds, setListIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(isEditing);
@@ -50,9 +52,11 @@ export function ContactForm({ contactId }: { contactId?: string }) {
         if (!res.ok) throw new Error(json.error ?? "Erro ao carregar contato.");
         setName(json.name ?? "");
         setEmail(json.email ?? "");
+        setPhone(json.phone ?? "");
         setCompany(json.company ?? "");
         setTags(Array.isArray(json.tags) ? json.tags.join(", ") : "");
         setSubscribed(json.subscribed !== false);
+        setWhatsappSubscribed(json.whatsappSubscribed === true);
         setListIds(Array.isArray(json.listIds) ? json.listIds : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -83,9 +87,11 @@ export function ContactForm({ contactId }: { contactId?: string }) {
           body: JSON.stringify({
             name,
             email,
+            phone,
             company,
             tags,
             subscribed,
+            whatsappSubscribed,
             listIds,
           }),
         }
@@ -146,6 +152,20 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                   placeholder="parceiro@empresa.com.br"
                   required
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="phone">Telefone (WhatsApp)</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="(48) 99999-9999"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Com DDD. Usado nas campanhas de WhatsApp.
+                </p>
               </div>
 
               <div className="grid gap-2">
@@ -218,7 +238,7 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                     onChange={(e) => setSubscribed(e.target.checked)}
                     className="size-4 accent-[#1D50DC]"
                   />
-                  Inscrito — recebe campanhas
+                  Inscrito — recebe campanhas por e-mail
                   {!subscribed ? (
                     <span className="text-xs text-muted-foreground">
                       (marque para reativar o recebimento)
@@ -226,6 +246,28 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                   ) : null}
                 </label>
               ) : null}
+
+              <label
+                className={
+                  phone.trim()
+                    ? "flex cursor-pointer items-center gap-2 text-sm"
+                    : "flex items-center gap-2 text-sm text-muted-foreground"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={whatsappSubscribed && Boolean(phone.trim())}
+                  onChange={(e) => setWhatsappSubscribed(e.target.checked)}
+                  disabled={!phone.trim()}
+                  className="size-4 accent-[#1D50DC]"
+                />
+                Aceita campanhas por WhatsApp
+                <span className="text-xs text-muted-foreground">
+                  {phone.trim()
+                    ? "(marque só com consentimento do contato — LGPD)"
+                    : "(informe o telefone para habilitar)"}
+                </span>
+              </label>
 
               <div className="flex gap-2 pt-2">
                 <Button type="submit" disabled={saving}>

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 import { contactLists, contacts, getDb } from "@/lib/db";
+import { normalizePhone } from "@/lib/phone";
 import {
   EMAIL_REGEX,
   errorMessage,
@@ -50,6 +51,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const db = getDb();
     const body = await request.json();
 
+    // O estado atual guia as transições de consentimento de WhatsApp.
+    const [existing] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, id));
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Contato não encontrado." },
+        { status: 404 }
+      );
+    }
+
     const updates: Partial<typeof contacts.$inferInsert> = {};
 
     if (typeof body.name === "string") {
@@ -84,6 +97,61 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       updates.subscribed = body.subscribed;
     }
 
+    if ("phone" in body) {
+      const raw = typeof body.phone === "string" ? body.phone.trim() : "";
+      if (!raw) {
+        updates.phone = null;
+      } else {
+        const phone = normalizePhone(raw);
+        if (!phone) {
+          return NextResponse.json(
+            {
+              error: "Informe um telefone válido com DDD (ex.: 48 99999-9999).",
+            },
+            { status: 400 }
+          );
+        }
+        if (phone !== existing.phone) {
+          const samePhone = await db
+            .select({ id: contacts.id })
+            .from(contacts)
+            .where(and(eq(contacts.phone, phone), ne(contacts.id, id)));
+          if (samePhone.length > 0) {
+            return NextResponse.json(
+              { error: "Já existe um contato com este telefone." },
+              { status: 409 }
+            );
+          }
+        }
+        updates.phone = phone;
+      }
+    }
+
+    if (typeof body.whatsappSubscribed === "boolean") {
+      const phoneAfter = "phone" in updates ? updates.phone : existing.phone;
+      const enable = body.whatsappSubscribed && Boolean(phoneAfter);
+      if (enable !== existing.whatsappSubscribed) {
+        updates.whatsappSubscribed = enable;
+        if (enable) {
+          // Preserva a data do primeiro consentimento (prova LGPD).
+          updates.whatsappOptInAt = existing.whatsappOptInAt ?? new Date();
+          updates.whatsappOptOutAt = null;
+        } else {
+          updates.whatsappOptOutAt = new Date();
+        }
+      }
+    }
+
+    // Sem telefone não há como manter o consentimento de WhatsApp.
+    if ("phone" in updates && updates.phone === null) {
+      const wasSubscribed =
+        updates.whatsappSubscribed ?? existing.whatsappSubscribed;
+      if (wasSubscribed) {
+        updates.whatsappSubscribed = false;
+        updates.whatsappOptOutAt = new Date();
+      }
+    }
+
     const changesLists = "listIds" in body;
 
     if (Object.keys(updates).length === 0 && !changesLists) {
@@ -93,27 +161,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
-    let contact = null;
+    let contact = existing;
     if (Object.keys(updates).length > 0) {
       const [updated] = await db
         .update(contacts)
         .set(updates)
         .where(eq(contacts.id, id))
         .returning();
-      contact = updated ?? null;
-    } else {
-      const [existing] = await db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.id, id));
-      contact = existing ?? null;
-    }
-
-    if (!contact) {
-      return NextResponse.json(
-        { error: "Contato não encontrado." },
-        { status: 404 }
-      );
+      contact = updated ?? existing;
     }
 
     // Substitui as associações de lista pelo conjunto informado.

@@ -66,6 +66,10 @@ export async function GET(request: NextRequest) {
       .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
       .where(
         and(
+          // Só e-mail: envios de WhatsApp não têm abertura/clique e
+          // distorceriam as taxas deste painel (o relatório por campanha
+          // mostra as métricas próprias do WhatsApp).
+          eq(campaigns.channel, "email"),
           isNotNull(campaignSends.sentAt),
           gte(campaignSends.sentAt, period.prevFromDate),
           lte(campaignSends.sentAt, period.toDate)

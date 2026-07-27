@@ -33,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/format";
+import { formatPhone } from "@/lib/phone";
 
 type ListRef = { id: string; name: string };
 
@@ -40,10 +41,12 @@ type ContactDto = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   company: string | null;
   tags: string[] | null;
   lists: ListRef[];
   subscribed: boolean;
+  whatsappSubscribed: boolean;
   createdAt: string;
 };
 
@@ -288,6 +291,7 @@ export default function ContactsPage() {
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {contact.email}
+                      {contact.phone ? ` · ${formatPhone(contact.phone)}` : ""}
                       {contact.company ? ` · ${contact.company}` : ""}
                     </p>
                   </TableCell>
@@ -318,11 +322,16 @@ export default function ContactsPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {contact.subscribed ? (
-                      <Badge variant="success">Ativo</Badge>
-                    ) : (
-                      <Badge variant="destructive">Descadastrado</Badge>
-                    )}
+                    <div className="flex flex-wrap gap-1">
+                      {contact.subscribed ? (
+                        <Badge variant="success">Ativo</Badge>
+                      ) : (
+                        <Badge variant="destructive">Descadastrado</Badge>
+                      )}
+                      {contact.whatsappSubscribed ? (
+                        <Badge variant="info">WhatsApp</Badge>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDate(contact.createdAt)}

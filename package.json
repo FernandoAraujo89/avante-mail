@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "worker": "tsx watch worker/email-worker.ts",
+    "worker:whatsapp": "tsx watch worker/whatsapp-worker.ts",
     "seed": "tsx scripts/seed.ts",
+    "test:whatsapp-webhook": "tsx scripts/test-whatsapp-webhook.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
@@ -24,6 +26,7 @@
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.10.1",
     "jose": "^6.2.3",
+    "libphonenumber-js": "^1.13.9",
     "lucide-react": "^1.24.0",
     "mjml": "^5.4.0",
     "next": "15.5.20",

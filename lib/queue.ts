@@ -40,3 +40,29 @@ export function getEmailQueue() {
   cachedQueue = queue;
   return queue;
 }
+
+// ─── Fila do canal WhatsApp ──────────────────────────────────────
+// Espelho da fila de e-mail: mesma mecânica de delayed jobs/retry, consumida
+// pelo worker/whatsapp-worker.ts (processo próprio no compose).
+
+export const WHATSAPP_QUEUE_NAME = "whatsapp-sends";
+
+export interface WhatsAppJobData {
+  sendId: string;
+  campaignId: string;
+  contactId: string;
+}
+
+function createWhatsAppQueue() {
+  return new Queue<WhatsAppJobData>(WHATSAPP_QUEUE_NAME, {
+    connection: createRedisConnection(),
+  });
+}
+
+let cachedWhatsAppQueue: ReturnType<typeof createWhatsAppQueue> | undefined;
+
+export function getWhatsAppQueue() {
+  const queue = cachedWhatsAppQueue ?? createWhatsAppQueue();
+  cachedWhatsAppQueue = queue;
+  return queue;
+}

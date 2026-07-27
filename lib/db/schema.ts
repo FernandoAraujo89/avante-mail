@@ -9,6 +9,14 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type { EmailDesign, EditorType, Row } from "../email-builder/types";
+import type {
+  WhatsAppButton,
+  WhatsAppHeaderType,
+  WhatsAppTemplateCategory,
+  WhatsAppTemplateStatus,
+  WhatsAppVariableExamples,
+  WhatsAppVariableMap,
+} from "../whatsapp/types";
 
 export const CAMPAIGN_STATUSES = [
   "draft",
@@ -18,6 +26,10 @@ export const CAMPAIGN_STATUSES = [
 ] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 
+// Canal de envio da campanha. E-mail é o padrão histórico.
+export const CAMPAIGN_CHANNELS = ["email", "whatsapp"] as const;
+export type CampaignChannel = (typeof CAMPAIGN_CHANNELS)[number];
+
 export const SEND_STATUSES = [
   "pending",
   "sent",
@@ -25,6 +37,9 @@ export const SEND_STATUSES = [
   "opened",
   "clicked",
   "bounced",
+  // Confirmações exclusivas do canal WhatsApp (webhook da Cloud API).
+  "delivered",
+  "read",
 ] as const;
 export type SendStatus = (typeof SEND_STATUSES)[number];
 
@@ -65,6 +80,13 @@ export const contacts = pgTable("contacts", {
   company: text("company"),
   tags: text("tags").array(),
   subscribed: boolean("subscribed").notNull().default(true),
+  // Canal WhatsApp: telefone em E.164 (+5548…) e consentimento próprio.
+  // O opt-in de WhatsApp é separado do de e-mail (subscribed) — exigência da
+  // política da Meta e da LGPD; por isso o padrão é false.
+  phone: text("phone").unique(),
+  whatsappSubscribed: boolean("whatsapp_subscribed").notNull().default(false),
+  whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),
+  whatsappOptOutAt: timestamp("whatsapp_opt_out_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -118,6 +140,44 @@ export const modules = pgTable("modules", {
     .defaultNow(),
 });
 
+// Modelos de mensagem do WhatsApp — espelho local dos templates da Meta.
+// Campanhas de WhatsApp só saem com modelo aprovado (status approved);
+// o status é atualizado pelo webhook da Meta e pela sincronização manual.
+export const whatsappTemplates = pgTable("whatsapp_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  // Nome na Meta: minúsculas, números e _ (ex.: promo_julho_2026).
+  name: text("name").notNull().unique(),
+  language: text("language").notNull().default("pt_BR"),
+  category: text("category")
+    .$type<WhatsAppTemplateCategory>()
+    .notNull()
+    .default("MARKETING"),
+  // draft = só local; os demais espelham a análise da Meta.
+  status: text("status")
+    .$type<WhatsAppTemplateStatus>()
+    .notNull()
+    .default("draft"),
+  metaTemplateId: text("meta_template_id"),
+  headerType: text("header_type")
+    .$type<WhatsAppHeaderType>()
+    .notNull()
+    .default("none"),
+  headerText: text("header_text"),
+  bodyText: text("body_text").notNull(),
+  footerText: text("footer_text"),
+  buttons: jsonb("buttons").$type<WhatsAppButton[]>(),
+  // Exemplos por variável ({"1": "Fernando"}) — exigidos na aprovação.
+  variableExamples: jsonb("variable_examples").$type<WhatsAppVariableExamples>(),
+  qualityScore: text("quality_score"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const campaigns = pgTable("campaigns", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -137,6 +197,15 @@ export const campaigns = pgTable("campaigns", {
   templateId: uuid("template_id").references(() => templates.id, {
     onDelete: "set null",
   }),
+  // Canal de envio: os campos de e-mail (subject/design/mjmlContent) valem
+  // para "email"; os whatsapp* abaixo valem para "whatsapp".
+  channel: text("channel").$type<CampaignChannel>().notNull().default("email"),
+  whatsappTemplateId: uuid("whatsapp_template_id").references(
+    () => whatsappTemplates.id,
+    { onDelete: "set null" }
+  ),
+  // Fonte de cada variável do modelo ({"1": {"source": "name"}}).
+  whatsappVariables: jsonb("whatsapp_variables").$type<WhatsAppVariableMap>(),
   // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas.
   lists: uuid("lists").array(),
   tagsFilter: text("tags_filter").array(),
@@ -161,6 +230,14 @@ export const campaignSends = pgTable("campaign_sends", {
   // eventos de devolução/reclamação (SNS) com o envio correspondente.
   providerMessageId: text("provider_message_id"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
+  // Confirmações do WhatsApp (webhook da Cloud API). A ordem dos eventos não
+  // é garantida — o status só avança (pending < sent < delivered < read).
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  // Falha permanente reportada pelo provedor (ex.: 131049 = limite de
+  // marketing do destinatário; 131026 = número não pode receber).
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
   openedAt: timestamp("opened_at", { withTimezone: true }),
   clickedAt: timestamp("clicked_at", { withTimezone: true }),
   // Devolução (webhook do Resend: email.bounced).
@@ -186,6 +263,8 @@ export type Template = typeof templates.$inferSelect;
 export type NewTemplate = typeof templates.$inferInsert;
 export type Campaign = typeof campaigns.$inferSelect;
 export type NewCampaign = typeof campaigns.$inferInsert;
+export type WhatsAppTemplate = typeof whatsappTemplates.$inferSelect;
+export type NewWhatsAppTemplate = typeof whatsappTemplates.$inferInsert;
 export type CampaignSend = typeof campaignSends.$inferSelect;
 export type NewCampaignSend = typeof campaignSends.$inferInsert;
 export type Module = typeof modules.$inferSelect;

@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { campaigns, getDb, templates } from "@/lib/db";
+import {
+  campaigns,
+  getDb,
+  templates,
+  whatsappTemplates,
+  type Campaign,
+} from "@/lib/db";
 import { buildEmailHtml, buildTestVariables } from "@/lib/email";
+import { normalizePhone, phoneToWaId } from "@/lib/phone";
 import { sendEmail } from "@/lib/ses";
 import { EMAIL_REGEX, errorMessage } from "@/lib/utils";
+import {
+  isWhatsAppConfigured,
+  sendTemplateMessage,
+} from "@/lib/whatsapp/client";
+import { buildBodyComponents } from "@/lib/whatsapp/variables";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +24,142 @@ const MAX_TEST_RECIPIENTS = 3;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+// Teste do canal WhatsApp: envia o modelo real (custo normal por mensagem)
+// para até 3 telefones, usando o mapeamento da campanha com um contato de
+// exemplo no lugar dos dados reais.
+async function sendWhatsAppTest(
+  db: ReturnType<typeof getDb>,
+  campaign: Campaign,
+  body: Record<string, unknown>
+) {
+  if (!isWhatsAppConfigured()) {
+    return NextResponse.json(
+      {
+        error:
+          "Canal WhatsApp ainda não configurado — preencha as envs WHATSAPP_* (Fase 0 do plano).",
+      },
+      { status: 400 }
+    );
+  }
+
+  const raw: string[] = Array.isArray(body.phones)
+    ? body.phones.map((p: unknown) => String(p))
+    : typeof body.phones === "string"
+      ? body.phones.split(",")
+      : [];
+  const trimmed = [...new Set(raw.map((p) => p.trim()).filter(Boolean))];
+
+  if (trimmed.length === 0) {
+    return NextResponse.json(
+      { error: "Informe ao menos um telefone de teste." },
+      { status: 400 }
+    );
+  }
+  if (trimmed.length > MAX_TEST_RECIPIENTS) {
+    return NextResponse.json(
+      { error: `Máximo de ${MAX_TEST_RECIPIENTS} telefones de teste.` },
+      { status: 400 }
+    );
+  }
+  const phones: string[] = [];
+  for (const value of trimmed) {
+    const phone = normalizePhone(value);
+    if (!phone) {
+      return NextResponse.json(
+        { error: `Telefone inválido: ${value} (use DDD, ex.: 48 99999-9999).` },
+        { status: 400 }
+      );
+    }
+    phones.push(phone);
+  }
+
+  if (!campaign.whatsappTemplateId) {
+    return NextResponse.json(
+      { error: "Escolha o modelo de WhatsApp antes de enviar o teste." },
+      { status: 400 }
+    );
+  }
+  const [template] = await db
+    .select()
+    .from(whatsappTemplates)
+    .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
+  if (!template) {
+    return NextResponse.json(
+      { error: "O modelo desta campanha não existe mais." },
+      { status: 400 }
+    );
+  }
+  if (template.status !== "approved") {
+    return NextResponse.json(
+      {
+        error: `O modelo "${template.name}" ainda não está aprovado pela Meta (status atual: ${template.status}).`,
+      },
+      { status: 400 }
+    );
+  }
+
+  const components = buildBodyComponents({
+    bodyText: template.bodyText,
+    variables: campaign.whatsappVariables,
+    examples: template.variableExamples,
+    contact: { name: "Parceiro Teste", company: "Empresa Exemplo" },
+  });
+
+  const results = await Promise.allSettled(
+    phones.map((phone) =>
+      sendTemplateMessage({
+        to: phoneToWaId(phone),
+        templateName: template.name,
+        language: template.language,
+        components,
+      })
+    )
+  );
+
+  const sent = results.filter((r) => r.status === "fulfilled").length;
+  const failed = results
+    .map((r, i) => ({ r, phone: phones[i] }))
+    .filter((x) => x.r.status === "rejected")
+    .map((x) => x.phone);
+
+  if (sent === 0) {
+    const [first] = results;
+    const reason =
+      first.status === "rejected" ? errorMessage(first.reason) : "";
+    return NextResponse.json(
+      {
+        error: `Falha ao enviar o teste para: ${failed.join(", ")}${
+          reason ? ` — ${reason}` : ""
+        }`,
+      },
+      { status: 502 }
+    );
+  }
+
+  return NextResponse.json({ sent, failed, recipients: phones });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const db = getDb();
 
     const body = await request.json().catch(() => ({}));
+
+    // O canal WhatsApp usa telefones; o de e-mail segue o fluxo abaixo.
+    const [target] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, id));
+    if (!target) {
+      return NextResponse.json(
+        { error: "Campanha não encontrada." },
+        { status: 404 }
+      );
+    }
+    if (target.channel === "whatsapp") {
+      return await sendWhatsAppTest(db, target, body);
+    }
 
     // Aceita string ("a@x.com, b@y.com") ou array de e-mails.
     const raw: string[] = Array.isArray(body.emails)

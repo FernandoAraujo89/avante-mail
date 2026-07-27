@@ -5,6 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
 import { CampaignStatusBadge } from "@/components/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -76,9 +77,16 @@ export default async function CampaignsPage() {
                 return (
                   <TableRow key={campaign.id}>
                     <TableCell>
-                      <p className="font-medium">{campaign.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">{campaign.name}</p>
+                        {campaign.channel === "whatsapp" ? (
+                          <Badge variant="info">WhatsApp</Badge>
+                        ) : null}
+                      </div>
                       <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">
-                        {campaign.subject}
+                        {campaign.channel === "whatsapp"
+                          ? "Campanha de WhatsApp"
+                          : campaign.subject}
                       </p>
                     </TableCell>
                     <TableCell className="text-muted-foreground">

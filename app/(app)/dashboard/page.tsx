@@ -6,7 +6,7 @@ import {
   Send,
   Users,
 } from "lucide-react";
-import { count, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -40,18 +40,32 @@ export default async function DashboardPage() {
       .select({ value: count() })
       .from(campaigns)
       .where(eq(campaigns.status, "sent")),
+    // Taxas de abertura/clique são do canal de e-mail: os envios de WhatsApp
+    // (sem abertura/clique) não entram no denominador de entregas.
     db
       .select({ value: count() })
       .from(campaignSends)
-      .where(inArray(campaignSends.status, ["sent", "opened", "clicked"])),
+      .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+      .where(
+        and(
+          eq(campaigns.channel, "email"),
+          inArray(campaignSends.status, ["sent", "opened", "clicked"])
+        )
+      ),
     db
       .select({ value: count() })
       .from(campaignSends)
-      .where(isNotNull(campaignSends.openedAt)),
+      .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+      .where(
+        and(eq(campaigns.channel, "email"), isNotNull(campaignSends.openedAt))
+      ),
     db
       .select({ value: count() })
       .from(campaignSends)
-      .where(isNotNull(campaignSends.clickedAt)),
+      .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+      .where(
+        and(eq(campaigns.channel, "email"), isNotNull(campaignSends.clickedAt))
+      ),
     db.select().from(campaigns).orderBy(desc(campaigns.createdAt)).limit(5),
   ]);
 

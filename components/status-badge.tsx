@@ -29,6 +29,9 @@ const SEND_STATUS: Record<
   opened: { label: "Aberto", variant: "info" },
   clicked: { label: "Clicado", variant: "success" },
   bounced: { label: "Devolvido", variant: "destructive" },
+  // Canal WhatsApp (confirmações da Cloud API).
+  delivered: { label: "Entregue", variant: "info" },
+  read: { label: "Lida", variant: "success" },
 };
 
 export function SendStatusBadge({ status }: { status: SendStatus }) {

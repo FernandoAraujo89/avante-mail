@@ -32,8 +32,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         sentAt: campaignSends.sentAt,
         openedAt: campaignSends.openedAt,
         clickedAt: campaignSends.clickedAt,
+        deliveredAt: campaignSends.deliveredAt,
+        readAt: campaignSends.readAt,
+        repliedAt: campaignSends.repliedAt,
+        errorCode: campaignSends.errorCode,
         contactName: contacts.name,
         contactEmail: contacts.email,
+        contactPhone: contacts.phone,
         contactCompany: contacts.company,
       })
       .from(campaignSends)
@@ -41,16 +46,39 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .where(eq(campaignSends.campaignId, id))
       .orderBy(asc(contacts.name));
 
-    const metrics = {
-      total: sends.length,
-      sent: sends.filter((s) =>
-        ["sent", "opened", "clicked"].includes(s.status)
-      ).length,
-      opened: sends.filter((s) => s.openedAt !== null).length,
-      clicked: sends.filter((s) => s.clickedAt !== null).length,
-      failed: sends.filter((s) => s.status === "failed").length,
-      pending: sends.filter((s) => s.status === "pending").length,
-    };
+    const pending = sends.filter((s) => s.status === "pending").length;
+    const failed = sends.filter((s) => s.status === "failed").length;
+
+    const metrics =
+      campaign.channel === "whatsapp"
+        ? {
+            total: sends.length,
+            // "Enviada" = deixou o sistema com sucesso (qualquer estágio).
+            sent: sends.filter((s) =>
+              ["sent", "delivered", "read"].includes(s.status)
+            ).length,
+            delivered: sends.filter(
+              (s) => s.deliveredAt !== null || s.status === "read"
+            ).length,
+            read: sends.filter((s) => s.readAt !== null).length,
+            replied: sends.filter((s) => s.repliedAt !== null).length,
+            failed,
+            // 131049 = limite de marketing do destinatário (esperado; não é
+            // erro técnico). Destacado à parte no relatório.
+            frequencyCapped: sends.filter((s) => s.errorCode === "131049")
+              .length,
+            pending,
+          }
+        : {
+            total: sends.length,
+            sent: sends.filter((s) =>
+              ["sent", "opened", "clicked"].includes(s.status)
+            ).length,
+            opened: sends.filter((s) => s.openedAt !== null).length,
+            clicked: sends.filter((s) => s.clickedAt !== null).length,
+            failed,
+            pending,
+          };
 
     return NextResponse.json({ campaign, metrics, sends });
   } catch (error) {

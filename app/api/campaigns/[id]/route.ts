@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { campaigns, getDb, templates } from "@/lib/db";
+import { campaigns, getDb, templates, whatsappTemplates } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
 import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
+import { parseVariableMap } from "@/lib/whatsapp/template-input";
 
 export const dynamic = "force-dynamic";
 
@@ -131,6 +132,35 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       } else {
         updates.scheduledAt = null;
       }
+    }
+
+    // Canal: só muda enquanto rascunho (agendada já tem jobs na fila do
+    // canal original).
+    if ("channel" in body && existing.status === "draft") {
+      updates.channel = body.channel === "whatsapp" ? "whatsapp" : "email";
+    }
+    if ("whatsappTemplateId" in body) {
+      if (
+        typeof body.whatsappTemplateId === "string" &&
+        body.whatsappTemplateId
+      ) {
+        const [template] = await db
+          .select({ id: whatsappTemplates.id })
+          .from(whatsappTemplates)
+          .where(eq(whatsappTemplates.id, body.whatsappTemplateId));
+        if (!template) {
+          return NextResponse.json(
+            { error: "Modelo de WhatsApp não encontrado." },
+            { status: 400 }
+          );
+        }
+        updates.whatsappTemplateId = template.id;
+      } else {
+        updates.whatsappTemplateId = null;
+      }
+    }
+    if ("whatsappVariables" in body) {
+      updates.whatsappVariables = parseVariableMap(body.whatsappVariables);
     }
 
     if (Object.keys(updates).length === 0) {
