@@ -5,6 +5,7 @@ import {
   Plus,
   Send,
   Users,
+  Wallet,
 } from "lucide-react";
 import { and, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
 
@@ -12,7 +13,21 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { CampaignStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   campaigns,
   campaignSends,
@@ -20,7 +35,14 @@ import {
   getDb,
   lists as listsTable,
 } from "@/lib/db";
-import { formatDateTime, formatPercent, listsLabel } from "@/lib/format";
+import { formatMonthLabel, monthlyConsumption } from "@/lib/costs";
+import {
+  formatBrl,
+  formatDateTime,
+  formatPercent,
+  formatUsd,
+  listsLabel,
+} from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +98,17 @@ export default async function DashboardPage() {
   const listNames = (ids: string[] | null) =>
     (ids ?? []).map((id) => listMap.get(id) ?? id);
 
+  // Consumo consolidado (US$/R$) por mês e canal — últimos 6 meses.
+  const consumption = await monthlyConsumption(6);
+  const costCell = (usd: number, brl: number, strong = false) => (
+    <div>
+      <p className={strong ? "font-semibold" : "font-medium"}>
+        {formatUsd(usd)}
+      </p>
+      <p className="text-xs text-muted-foreground">{formatBrl(brl)}</p>
+    </div>
+  );
+
   return (
     <>
       <PageHeader
@@ -116,6 +149,78 @@ export default async function DashboardPage() {
           icon={MousePointerClick}
         />
       </div>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wallet className="size-4 text-primary" />
+            Consumo por mês
+          </CardTitle>
+          <CardDescription>
+            AWS SES (e-mail) + WhatsApp (Meta). Cobrado em US$; R$ convertido ao
+            câmbio de {formatBrl(consumption.rate)}/US$.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {consumption.months.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Nenhum consumo registrado ainda.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Mês</TableHead>
+                    <TableHead className="text-right">E-mail</TableHead>
+                    <TableHead className="text-right">WhatsApp</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {consumption.months.map((m) => (
+                    <TableRow key={m.month}>
+                      <TableCell className="font-medium">
+                        {formatMonthLabel(m.month)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {costCell(m.emailUsd, m.emailBrl)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {costCell(m.whatsappUsd, m.whatsappBrl)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {costCell(m.totalUsd, m.totalBrl, true)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="border-t-2 border-border">
+                    <TableCell className="font-semibold">
+                      Total ({consumption.months.length}{" "}
+                      {consumption.months.length === 1 ? "mês" : "meses"})
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {costCell(
+                        consumption.emailUsd,
+                        consumption.emailUsd * consumption.rate
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {costCell(
+                        consumption.whatsappUsd,
+                        consumption.whatsappUsd * consumption.rate
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {costCell(consumption.totalUsd, consumption.totalBrl, true)}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="mt-6">
         <CardHeader>
