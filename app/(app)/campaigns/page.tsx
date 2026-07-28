@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { BarChart2, Copy, Pencil, Plus } from "lucide-react";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
@@ -16,8 +16,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { campaigns, getDb, lists as listsTable, templates } from "@/lib/db";
-import { formatDateTime, listsLabel } from "@/lib/format";
+import {
+  campaigns,
+  campaignSends,
+  getDb,
+  lists as listsTable,
+  templates,
+  whatsappTemplates,
+  type Campaign,
+} from "@/lib/db";
+import { formatBrl, formatDateTime, formatUsd, listsLabel } from "@/lib/format";
+import { campaignCost } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +45,59 @@ export default async function CampaignsPage() {
   const listMap = new Map(allLists.map((l) => [l.id, l.name]));
   const listNames = (ids: string[] | null) =>
     (ids ?? []).map((id) => listMap.get(id) ?? id);
+
+  // Unidades cobráveis por campanha: e-mails aceitos pelo SES (sentAt) e
+  // mensagens de WhatsApp entregues (deliveredAt). Uma query só.
+  const chargeAgg = await db
+    .select({
+      campaignId: campaignSends.campaignId,
+      emailChargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
+      waChargeable: sql<number>`count(*) filter (where ${campaignSends.deliveredAt} is not null)`,
+    })
+    .from(campaignSends)
+    .groupBy(campaignSends.campaignId);
+  const chargeMap = new Map(
+    chargeAgg.map((r) => [
+      r.campaignId,
+      { email: Number(r.emailChargeable), wa: Number(r.waChargeable) },
+    ])
+  );
+
+  // Categoria do modelo (define a tarifa) das campanhas de WhatsApp.
+  const waTemplateIds = [
+    ...new Set(
+      rows
+        .filter(
+          (r) => r.campaign.channel === "whatsapp" && r.campaign.whatsappTemplateId
+        )
+        .map((r) => r.campaign.whatsappTemplateId as string)
+    ),
+  ];
+  const categoryMap = new Map<string, string>();
+  if (waTemplateIds.length > 0) {
+    const cats = await db
+      .select({
+        id: whatsappTemplates.id,
+        category: whatsappTemplates.category,
+      })
+      .from(whatsappTemplates)
+      .where(inArray(whatsappTemplates.id, waTemplateIds));
+    for (const c of cats) categoryMap.set(c.id, c.category);
+  }
+
+  const costFor = (campaign: Campaign) => {
+    const counts = chargeMap.get(campaign.id) ?? { email: 0, wa: 0 };
+    if (campaign.channel === "whatsapp") {
+      return campaignCost({
+        channel: "whatsapp",
+        chargeable: counts.wa,
+        whatsappCategory: campaign.whatsappTemplateId
+          ? (categoryMap.get(campaign.whatsappTemplateId) ?? null)
+          : null,
+      });
+    }
+    return campaignCost({ channel: "email", chargeable: counts.email });
+  };
 
   return (
     <>
@@ -65,6 +127,7 @@ export default async function CampaignsPage() {
                 <TableHead>Template</TableHead>
                 <TableHead>Listas</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Custo</TableHead>
                 <TableHead>Criada em</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -74,6 +137,7 @@ export default async function CampaignsPage() {
                 const editable =
                   campaign.status === "draft" ||
                   campaign.status === "scheduled";
+                const cost = costFor(campaign);
                 return (
                   <TableRow key={campaign.id}>
                     <TableCell>
@@ -97,6 +161,18 @@ export default async function CampaignsPage() {
                     </TableCell>
                     <TableCell>
                       <CampaignStatusBadge status={campaign.status} />
+                    </TableCell>
+                    <TableCell>
+                      {cost.chargeable === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <>
+                          <p className="font-medium">{formatUsd(cost.usd)}</p>
+                          <p className="text-xs text-muted-foreground">
+                            ≈ {formatBrl(cost.brl)}
+                          </p>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDateTime(campaign.createdAt)}

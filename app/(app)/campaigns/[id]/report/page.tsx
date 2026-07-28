@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCheck,
+  DollarSign,
   MailOpen,
   MailWarning,
   MessageCircle,
@@ -38,9 +39,17 @@ import {
   contacts,
   getDb,
   lists as listsTable,
+  whatsappTemplates,
 } from "@/lib/db";
-import { formatDateTime, formatPercent, listsLabel } from "@/lib/format";
+import {
+  formatBrl,
+  formatDateTime,
+  formatPercent,
+  formatUsd,
+  listsLabel,
+} from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
+import { campaignCost } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +106,16 @@ export default async function CampaignReportPage({
   const pending = sends.filter((s) => s.status === "pending").length;
   const failed = sends.filter((s) => s.status === "failed").length;
 
+  // Categoria do modelo define a tarifa do WhatsApp (marketing × utility).
+  let whatsappCategory: string | null = null;
+  if (isWhatsApp && campaign.whatsappTemplateId) {
+    const [tpl] = await db
+      .select({ category: whatsappTemplates.category })
+      .from(whatsappTemplates)
+      .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
+    whatsappCategory = tpl?.category ?? null;
+  }
+
   const header = (
     <div className="mb-6">
       <Button variant="ghost" size="sm" asChild className="-ml-2 mb-4">
@@ -137,6 +156,12 @@ export default async function CampaignReportPage({
     const frequencyCapped = sends.filter(
       (s) => s.errorCode === "131049"
     ).length;
+    // Meta cobra por mensagem ENTREGUE, na tarifa da categoria do modelo.
+    const cost = campaignCost({
+      channel: "whatsapp",
+      chargeable: delivered,
+      whatsappCategory,
+    });
 
     return (
       <>
@@ -164,7 +189,7 @@ export default async function CampaignReportPage({
           />
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Respostas"
             value={String(replied)}
@@ -188,6 +213,12 @@ export default async function CampaignReportPage({
             value={String(failed)}
             hint="Total de envios que falharam (inclui o limite ao lado)"
             icon={AlertTriangle}
+          />
+          <MetricCard
+            label="Custo (Meta)"
+            value={formatUsd(cost.usd)}
+            hint={`≈ ${formatBrl(cost.brl)} · ${delivered} entregue(s)`}
+            icon={DollarSign}
           />
         </div>
 
@@ -268,6 +299,9 @@ export default async function CampaignReportPage({
   const bouncedSoft = sends.filter((s) => s.bounceType === "soft").length;
   const bounced = bouncedHard + bouncedSoft;
   const complained = sends.filter((s) => s.complainedAt !== null).length;
+  // SES cobra por e-mail aceito (todo envio com sentAt, inclusive devolvidos).
+  const chargeableEmails = sends.filter((s) => s.sentAt !== null).length;
+  const cost = campaignCost({ channel: "email", chargeable: chargeableEmails });
 
   return (
     <>
@@ -295,7 +329,7 @@ export default async function CampaignReportPage({
         />
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           label="Devolvidos"
           value={String(bounced)}
@@ -321,6 +355,12 @@ export default async function CampaignReportPage({
           value={String(failed)}
           hint="Erro técnico (não é devolução nem spam)"
           icon={AlertTriangle}
+        />
+        <MetricCard
+          label="Custo (SES)"
+          value={formatUsd(cost.usd)}
+          hint={`≈ ${formatBrl(cost.brl)} · ${chargeableEmails} e-mail(s)`}
+          icon={DollarSign}
         />
       </div>
 

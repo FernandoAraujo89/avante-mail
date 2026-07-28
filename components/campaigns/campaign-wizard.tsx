@@ -74,6 +74,7 @@ type WaConfig = {
   configured: boolean;
   dailyLimit: number | null;
   pricesUsd: Record<string, number>;
+  usdBrlRate?: number;
 };
 
 type WizardData = {
@@ -1176,13 +1177,20 @@ export function CampaignWizard({
                       <dd className="text-right font-medium">
                         {recipientCount === null
                           ? "..."
-                          : `~US$ ${(
-                              recipientCount *
-                              ((waConfig?.pricesUsd ??
-                                WHATSAPP_BRAZIL_PRICE_USD)[
-                                selectedWaTemplate?.category ?? "MARKETING"
-                              ] ?? WHATSAPP_BRAZIL_PRICE_USD.MARKETING)
-                            ).toFixed(2)}`}
+                          : (() => {
+                              const unit =
+                                (waConfig?.pricesUsd ??
+                                  WHATSAPP_BRAZIL_PRICE_USD)[
+                                  selectedWaTemplate?.category ?? "MARKETING"
+                                ] ?? WHATSAPP_BRAZIL_PRICE_USD.MARKETING;
+                              const usd = recipientCount * unit;
+                              const rate = waConfig?.usdBrlRate;
+                              return rate
+                                ? `~US$ ${usd.toFixed(2)} (≈ R$ ${(usd * rate)
+                                    .toFixed(2)
+                                    .replace(".", ",")})`
+                                : `~US$ ${usd.toFixed(2)}`;
+                            })()}
                       </dd>
                     </div>
                   ) : null}

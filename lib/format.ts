@@ -56,3 +56,26 @@ export function listsLabel(names: string[] | null | undefined): string {
   if (!names || names.length === 0) return "Todas as listas";
   return names.join(", ");
 }
+
+// Custos são pequenos (fração de centavo por e-mail); até 4 casas evita
+// arredondar um valor real para "0,00".
+const usdFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 4,
+});
+const brlFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  maximumFractionDigits: 4,
+});
+
+/** Valor em dólar: 0.0625 → "US$ 0,0625". */
+export function formatUsd(value: number): string {
+  return usdFormatter.format(value);
+}
+
+/** Valor em real: 12.5 → "R$ 12,50". */
+export function formatBrl(value: number): string {
+  return brlFormatter.format(value);
+}

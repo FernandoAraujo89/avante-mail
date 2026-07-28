@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 
-import { campaigns, campaignSends, contacts, getDb } from "@/lib/db";
+import {
+  campaigns,
+  campaignSends,
+  contacts,
+  getDb,
+  whatsappTemplates,
+} from "@/lib/db";
+import { campaignCost } from "@/lib/pricing";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -49,38 +56,58 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const pending = sends.filter((s) => s.status === "pending").length;
     const failed = sends.filter((s) => s.status === "failed").length;
 
-    const metrics =
-      campaign.channel === "whatsapp"
-        ? {
-            total: sends.length,
-            // "Enviada" = deixou o sistema com sucesso (qualquer estágio).
-            sent: sends.filter((s) =>
-              ["sent", "delivered", "read"].includes(s.status)
-            ).length,
-            delivered: sends.filter(
-              (s) => s.deliveredAt !== null || s.status === "read"
-            ).length,
-            read: sends.filter((s) => s.readAt !== null).length,
-            replied: sends.filter((s) => s.repliedAt !== null).length,
-            failed,
-            // 131049 = limite de marketing do destinatário (esperado; não é
-            // erro técnico). Destacado à parte no relatório.
-            frequencyCapped: sends.filter((s) => s.errorCode === "131049")
-              .length,
-            pending,
-          }
-        : {
-            total: sends.length,
-            sent: sends.filter((s) =>
-              ["sent", "opened", "clicked"].includes(s.status)
-            ).length,
-            opened: sends.filter((s) => s.openedAt !== null).length,
-            clicked: sends.filter((s) => s.clickedAt !== null).length,
-            failed,
-            pending,
-          };
+    let metrics;
+    let cost;
+    if (campaign.channel === "whatsapp") {
+      const delivered = sends.filter(
+        (s) => s.deliveredAt !== null || s.status === "read"
+      ).length;
+      let whatsappCategory: string | null = null;
+      if (campaign.whatsappTemplateId) {
+        const [tpl] = await db
+          .select({ category: whatsappTemplates.category })
+          .from(whatsappTemplates)
+          .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
+        whatsappCategory = tpl?.category ?? null;
+      }
+      metrics = {
+        total: sends.length,
+        // "Enviada" = deixou o sistema com sucesso (qualquer estágio).
+        sent: sends.filter((s) =>
+          ["sent", "delivered", "read"].includes(s.status)
+        ).length,
+        delivered,
+        read: sends.filter((s) => s.readAt !== null).length,
+        replied: sends.filter((s) => s.repliedAt !== null).length,
+        failed,
+        // 131049 = limite de marketing do destinatário (esperado; não é
+        // erro técnico). Destacado à parte no relatório.
+        frequencyCapped: sends.filter((s) => s.errorCode === "131049").length,
+        pending,
+      };
+      // Meta cobra por mensagem entregue, na tarifa da categoria do modelo.
+      cost = campaignCost({
+        channel: "whatsapp",
+        chargeable: delivered,
+        whatsappCategory,
+      });
+    } else {
+      const chargeableEmails = sends.filter((s) => s.sentAt !== null).length;
+      metrics = {
+        total: sends.length,
+        sent: sends.filter((s) =>
+          ["sent", "opened", "clicked"].includes(s.status)
+        ).length,
+        opened: sends.filter((s) => s.openedAt !== null).length,
+        clicked: sends.filter((s) => s.clickedAt !== null).length,
+        failed,
+        pending,
+      };
+      // SES cobra por e-mail aceito (todo envio com sentAt).
+      cost = campaignCost({ channel: "email", chargeable: chargeableEmails });
+    }
 
-    return NextResponse.json({ campaign, metrics, sends });
+    return NextResponse.json({ campaign, metrics, cost, sends });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
