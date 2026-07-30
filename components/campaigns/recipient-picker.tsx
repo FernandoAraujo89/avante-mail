@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Search } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 export interface RecipientContact {
@@ -13,12 +20,15 @@ export interface RecipientContact {
   email: string;
   company: string | null;
   phone: string | null;
+  lists: { id: string; name: string }[];
 }
 
 interface RecipientPickerProps {
   channel: "email" | "whatsapp";
   /** Listas escolhidas no passo. Vazio = todas. */
   lists: string[];
+  /** Nomes das listas escolhidas, só para exibição. */
+  listNames: string[];
   tags: string[];
   /** null = todos os elegíveis; array = escolha manual (vazio = ninguém). */
   value: string[] | null;
@@ -26,13 +36,12 @@ interface RecipientPickerProps {
   onEligibleCountChange?: (count: number) => void;
 }
 
-// Teto de linhas renderizadas — bases grandes travariam a tela. O que passar
-// disso continua selecionado e é avisado embaixo da lista (nunca some calado).
-const VISIBLE_LIMIT = 200;
+const PAGE_SIZES = [20, 50, 100];
 
 export function RecipientPicker({
   channel,
   lists,
+  listNames,
   tags,
   value,
   onChange,
@@ -41,6 +50,8 @@ export function RecipientPicker({
   const [contacts, setContacts] = useState<RecipientContact[] | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
+  const [page, setPage] = useState(1);
 
   // Callbacks e valor por ref: a lista só é recarregada quando o público muda
   // (canal/listas/tags), não a cada clique numa linha.
@@ -86,6 +97,7 @@ export function RecipientPicker({
           email: c.email,
           company: c.company ?? null,
           phone: c.phone ?? null,
+          lists: Array.isArray(c.lists) ? c.lists : [],
         }));
 
         setContacts(rows);
@@ -111,6 +123,11 @@ export function RecipientPicker({
     };
   }, [channel, listsKey, tagsKey]);
 
+  // Buscar ou trocar o público/página joga de volta para a primeira página.
+  useEffect(() => {
+    setPage(1);
+  }, [search, pageSize, channel, listsKey, tagsKey]);
+
   const visible = useMemo(() => {
     if (!contacts) return [];
     const term = search.trim().toLowerCase();
@@ -125,6 +142,13 @@ export function RecipientPicker({
   const total = contacts?.length ?? 0;
   const selectedCount = value === null ? total : value.length;
   const isSelected = (id: string) => value === null || value.includes(id);
+
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  // A página fica presa ao intervalo válido: apagar a busca pode encolher a
+  // lista e deixar `page` além do fim.
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * pageSize;
+  const pageRows = visible.slice(start, start + pageSize);
 
   function toggle(id: string) {
     if (!contacts) return;
@@ -143,8 +167,18 @@ export function RecipientPicker({
     onChange(next.length === contacts.length ? null : next);
   }
 
+  const origem =
+    listNames.length > 0
+      ? `Contatos de ${listNames.join(", ")}`
+      : "Contatos de todas as listas";
+
   return (
     <div className="grid gap-3">
+      <p className="text-xs text-muted-foreground">
+        {origem}
+        {tags.length > 0 ? ` · tags: ${tags.join(", ")}` : ""}
+      </p>
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           {contacts === null ? (
@@ -201,8 +235,9 @@ export function RecipientPicker({
             : "Nenhum contato inscrito nas listas escolhidas."}
         </p>
       ) : (
-        <div className="max-h-80 overflow-y-auto rounded-lg border border-border">
-          {visible.slice(0, VISIBLE_LIMIT).map((contact) => {
+        // Altura limitada: com 100 por página a lista rolaria a tela inteira.
+        <div className="max-h-[28rem] overflow-y-auto rounded-lg border border-border">
+          {pageRows.map((contact) => {
             const selected = isSelected(contact.id);
             return (
               <button
@@ -231,12 +266,15 @@ export function RecipientPicker({
                       ? (contact.phone ?? "sem telefone")
                       : contact.email}
                     {contact.company ? ` · ${contact.company}` : ""}
+                    {contact.lists.length > 0
+                      ? ` · ${contact.lists.map((l) => l.name).join(", ")}`
+                      : ""}
                   </span>
                 </span>
               </button>
             );
           })}
-          {visible.length === 0 ? (
+          {pageRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               Nenhum contato encontrado para “{search}”.
             </p>
@@ -244,11 +282,57 @@ export function RecipientPicker({
         </div>
       )}
 
-      {visible.length > VISIBLE_LIMIT ? (
-        <p className="text-xs text-muted-foreground">
-          Mostrando os {VISIBLE_LIMIT} primeiros de {visible.length}. Use a busca
-          para encontrar os demais — quem não aparece continua selecionado.
-        </p>
+      {contacts !== null && visible.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>Por página</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => setPageSize(Number(v))}
+            >
+              <SelectTrigger className="h-8 w-20">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZES.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>
+              {start + 1}–{start + pageRows.length} de {visible.length}
+              {search.trim() ? " (filtrados)" : ""}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(currentPage - 1)}
+              disabled={currentPage <= 1}
+              aria-label="Página anterior"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="tabular-nums">
+              {currentPage}/{totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+              aria-label="Próxima página"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

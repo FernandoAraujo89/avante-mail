@@ -1105,6 +1105,10 @@ export function CampaignWizard({
               <RecipientPicker
                 channel={data.channel}
                 lists={data.lists}
+                listNames={data.lists.map(
+                  (id) =>
+                    availableLists.find((l) => l.id === id)?.name ?? id
+                )}
                 tags={parseTags(data.tagsFilter)}
                 value={data.recipientIds}
                 onChange={(recipientIds) => update({ recipientIds })}
