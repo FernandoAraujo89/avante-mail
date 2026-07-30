@@ -27,6 +27,8 @@ export function ReportsFilters({
   onClearCampaigns,
   compare,
   onCompare,
+  label = "Campanha",
+  allLabel = "Todas as campanhas",
 }: {
   preset: Preset;
   onPreset: (p: Preset) => void;
@@ -40,6 +42,9 @@ export function ReportsFilters({
   onClearCampaigns: () => void;
   compare: boolean;
   onCompare: (v: boolean) => void;
+  /** Rótulo do filtro — "Campanha" ou "Edição" (Avante News). */
+  label?: string;
+  allLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -57,13 +62,14 @@ export function ReportsFilters({
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
+  const plural = allLabel.replace(/^Tod[ao]s as /, "");
   const selectedLabel =
     selectedIds.length === 0
-      ? "Todas as campanhas"
+      ? allLabel
       : selectedIds.length === 1
         ? (options.find((o) => o.id === selectedIds[0])?.name ??
-          "1 campanha")
-        : `${selectedIds.length} campanhas`;
+          `1 ${label.toLowerCase()}`)
+        : `${selectedIds.length} ${plural}`;
 
   return (
     <div className="mb-6 flex flex-wrap items-end gap-4">
@@ -127,9 +133,9 @@ export function ReportsFilters({
         </div>
       ) : null}
 
-      {/* Multisseleção de campanhas */}
+      {/* Multisseleção de campanhas/edições */}
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs text-muted-foreground">Campanha</Label>
+        <Label className="text-xs text-muted-foreground">{label}</Label>
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
@@ -151,11 +157,11 @@ export function ReportsFilters({
                     <Check className="size-4 text-primary" />
                   ) : null}
                 </span>
-                Todas as campanhas
+                {allLabel}
               </button>
               {options.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-muted-foreground">
-                  Nenhuma campanha enviada ainda.
+                  Nenhum envio registrado ainda.
                 </p>
               ) : (
                 options.map((option) => {

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { DesignEditor } from "@/components/builder/design-editor";
+import { RecipientPicker } from "@/components/campaigns/recipient-picker";
 import {
   WhatsAppMessageStep,
   type WaTemplateOption,
@@ -90,6 +91,8 @@ type WizardData = {
   channel: CampaignChannel;
   whatsappTemplateId: string;
   whatsappVariables: WhatsAppVariableMap;
+  /** null = todos os elegíveis; array = escolha manual no passo Destinatários. */
+  recipientIds: string[] | null;
 };
 
 const EMPTY_DATA: WizardData = {
@@ -105,6 +108,7 @@ const EMPTY_DATA: WizardData = {
   channel: "email",
   whatsappTemplateId: "",
   whatsappVariables: {},
+  recipientIds: null,
 };
 
 const STEPS = [
@@ -262,6 +266,9 @@ export function CampaignWizard({
             json.whatsappVariables && typeof json.whatsappVariables === "object"
               ? json.whatsappVariables
               : {},
+          recipientIds: Array.isArray(json.recipientIds)
+            ? json.recipientIds
+            : null,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -382,6 +389,11 @@ export function CampaignWizard({
     };
   }, [step, data.lists, data.tagsFilter, data.channel]);
 
+  // Público efetivo: a escolha manual manda; sem ela, vale a contagem por
+  // listas/tags. Alimenta a contagem, o custo estimado e o aviso de limite.
+  const effectiveRecipients =
+    data.recipientIds !== null ? data.recipientIds.length : recipientCount;
+
   function update(patch: Partial<WizardData>) {
     setData((current) => ({ ...current, ...patch }));
   }
@@ -438,6 +450,11 @@ export function CampaignWizard({
         return "Monte o e-mail da campanha: escolha um modelo ou comece do zero.";
       }
     }
+    if (current === 3) {
+      if (data.recipientIds && data.recipientIds.length === 0) {
+        return "Selecione ao menos um destinatário para a campanha.";
+      }
+    }
     return "";
   }
 
@@ -474,6 +491,7 @@ export function CampaignWizard({
       channel: data.channel,
       whatsappTemplateId: data.whatsappTemplateId || null,
       whatsappVariables: data.whatsappVariables,
+      recipientIds: data.recipientIds,
     };
   }
 
@@ -1076,18 +1094,39 @@ export function CampaignWizard({
           </Card>
 
           <Card>
+            <CardHeader>
+              <CardTitle>Quem vai receber</CardTitle>
+              <CardDescription>
+                Todos vêm marcados. Desmarque quem não deve receber — ou
+                desmarque todos e escolha um a um.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RecipientPicker
+                channel={data.channel}
+                lists={data.lists}
+                tags={parseTags(data.tagsFilter)}
+                value={data.recipientIds}
+                onChange={(recipientIds) => update({ recipientIds })}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardContent className="flex items-center gap-4 p-6">
               <div className="flex size-12 items-center justify-center rounded-lg bg-primary/10">
                 <Users className="size-6 text-primary" />
               </div>
               <div>
                 <p className="text-3xl font-bold tracking-tight">
-                  {recipientCount === null ? "..." : recipientCount}
+                  {effectiveRecipients === null ? "..." : effectiveRecipients}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {data.channel === "whatsapp"
-                    ? "destinatários elegíveis (apenas contatos com telefone e consentimento de WhatsApp)"
-                    : "destinatários elegíveis (contatos descadastrados são excluídos automaticamente)"}
+                  {data.recipientIds !== null
+                    ? "destinatários escolhidos a dedo"
+                    : data.channel === "whatsapp"
+                      ? "destinatários elegíveis (apenas contatos com telefone e consentimento de WhatsApp)"
+                      : "destinatários elegíveis (contatos descadastrados são excluídos automaticamente)"}
                 </p>
               </div>
             </CardContent>
@@ -1164,9 +1203,16 @@ export function CampaignWizard({
                     </div>
                   ))}
                   <div className="flex justify-between gap-4 border-t border-border pt-3">
-                    <dt className="text-muted-foreground">Destinatários</dt>
+                    <dt className="text-muted-foreground">
+                      Destinatários
+                      {data.recipientIds !== null
+                        ? " (escolhidos a dedo)"
+                        : null}
+                    </dt>
                     <dd className="text-right font-bold text-primary">
-                      {recipientCount === null ? "..." : recipientCount}
+                      {effectiveRecipients === null
+                        ? "..."
+                        : effectiveRecipients}
                     </dd>
                   </div>
                   {data.channel === "whatsapp" ? (
@@ -1175,7 +1221,7 @@ export function CampaignWizard({
                         Custo estimado (Meta)
                       </dt>
                       <dd className="text-right font-medium">
-                        {recipientCount === null
+                        {effectiveRecipients === null
                           ? "..."
                           : (() => {
                               const unit =
@@ -1183,7 +1229,7 @@ export function CampaignWizard({
                                   WHATSAPP_BRAZIL_PRICE_USD)[
                                   selectedWaTemplate?.category ?? "MARKETING"
                                 ] ?? WHATSAPP_BRAZIL_PRICE_USD.MARKETING;
-                              const usd = recipientCount * unit;
+                              const usd = effectiveRecipients * unit;
                               const rate = waConfig?.usdBrlRate;
                               return rate
                                 ? `~US$ ${usd.toFixed(2)} (≈ R$ ${(usd * rate)
@@ -1208,14 +1254,14 @@ export function CampaignWizard({
 
             {data.channel === "whatsapp" &&
             waConfig?.dailyLimit != null &&
-            recipientCount !== null &&
-            recipientCount > waConfig.dailyLimit ? (
+            effectiveRecipients !== null &&
+            effectiveRecipients > waConfig.dailyLimit ? (
               <div className="rounded-lg border border-border bg-accent/50 px-4 py-3 text-sm">
                 Atenção: seu limite atual é de{" "}
                 <span className="font-medium">
                   {waConfig.dailyLimit} conversas/24h
                 </span>{" "}
-                e a campanha tem {recipientCount} destinatários — o excedente
+                e a campanha tem {effectiveRecipients} destinatários — o excedente
                 pode falhar no envio. Considere dividir por listas ou aguardar
                 o limite subir.
               </div>
@@ -1394,7 +1440,7 @@ export function CampaignWizard({
               }}
               disabled={
                 dispatching ||
-                recipientCount === 0 ||
+                effectiveRecipients === 0 ||
                 (data.channel === "whatsapp" &&
                   waConfig !== null &&
                   !waConfig.configured)
@@ -1480,7 +1526,7 @@ export function CampaignWizard({
             <DialogDescription>
               {isScheduled
                 ? `A campanha "${data.name}" será enviada para ${
-                    recipientCount ?? "—"
+                    effectiveRecipients ?? "—"
                   } contatos em ${new Date(data.scheduledAt).toLocaleString(
                     "pt-BR"
                   )}.`
@@ -1489,7 +1535,7 @@ export function CampaignWizard({
                       ? "A mensagem de WhatsApp será enviada"
                       : "O e-mail será enviado"
                   } agora para ${
-                    recipientCount ?? "—"
+                    effectiveRecipients ?? "—"
                   } contatos. Essa ação não pode ser desfeita.`}
             </DialogDescription>
           </DialogHeader>

@@ -112,12 +112,20 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         );
       }
     }
-    if ("lists" in body) {
+    // O Avante News tem destinatário fixo (lista de White Label Ativos, em
+    // app_settings) — nenhum payload pode redirecioná-lo.
+    if ("lists" in body && existing.kind !== "news") {
       const ids = normalizeIds(body.lists);
       updates.lists = ids.length > 0 ? ids : null;
     }
-    if ("tagsFilter" in body) {
+    if ("tagsFilter" in body && existing.kind !== "news") {
       updates.tagsFilter = normalizeTags(body.tagsFilter);
+    }
+    if ("recipientIds" in body && existing.kind !== "news") {
+      // Ausente/nulo = todos os elegíveis; array (mesmo vazio) = escolha manual.
+      updates.recipientIds = Array.isArray(body.recipientIds)
+        ? normalizeIds(body.recipientIds)
+        : null;
     }
     if ("scheduledAt" in body) {
       if (typeof body.scheduledAt === "string" && body.scheduledAt) {
@@ -135,8 +143,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     // Canal: só muda enquanto rascunho (agendada já tem jobs na fila do
-    // canal original).
-    if ("channel" in body && existing.status === "draft") {
+    // canal original). O Avante News é sempre e-mail.
+    if ("channel" in body && existing.status === "draft" && existing.kind !== "news") {
       updates.channel = body.channel === "whatsapp" ? "whatsapp" : "email";
     }
     if ("whatsappTemplateId" in body) {

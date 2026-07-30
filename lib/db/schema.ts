@@ -30,6 +30,12 @@ export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 export const CAMPAIGN_CHANNELS = ["email", "whatsapp"] as const;
 export type CampaignChannel = (typeof CAMPAIGN_CHANNELS)[number];
 
+// Tipo do envio. O Avante News é o boletim semanal dos parceiros White Label:
+// usa a mesma máquina de envio das campanhas, mas é registrado e reportado
+// separadamente (nunca aparece junto das campanhas).
+export const CAMPAIGN_KINDS = ["campaign", "news"] as const;
+export type CampaignKind = (typeof CAMPAIGN_KINDS)[number];
+
 export const SEND_STATUSES = [
   "pending",
   "sent",
@@ -200,6 +206,9 @@ export const campaigns = pgTable("campaigns", {
   // Canal de envio: os campos de e-mail (subject/design/mjmlContent) valem
   // para "email"; os whatsapp* abaixo valem para "whatsapp".
   channel: text("channel").$type<CampaignChannel>().notNull().default("email"),
+  // "campaign" = campanha comum; "news" = edição do Avante News (sempre
+  // e-mail, sempre para a lista de parceiros White Label Ativos).
+  kind: text("kind").$type<CampaignKind>().notNull().default("campaign"),
   whatsappTemplateId: uuid("whatsapp_template_id").references(
     () => whatsappTemplates.id,
     { onDelete: "set null" }
@@ -209,6 +218,12 @@ export const campaigns = pgTable("campaigns", {
   // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas.
   lists: uuid("lists").array(),
   tagsFilter: text("tags_filter").array(),
+  // Destinatários escolhidos à mão no passo "Destinatários". Nulo = todos os
+  // contatos elegíveis das listas/tags (padrão, e o das campanhas antigas);
+  // uma lista explícita restringe o envio a esses contatos. A elegibilidade
+  // continua valendo por cima: descadastrado/opt-out não recebe nem se estiver
+  // escolhido.
+  recipientIds: uuid("recipient_ids").array(),
   status: text("status").$type<CampaignStatus>().notNull().default("draft"),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
   sentAt: timestamp("sent_at", { withTimezone: true }),
@@ -253,6 +268,16 @@ export const campaignSends = pgTable("campaign_sends", {
   repliedAt: timestamp("replied_at", { withTimezone: true }),
 });
 
+// Configurações do sistema (chave/valor). Hoje guarda qual lista recebe o
+// Avante News; serve para qualquer preferência global futura.
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
 export type List = typeof lists.$inferSelect;
@@ -273,3 +298,5 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+export type AppSetting = typeof appSettings.$inferSelect;
+export type NewAppSetting = typeof appSettings.$inferInsert;

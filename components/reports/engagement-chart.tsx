@@ -2,7 +2,13 @@
 
 import { useMemo, useRef, useState } from "react";
 
-import type { SeriesPoint } from "@/lib/reports";
+// Ponto genérico do gráfico: quem chama decide o que são as duas séries
+// (aberturas/cliques no e-mail, entregues/lidas no WhatsApp).
+export interface ChartPoint {
+  date: string; // YYYY-MM-DD
+  primary: number;
+  secondary: number;
+}
 
 const OPEN_COLOR = "#3ECF8E";
 const CLICK_COLOR = "#ec4899";
@@ -22,7 +28,13 @@ function labelForDay(date: string): string {
   return dayLabelFmt.format(new Date(`${date}T12:00:00-03:00`));
 }
 
-export function EngagementChart({ series }: { series: SeriesPoint[] }) {
+export function EngagementChart({
+  series,
+  labels = { primary: "Aberturas", secondary: "Cliques" },
+}: {
+  series: ChartPoint[];
+  labels?: { primary: string; secondary: string };
+}) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<number | null>(null);
 
@@ -30,7 +42,7 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
   const plotH = HEIGHT - PAD.top - PAD.bottom;
 
   const maxY = useMemo(() => {
-    const m = Math.max(1, ...series.flatMap((p) => [p.opened, p.clicked]));
+    const m = Math.max(1, ...series.flatMap((p) => [p.primary, p.secondary]));
     // Arredonda para cima para um "teto" agradável.
     const step = m <= 5 ? 1 : m <= 20 ? 5 : m <= 100 ? 10 : 50;
     return Math.ceil(m / step) * step;
@@ -41,7 +53,7 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
     PAD.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
   const yFor = (v: number) => PAD.top + plotH - (v / maxY) * plotH;
 
-  const buildPath = (key: "opened" | "clicked") => {
+  const buildPath = (key: "primary" | "secondary") => {
     if (n === 0) return { line: "", area: "" };
     const pts = series.map((p, i) => `${xFor(i)},${yFor(p[key])}`);
     const line = `M${pts.join("L")}`;
@@ -51,8 +63,8 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
     return { line, area };
   };
 
-  const openPath = buildPath("opened");
-  const clickPath = buildPath("clicked");
+  const openPath = buildPath("primary");
+  const clickPath = buildPath("secondary");
 
   const yTicks = useMemo(() => {
     // Nunca mais divisões que o próprio máximo, para não repetir inteiros.
@@ -94,14 +106,14 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
             className="inline-block size-2.5 rounded-full"
             style={{ backgroundColor: OPEN_COLOR }}
           />
-          Aberturas
+          {labels.primary}
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block size-2.5 rounded-full"
             style={{ backgroundColor: CLICK_COLOR }}
           />
-          Cliques
+          {labels.secondary}
         </span>
       </div>
 
@@ -114,7 +126,7 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
           onMouseMove={handleMove}
           onMouseLeave={() => setHover(null)}
           role="img"
-          aria-label="Gráfico de engajamento: aberturas e cliques por dia"
+          aria-label={`Gráfico de engajamento: ${labels.primary.toLowerCase()} e ${labels.secondary.toLowerCase()} por dia`}
         >
           <defs>
             <linearGradient id="openFill" x1="0" y1="0" x2="0" y2="1">
@@ -192,10 +204,10 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
           {/* Marcadores */}
           {series.map((p, i) => (
             <g key={`m-${p.date}`}>
-              <circle cx={xFor(i)} cy={yFor(p.opened)} r={2.5} fill={OPEN_COLOR} />
+              <circle cx={xFor(i)} cy={yFor(p.primary)} r={2.5} fill={OPEN_COLOR} />
               <circle
                 cx={xFor(i)}
-                cy={yFor(p.clicked)}
+                cy={yFor(p.secondary)}
                 r={2.5}
                 fill={CLICK_COLOR}
               />
@@ -216,7 +228,7 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
               />
               <circle
                 cx={xFor(hover)}
-                cy={yFor(hoverPoint.opened)}
+                cy={yFor(hoverPoint.primary)}
                 r={4}
                 fill={OPEN_COLOR}
                 stroke="#ffffff"
@@ -224,7 +236,7 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
               />
               <circle
                 cx={xFor(hover)}
-                cy={yFor(hoverPoint.clicked)}
+                cy={yFor(hoverPoint.secondary)}
                 r={4}
                 fill={CLICK_COLOR}
                 stroke="#ffffff"
@@ -238,7 +250,7 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
         {hover !== null && hoverPoint ? (
           (() => {
             const topPct =
-              (yFor(Math.max(hoverPoint.opened, hoverPoint.clicked)) / HEIGHT) *
+              (yFor(Math.max(hoverPoint.primary, hoverPoint.secondary)) / HEIGHT) *
               100;
             const leftPct = (xFor(hover) / WIDTH) * 100;
             const below = topPct < 26; // ponto perto do topo → tooltip abaixo
@@ -261,14 +273,16 @@ export function EngagementChart({ series }: { series: SeriesPoint[] }) {
                 className="inline-block size-2 rounded-full"
                 style={{ backgroundColor: OPEN_COLOR }}
               />
-              Aberturas: <span className="text-foreground">{hoverPoint.opened}</span>
+              {labels.primary}:{" "}
+              <span className="text-foreground">{hoverPoint.primary}</span>
             </p>
             <p className="flex items-center gap-1.5 text-muted-foreground">
               <span
                 className="inline-block size-2 rounded-full"
                 style={{ backgroundColor: CLICK_COLOR }}
               />
-              Cliques: <span className="text-foreground">{hoverPoint.clicked}</span>
+              {labels.secondary}:{" "}
+              <span className="text-foreground">{hoverPoint.secondary}</span>
             </p>
               </div>
             );

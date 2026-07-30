@@ -1,3 +1,4 @@
+import type { SendStatus } from "./db/schema";
 import { ratePct } from "./format";
 
 // Fuso fixo do Brasil (sem horário de verão desde 2019): UTC−3.
@@ -295,6 +296,237 @@ export function aggregateReport(
     },
     campaigns,
     series: buildSeries(current, days),
+    seriesByCampaign,
+  };
+}
+
+// ─── Canal WhatsApp ────────────────────────────────────────────────────
+// Métricas próprias do canal: não há abertura nem clique — o que se mede é
+// entrega, leitura e resposta, além do limite de marketing da Meta (131049).
+
+export interface WaSendRow {
+  campaignId: string;
+  status: SendStatus;
+  sentAt: Date | null;
+  deliveredAt: Date | null;
+  readAt: Date | null;
+  repliedAt: Date | null;
+  errorCode: string | null;
+}
+
+export interface WaCampaignRef {
+  id: string;
+  name: string;
+  /** Data de referência da campanha no período (envio, agendamento ou criação). */
+  sendDate: Date;
+}
+
+export interface WaKpis {
+  campaigns: KpiCount;
+  sent: KpiCount;
+  delivered: KpiCount & { rate: number | null; ratePrevious: number | null };
+  read: KpiCount & { rate: number | null; ratePrevious: number | null };
+  replied: KpiCount & { rate: number | null; ratePrevious: number | null };
+  failed: KpiCount;
+  frequencyCapped: KpiCount;
+}
+
+export interface WaCampaignRow {
+  id: string;
+  name: string;
+  sentAt: string;
+  total: number;
+  sent: number;
+  delivered: number;
+  deliveryRate: number | null;
+  read: number;
+  readRate: number | null;
+  replied: number;
+  failed: number;
+  frequencyCapped: number;
+}
+
+export interface WaSeriesPoint {
+  date: string; // YYYY-MM-DD
+  delivered: number;
+  read: number;
+}
+
+export interface WhatsAppReportResult {
+  generatedAt: string;
+  period: { from: string; to: string };
+  previousPeriod: { from: string; to: string };
+  kpis: WaKpis;
+  campaigns: WaCampaignRow[];
+  series: WaSeriesPoint[];
+  seriesByCampaign: Record<string, WaSeriesPoint[]>;
+}
+
+interface WaTotals {
+  campaigns: number;
+  total: number;
+  sent: number;
+  delivered: number;
+  read: number;
+  replied: number;
+  failed: number;
+  frequencyCapped: number;
+}
+
+function waTotalsFor(rowsByCampaign: WaSendRow[][]): WaTotals {
+  const t: WaTotals = {
+    campaigns: rowsByCampaign.length,
+    total: 0,
+    sent: 0,
+    delivered: 0,
+    read: 0,
+    replied: 0,
+    failed: 0,
+    frequencyCapped: 0,
+  };
+  for (const rows of rowsByCampaign) {
+    for (const r of rows) {
+      t.total += 1;
+      // "Enviada" = saiu do sistema com sucesso, em qualquer estágio.
+      if (r.sentAt) t.sent += 1;
+      // A ordem dos webhooks não é garantida: "lida" implica "entregue".
+      if (r.deliveredAt || r.readAt) t.delivered += 1;
+      if (r.readAt) t.read += 1;
+      if (r.repliedAt) t.replied += 1;
+      if (r.status === "failed") t.failed += 1;
+      // 131049 = limite de marketing do destinatário; não é falha técnica.
+      if (r.errorCode === "131049") t.frequencyCapped += 1;
+    }
+  }
+  return t;
+}
+
+function waBuildSeries(
+  rowsByCampaign: WaSendRow[][],
+  days: string[]
+): WaSeriesPoint[] {
+  const index = new Map(days.map((d, i) => [d, i]));
+  const series: WaSeriesPoint[] = days.map((date) => ({
+    date,
+    delivered: 0,
+    read: 0,
+  }));
+  for (const rows of rowsByCampaign) {
+    for (const r of rows) {
+      const deliveredAt = r.deliveredAt ?? r.readAt;
+      if (deliveredAt) {
+        const i = index.get(dayKey(deliveredAt));
+        if (i !== undefined) series[i].delivered += 1;
+      }
+      if (r.readAt) {
+        const i = index.get(dayKey(r.readAt));
+        if (i !== undefined) series[i].read += 1;
+      }
+    }
+  }
+  return series;
+}
+
+/**
+ * Agrega o relatório do canal WhatsApp. Diferente do e-mail, as campanhas
+ * chegam já identificadas (`refs`) porque um disparo pode ter só falhas —
+ * sem nenhum envio com data, ele ainda precisa aparecer no período.
+ */
+export function aggregateWhatsAppReport(
+  refs: WaCampaignRef[],
+  rows: WaSendRow[],
+  period: ParsedPeriod,
+  from: string,
+  to: string,
+  generatedAt: string,
+  campaignFilter?: Set<string>
+): WhatsAppReportResult {
+  const byCampaign = new Map<string, WaSendRow[]>();
+  for (const row of rows) {
+    const bucket = byCampaign.get(row.campaignId);
+    if (bucket) bucket.push(row);
+    else byCampaign.set(row.campaignId, [row]);
+  }
+
+  const visible = refs.filter((r) => !campaignFilter || campaignFilter.has(r.id));
+  const inRange = (d: Date, a: Date, b: Date) =>
+    d.getTime() >= a.getTime() && d.getTime() <= b.getTime();
+
+  const current = visible.filter((r) =>
+    inRange(r.sendDate, period.fromDate, period.toDate)
+  );
+  const previous = visible.filter((r) =>
+    inRange(r.sendDate, period.prevFromDate, period.prevToDate)
+  );
+
+  const rowsOf = (list: WaCampaignRef[]) =>
+    list.map((r) => byCampaign.get(r.id) ?? []);
+
+  const cur = waTotalsFor(rowsOf(current));
+  const prev = waTotalsFor(rowsOf(previous));
+  const days = dayRange(period.fromDate, period.toDate);
+
+  const campaigns: WaCampaignRow[] = current
+    .map((ref): WaCampaignRow => {
+      const t = waTotalsFor([byCampaign.get(ref.id) ?? []]);
+      return {
+        id: ref.id,
+        name: ref.name,
+        sentAt: ref.sendDate.toISOString(),
+        total: t.total,
+        sent: t.sent,
+        delivered: t.delivered,
+        deliveryRate: ratePct(t.delivered, t.sent),
+        read: t.read,
+        readRate: ratePct(t.read, t.delivered),
+        replied: t.replied,
+        failed: t.failed,
+        frequencyCapped: t.frequencyCapped,
+      };
+    })
+    .sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+
+  const seriesByCampaign: Record<string, WaSeriesPoint[]> = {};
+  for (const ref of current) {
+    seriesByCampaign[ref.id] = waBuildSeries([byCampaign.get(ref.id) ?? []], days);
+  }
+
+  return {
+    generatedAt,
+    period: { from, to },
+    previousPeriod: {
+      from: dayKey(period.prevFromDate),
+      to: dayKey(period.prevToDate),
+    },
+    kpis: {
+      campaigns: { value: cur.campaigns, previous: prev.campaigns },
+      sent: { value: cur.sent, previous: prev.sent },
+      delivered: {
+        value: cur.delivered,
+        previous: prev.delivered,
+        rate: ratePct(cur.delivered, cur.sent),
+        ratePrevious: ratePct(prev.delivered, prev.sent),
+      },
+      read: {
+        value: cur.read,
+        previous: prev.read,
+        rate: ratePct(cur.read, cur.delivered),
+        ratePrevious: ratePct(prev.read, prev.delivered),
+      },
+      replied: {
+        value: cur.replied,
+        previous: prev.replied,
+        rate: ratePct(cur.replied, cur.delivered),
+        ratePrevious: ratePct(prev.replied, prev.delivered),
+      },
+      failed: { value: cur.failed, previous: prev.failed },
+      frequencyCapped: {
+        value: cur.frequencyCapped,
+        previous: prev.frequencyCapped,
+      },
+    },
+    campaigns,
+    series: waBuildSeries(rowsOf(current), days),
     seriesByCampaign,
   };
 }

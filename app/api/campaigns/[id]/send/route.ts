@@ -19,6 +19,7 @@ import {
   type Campaign,
 } from "@/lib/db";
 import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
+import { resolveNewsList } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { missingVariableSources } from "@/lib/whatsapp/variables";
@@ -102,6 +103,20 @@ async function dispatchWhatsApp(
   }
   if (campaign.tagsFilter && campaign.tagsFilter.length > 0) {
     conditions.push(arrayOverlaps(contacts.tags, campaign.tagsFilter));
+  }
+  // Escolha manual do passo "Destinatários": só restringe, nunca amplia — as
+  // condições de elegibilidade acima continuam valendo.
+  if (campaign.recipientIds) {
+    if (campaign.recipientIds.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Nenhum destinatário selecionado — escolha ao menos um contato no passo Destinatários.",
+        },
+        { status: 400 }
+      );
+    }
+    conditions.push(inArray(contacts.id, campaign.recipientIds));
   }
 
   const eligible = await db
@@ -208,21 +223,57 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       }
     }
 
+    // O Avante News vai sempre para a lista de parceiros White Label Ativos,
+    // resolvida no momento do disparo (não no rascunho) — se a configuração
+    // mudou desde a criação, vale a lista atual.
+    let targetLists = campaign.lists;
+    if (campaign.kind === "news") {
+      const audience = await resolveNewsList();
+      if (!audience) {
+        return NextResponse.json(
+          {
+            error:
+              "Defina a lista de parceiros White Label Ativos antes de enviar o Avante News.",
+          },
+          { status: 400 }
+        );
+      }
+      targetLists = [audience.id];
+      await db
+        .update(campaigns)
+        .set({ lists: targetLists })
+        .where(eq(campaigns.id, campaign.id));
+    }
+
     // 1. Contatos elegíveis: inscritos + listas + tags.
     const conditions: SQL[] = [eq(contacts.subscribed, true)];
-    if (campaign.lists && campaign.lists.length > 0) {
+    if (targetLists && targetLists.length > 0) {
       conditions.push(
         inArray(
           contacts.id,
           db
             .select({ id: contactLists.contactId })
             .from(contactLists)
-            .where(inArray(contactLists.listId, campaign.lists))
+            .where(inArray(contactLists.listId, targetLists))
         )
       );
     }
     if (campaign.tagsFilter && campaign.tagsFilter.length > 0) {
       conditions.push(arrayOverlaps(contacts.tags, campaign.tagsFilter));
+    }
+    // Escolha manual do passo "Destinatários": só restringe, nunca amplia — as
+    // condições de elegibilidade acima continuam valendo.
+    if (campaign.recipientIds) {
+      if (campaign.recipientIds.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Nenhum destinatário selecionado — escolha ao menos um contato no passo Destinatários.",
+          },
+          { status: 400 }
+        );
+      }
+      conditions.push(inArray(contacts.id, campaign.recipientIds));
     }
 
     const eligible = await db

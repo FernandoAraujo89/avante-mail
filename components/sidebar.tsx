@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   MessageCircle,
+  Newspaper,
   Send,
   UserCog,
   Users,
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campanhas", icon: Send },
+  { href: "/news", label: "Avante News", icon: Newspaper },
   { href: "/reports", label: "Relatórios", icon: BarChart3 },
   { href: "/contacts", label: "Contatos", icon: Users },
   { href: "/lists", label: "Listas", icon: ListChecks },

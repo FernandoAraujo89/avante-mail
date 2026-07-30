@@ -33,10 +33,12 @@ export const dynamic = "force-dynamic";
 export default async function CampaignsPage() {
   const db = getDb();
 
+  // Só campanhas: o Avante News tem tela própria (/news).
   const rows = await db
     .select({ campaign: campaigns, templateName: templates.name })
     .from(campaigns)
     .leftJoin(templates, eq(campaigns.templateId, templates.id))
+    .where(eq(campaigns.kind, "campaign"))
     .orderBy(desc(campaigns.createdAt));
 
   const allLists = await db

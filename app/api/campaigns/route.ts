@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const db = getDb();
+    // Só campanhas: as edições do Avante News têm tela e relatório próprios.
     const rows = await db
       .select({
         campaign: campaigns,
@@ -18,6 +19,7 @@ export async function GET() {
       })
       .from(campaigns)
       .leftJoin(templates, eq(campaigns.templateId, templates.id))
+      .where(eq(campaigns.kind, "campaign"))
       .orderBy(desc(campaigns.createdAt));
 
     return NextResponse.json(
@@ -135,6 +137,10 @@ export async function POST(request: NextRequest) {
           return ids.length > 0 ? ids : null;
         })(),
         tagsFilter: normalizeTags(body.tagsFilter),
+        // Ausente = todos os elegíveis; array (mesmo vazio) = escolha manual.
+        recipientIds: Array.isArray(body.recipientIds)
+          ? normalizeIds(body.recipientIds)
+          : null,
         design,
         mjmlContent,
         editorType,

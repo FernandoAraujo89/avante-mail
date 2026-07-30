@@ -14,10 +14,14 @@ import {
 
 export interface MonthlyConsumption {
   month: string; // "YYYY-MM"
+  /** Campanhas de e-mail (não inclui o Avante News). */
   emailUsd: number;
+  /** Avante News — contabilizado à parte das campanhas. */
+  newsUsd: number;
   whatsappUsd: number;
   totalUsd: number;
   emailBrl: number;
+  newsBrl: number;
   whatsappBrl: number;
   totalBrl: number;
 }
@@ -27,6 +31,7 @@ export interface ConsumptionSummary {
   totalUsd: number;
   totalBrl: number;
   emailUsd: number;
+  newsUsd: number;
   whatsappUsd: number;
   rate: number;
 }
@@ -43,15 +48,19 @@ export async function monthlyConsumption(
   const emailMonth = sql<string>`to_char(${campaignSends.sentAt} at time zone 'America/Sao_Paulo', 'YYYY-MM')`;
   const whatsappMonth = sql<string>`to_char(${campaignSends.deliveredAt} at time zone 'America/Sao_Paulo', 'YYYY-MM')`;
 
-  // E-mail: e-mails aceitos pelo SES, por mês.
+  // E-mail: e-mails aceitos pelo SES, por mês e por tipo (campanha × News).
   const emailRows = await db
-    .select({ month: emailMonth, count: sql<number>`count(*)` })
+    .select({
+      month: emailMonth,
+      kind: campaigns.kind,
+      count: sql<number>`count(*)`,
+    })
     .from(campaignSends)
     .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
     .where(
       and(eq(campaigns.channel, "email"), isNotNull(campaignSends.sentAt))
     )
-    .groupBy(emailMonth);
+    .groupBy(emailMonth, campaigns.kind);
 
   // WhatsApp: mensagens entregues, por mês e categoria do modelo.
   const whatsappRows = await db
@@ -74,11 +83,14 @@ export async function monthlyConsumption(
     )
     .groupBy(whatsappMonth, whatsappTemplates.category);
 
-  const byMonth = new Map<string, { emailUsd: number; whatsappUsd: number }>();
+  const byMonth = new Map<
+    string,
+    { emailUsd: number; newsUsd: number; whatsappUsd: number }
+  >();
   const bucket = (month: string) => {
     let entry = byMonth.get(month);
     if (!entry) {
-      entry = { emailUsd: 0, whatsappUsd: 0 };
+      entry = { emailUsd: 0, newsUsd: 0, whatsappUsd: 0 };
       byMonth.set(month, entry);
     }
     return entry;
@@ -86,7 +98,9 @@ export async function monthlyConsumption(
 
   for (const row of emailRows) {
     if (!row.month) continue;
-    bucket(row.month).emailUsd += Number(row.count) * sesPricePerEmailUsd();
+    const usd = Number(row.count) * sesPricePerEmailUsd();
+    if (row.kind === "news") bucket(row.month).newsUsd += usd;
+    else bucket(row.month).emailUsd += usd;
   }
   for (const row of whatsappRows) {
     if (!row.month) continue;
@@ -96,13 +110,15 @@ export async function monthlyConsumption(
 
   const months = [...byMonth.entries()]
     .map(([month, v]): MonthlyConsumption => {
-      const totalUsd = v.emailUsd + v.whatsappUsd;
+      const totalUsd = v.emailUsd + v.newsUsd + v.whatsappUsd;
       return {
         month,
         emailUsd: v.emailUsd,
+        newsUsd: v.newsUsd,
         whatsappUsd: v.whatsappUsd,
         totalUsd,
         emailBrl: v.emailUsd * rate,
+        newsBrl: v.newsUsd * rate,
         whatsappBrl: v.whatsappUsd * rate,
         totalBrl: totalUsd * rate,
       };
@@ -111,12 +127,14 @@ export async function monthlyConsumption(
     .slice(0, monthsBack);
 
   const emailUsd = months.reduce((s, m) => s + m.emailUsd, 0);
+  const newsUsd = months.reduce((s, m) => s + m.newsUsd, 0);
   const whatsappUsd = months.reduce((s, m) => s + m.whatsappUsd, 0);
-  const totalUsd = emailUsd + whatsappUsd;
+  const totalUsd = emailUsd + newsUsd + whatsappUsd;
 
   return {
     months,
     emailUsd,
+    newsUsd,
     whatsappUsd,
     totalUsd,
     totalBrl: totalUsd * rate,

@@ -2,7 +2,7 @@ import { SendReport } from "@/components/reports/send-report";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampaignReportPage({
+export default async function NewsReportPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -11,9 +11,9 @@ export default async function CampaignReportPage({
   return (
     <SendReport
       id={id}
-      kind="campaign"
-      backHref="/campaigns"
-      backLabel="Voltar para campanhas"
+      kind="news"
+      backHref="/news"
+      backLabel="Voltar para o Avante News"
     />
   );
 }

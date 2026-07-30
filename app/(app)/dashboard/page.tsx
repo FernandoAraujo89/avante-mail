@@ -61,7 +61,9 @@ export default async function DashboardPage() {
     db
       .select({ value: count() })
       .from(campaigns)
-      .where(eq(campaigns.status, "sent")),
+      .where(
+        and(eq(campaigns.status, "sent"), eq(campaigns.kind, "campaign"))
+      ),
     // Taxas de abertura/clique são do canal de e-mail: os envios de WhatsApp
     // (sem abertura/clique) não entram no denominador de entregas.
     db
@@ -88,7 +90,12 @@ export default async function DashboardPage() {
       .where(
         and(eq(campaigns.channel, "email"), isNotNull(campaignSends.clickedAt))
       ),
-    db.select().from(campaigns).orderBy(desc(campaigns.createdAt)).limit(5),
+    db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.kind, "campaign"))
+      .orderBy(desc(campaigns.createdAt))
+      .limit(5),
   ]);
 
   const allLists = await db
@@ -157,8 +164,9 @@ export default async function DashboardPage() {
             Consumo por mês
           </CardTitle>
           <CardDescription>
-            AWS SES (e-mail) + WhatsApp (Meta). Cobrado em US$; R$ convertido ao
-            câmbio de {formatBrl(consumption.rate)}/US$.
+            AWS SES (campanhas de e-mail e Avante News, separados) + WhatsApp
+            (Meta). Cobrado em US$; R$ convertido ao câmbio de{" "}
+            {formatBrl(consumption.rate)}/US$.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -172,7 +180,8 @@ export default async function DashboardPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Mês</TableHead>
-                    <TableHead className="text-right">E-mail</TableHead>
+                    <TableHead className="text-right">Campanhas</TableHead>
+                    <TableHead className="text-right">Avante News</TableHead>
                     <TableHead className="text-right">WhatsApp</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                   </TableRow>
@@ -185,6 +194,9 @@ export default async function DashboardPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         {costCell(m.emailUsd, m.emailBrl)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {costCell(m.newsUsd, m.newsBrl)}
                       </TableCell>
                       <TableCell className="text-right">
                         {costCell(m.whatsappUsd, m.whatsappBrl)}
@@ -203,6 +215,12 @@ export default async function DashboardPage() {
                       {costCell(
                         consumption.emailUsd,
                         consumption.emailUsd * consumption.rate
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {costCell(
+                        consumption.newsUsd,
+                        consumption.newsUsd * consumption.rate
                       )}
                     </TableCell>
                     <TableCell className="text-right">

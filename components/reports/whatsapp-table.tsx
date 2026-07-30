@@ -13,39 +13,36 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, formatInt, formatPctValue } from "@/lib/format";
-import type { CampaignRow } from "@/lib/reports";
+import type { WaCampaignRow } from "@/lib/reports";
 import { cn } from "@/lib/utils";
 
 type SortKey =
   | "name"
   | "sentAt"
   | "sent"
-  | "openedUnique"
-  | "clickedUnique"
-  | "bounces"
-  | "complaints";
+  | "delivered"
+  | "read"
+  | "replied"
+  | "failed";
 
 const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
-  // O rótulo da 1ª coluna vem por prop (Campanha × Edição, no Avante News).
   { key: "name", label: "Campanha", numeric: false },
   { key: "sentAt", label: "Data de envio", numeric: false },
-  { key: "sent", label: "Enviados", numeric: true },
-  { key: "openedUnique", label: "Aberturas únicas", numeric: true },
-  { key: "clickedUnique", label: "Cliques únicos", numeric: true },
-  { key: "bounces", label: "Devoluções", numeric: true },
-  { key: "complaints", label: "Spam", numeric: true },
+  { key: "sent", label: "Enviadas", numeric: true },
+  { key: "delivered", label: "Entregues", numeric: true },
+  { key: "read", label: "Lidas", numeric: true },
+  { key: "replied", label: "Respostas", numeric: true },
+  { key: "failed", label: "Falhas", numeric: true },
 ];
 
-export function CampaignTable({
+export function WhatsAppTable({
   rows,
   selectedId,
   onSelect,
-  nameLabel = "Campanha",
 }: {
-  rows: CampaignRow[];
+  rows: WaCampaignRow[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  nameLabel?: string;
 }) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("sentAt");
@@ -82,7 +79,7 @@ export function CampaignTable({
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder={`Buscar ${nameLabel.toLowerCase()}...`}
+            placeholder="Buscar campanha..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -101,9 +98,7 @@ export function CampaignTable({
 
       {filtered.length === 0 ? (
         <p className="py-10 text-center text-sm text-muted-foreground">
-          {nameLabel === "Edição"
-            ? "Nenhuma edição encontrada no período."
-            : "Nenhuma campanha encontrada no período."}
+          Nenhuma campanha de WhatsApp no período.
         </p>
       ) : (
         <Table>
@@ -122,7 +117,7 @@ export function CampaignTable({
                       col.numeric && "flex-row-reverse"
                     )}
                   >
-                    {col.key === "name" ? nameLabel : col.label}
+                    {col.label}
                     {sortKey === col.key ? (
                       sortDir === "asc" ? (
                         <ArrowUp className="size-3" />
@@ -155,28 +150,27 @@ export function CampaignTable({
                   {formatInt(row.sent)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {formatInt(row.openedUnique)}
+                  {formatInt(row.delivered)}
                   <span className="ml-1 text-xs text-muted-foreground">
-                    ({formatPctValue(row.openRate)})
+                    ({formatPctValue(row.deliveryRate)})
                   </span>
                 </TableCell>
                 <TableCell className="text-right">
-                  {formatInt(row.clickedUnique)}
+                  {formatInt(row.read)}
                   <span className="ml-1 text-xs text-muted-foreground">
-                    ({formatPctValue(row.clickRate)})
+                    ({formatPctValue(row.readRate)})
                   </span>
                 </TableCell>
                 <TableCell className="text-right">
-                  {formatInt(row.bounces)}
-                  <span className="ml-1 text-xs text-muted-foreground">
-                    ({formatPctValue(row.bounceRate)})
-                  </span>
+                  {formatInt(row.replied)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {formatInt(row.complaints)}
-                  <span className="ml-1 text-xs text-muted-foreground">
-                    ({formatPctValue(row.complaintRate)})
-                  </span>
+                  {formatInt(row.failed)}
+                  {row.frequencyCapped > 0 ? (
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      ({formatInt(row.frequencyCapped)} por limite)
+                    </span>
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))}

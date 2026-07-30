@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Mail, MessageCircle, Newspaper, RefreshCw } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { CampaignTable } from "@/components/reports/campaign-table";
@@ -12,10 +12,51 @@ import {
   type CampaignOption,
   type Preset,
 } from "@/components/reports/reports-filters";
+import { WhatsAppTable } from "@/components/reports/whatsapp-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatInt, formatPctValue } from "@/lib/format";
-import type { ReportResult } from "@/lib/reports";
+import type { ReportResult, WhatsAppReportResult } from "@/lib/reports";
+import { cn } from "@/lib/utils";
+
+// Os três conjuntos de dados nunca se misturam: cada escopo tem sua própria
+// origem (campanhas de e-mail, Avante News, WhatsApp) e suas próprias métricas.
+type Scope = "campaigns" | "news" | "whatsapp";
+
+const SCOPES: {
+  key: Scope;
+  label: string;
+  icon: typeof Mail;
+  description: string;
+  /** De onde vêm as opções do filtro de campanha/edição. */
+  optionsEndpoint: string;
+  optionChannel?: "email" | "whatsapp";
+}[] = [
+  {
+    key: "campaigns",
+    label: "Campanhas de e-mail",
+    icon: Mail,
+    description: "Desempenho das campanhas de e-mail marketing.",
+    optionsEndpoint: "/api/campaigns",
+    optionChannel: "email",
+  },
+  {
+    key: "news",
+    label: "Avante News",
+    icon: Newspaper,
+    description:
+      "Desempenho do boletim semanal enviado aos parceiros White Label Ativos.",
+    optionsEndpoint: "/api/news",
+  },
+  {
+    key: "whatsapp",
+    label: "WhatsApp",
+    icon: MessageCircle,
+    description: "Desempenho das campanhas enviadas pela Cloud API da Meta.",
+    optionsEndpoint: "/api/campaigns",
+    optionChannel: "whatsapp",
+  },
+];
 
 function todayKey(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -37,6 +78,7 @@ const timeFmt = new Intl.DateTimeFormat("pt-BR", {
 });
 
 export function ReportsClient() {
+  const [scope, setScope] = useState<Scope>("campaigns");
   const [preset, setPreset] = useState<Preset>("30d");
   const [customFrom, setCustomFrom] = useState(daysAgoKey(29));
   const [customTo, setCustomTo] = useState(todayKey());
@@ -45,9 +87,12 @@ export function ReportsClient() {
 
   const [options, setOptions] = useState<CampaignOption[]>([]);
   const [data, setData] = useState<ReportResult | null>(null);
+  const [waData, setWaData] = useState<WhatsAppReportResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [focusId, setFocusId] = useState<string | null>(null);
+
+  const config = SCOPES.find((s) => s.key === scope) ?? SCOPES[0];
 
   const { from, to } = useMemo(() => {
     if (preset === "7d") return { from: daysAgoKey(6), to: todayKey() };
@@ -55,59 +100,315 @@ export function ReportsClient() {
     return { from: customFrom, to: customTo };
   }, [preset, customFrom, customTo]);
 
-  // Opções do filtro de campanha (todas as campanhas já disparadas).
+  // Opções do filtro: só os disparos já feitos do escopo atual.
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/campaigns");
+        const res = await fetch(config.optionsEndpoint);
         const json = await res.json();
-        if (res.ok && Array.isArray(json)) {
-          setOptions(
-            json
-              .filter((c: { status: string }) =>
-                ["sending", "sent", "scheduled"].includes(c.status)
-              )
-              .map((c: { id: string; name: string }) => ({
-                id: c.id,
-                name: c.name,
-              }))
-          );
-        }
+        if (cancelled || !res.ok || !Array.isArray(json)) return;
+        setOptions(
+          json
+            .filter(
+              (c: { status: string; channel?: string }) =>
+                ["sending", "sent", "scheduled"].includes(c.status) &&
+                (!config.optionChannel || c.channel === config.optionChannel)
+            )
+            .map((c: { id: string; name: string }) => ({
+              id: c.id,
+              name: c.name,
+            }))
+        );
       } catch {
         // opções são um conforto; falha silenciosa
       }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [config.optionsEndpoint, config.optionChannel]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams({ from, to });
+      const params = new URLSearchParams({ from, to, scope });
       if (campaignIds.length > 0) {
         params.set("campaignIds", campaignIds.join(","));
       }
       const res = await fetch(`/api/reports?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar métricas.");
-      setData(json);
-      // Se a campanha em foco saiu do resultado, volta para a visão geral.
+      if (scope === "whatsapp") {
+        setWaData(json);
+        setData(null);
+      } else {
+        setData(json);
+        setWaData(null);
+      }
+      // Se o item em foco saiu do resultado, volta para a visão geral.
       setFocusId((current) =>
         current && !json.seriesByCampaign[current] ? null : current
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setData(null);
+      setWaData(null);
     } finally {
       setLoading(false);
     }
-  }, [from, to, campaignIds]);
+  }, [from, to, campaignIds, scope]);
 
   useEffect(() => {
     const timer = setTimeout(load, 250);
     return () => clearTimeout(timer);
   }, [load]);
 
+  function changeScope(next: Scope) {
+    if (next === scope) return;
+    setScope(next);
+    setCampaignIds([]);
+    setFocusId(null);
+    setOptions([]);
+  }
+
+  const generatedAt = data?.generatedAt ?? waData?.generatedAt ?? null;
+
+  const scopeTabs = (
+    <div className="mb-6 flex flex-wrap items-center gap-1 rounded-lg border border-border p-1">
+      {SCOPES.map((s) => (
+        <button
+          key={s.key}
+          type="button"
+          onClick={() => changeScope(s.key)}
+          aria-pressed={scope === s.key}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            scope === s.key
+              ? "bg-primary/10 font-medium text-primary"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <s.icon className="size-4" />
+          {s.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const filters = (
+    <ReportsFilters
+      preset={preset}
+      onPreset={setPreset}
+      from={from}
+      to={to}
+      onCustomFrom={setCustomFrom}
+      onCustomTo={setCustomTo}
+      options={options}
+      selectedIds={campaignIds}
+      onToggleCampaign={(id) =>
+        setCampaignIds((cur) =>
+          cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
+        )
+      }
+      onClearCampaigns={() => setCampaignIds([])}
+      compare={compare}
+      onCompare={setCompare}
+      label={scope === "news" ? "Edição" : "Campanha"}
+      allLabel={scope === "news" ? "Todas as edições" : "Todas as campanhas"}
+    />
+  );
+
+  const header = (
+    <>
+      <PageHeader title="Relatórios" description={config.description}>
+        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+          <RefreshCw className={loading ? "animate-spin" : ""} />
+          Atualizar
+        </Button>
+      </PageHeader>
+
+      {scopeTabs}
+      {filters}
+
+      {error ? (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+          {error}
+        </div>
+      ) : null}
+    </>
+  );
+
+  const emptyState = (
+    <Card>
+      <CardContent className="py-16 text-center">
+        <p className="font-medium">Sem dados no período</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {scope === "news"
+            ? "Nenhuma edição do Avante News foi enviada"
+            : scope === "whatsapp"
+              ? "Nenhuma campanha de WhatsApp foi disparada"
+              : "Nenhuma campanha de e-mail foi enviada"}{" "}
+          entre {from.split("-").reverse().join("/")} e{" "}
+          {to.split("-").reverse().join("/")}. Ajuste o período.
+        </p>
+      </CardContent>
+    </Card>
+  );
+
+  const footer = generatedAt ? (
+    <p className="mt-6 text-center text-xs text-muted-foreground">
+      Última atualização: {timeFmt.format(new Date(generatedAt))}
+    </p>
+  ) : null;
+
+  // ─── WhatsApp ────────────────────────────────────────────────────────
+  if (scope === "whatsapp") {
+    const kpis = waData?.kpis;
+    const series =
+      focusId && waData?.seriesByCampaign[focusId]
+        ? waData.seriesByCampaign[focusId]
+        : (waData?.series ?? []);
+    const focusName = focusId
+      ? (waData?.campaigns.find((c) => c.id === focusId)?.name ?? null)
+      : null;
+
+    return (
+      <>
+        {header}
+
+        {loading && !waData ? (
+          <div className="py-20 text-center text-sm text-muted-foreground">
+            Carregando métricas...
+          </div>
+        ) : kpis && kpis.campaigns.value === 0 ? (
+          emptyState
+        ) : kpis ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <KpiTile
+                label="Campanhas"
+                value={formatInt(kpis.campaigns.value)}
+                current={kpis.campaigns.value}
+                previous={kpis.campaigns.previous}
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Mensagens enviadas"
+                value={formatInt(kpis.sent.value)}
+                current={kpis.sent.value}
+                previous={kpis.sent.previous}
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Entregues"
+                value={formatInt(kpis.delivered.value)}
+                sub={formatPctValue(kpis.delivered.rate)}
+                current={kpis.delivered.value}
+                previous={kpis.delivered.previous}
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Lidas"
+                value={formatInt(kpis.read.value)}
+                sub={formatPctValue(kpis.read.rate)}
+                current={kpis.read.value}
+                previous={kpis.read.previous}
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Taxa de entrega"
+                value={formatPctValue(kpis.delivered.rate)}
+                current={kpis.delivered.rate}
+                previous={kpis.delivered.ratePrevious}
+                kind="pp"
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Taxa de leitura"
+                value={formatPctValue(kpis.read.rate)}
+                current={kpis.read.rate}
+                previous={kpis.read.ratePrevious}
+                kind="pp"
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Respostas"
+                value={formatInt(kpis.replied.value)}
+                sub={formatPctValue(kpis.replied.rate)}
+                current={kpis.replied.value}
+                previous={kpis.replied.previous}
+                showComparison={compare}
+              />
+              <KpiTile
+                label="Falhas de envio"
+                value={formatInt(kpis.failed.value)}
+                sub={
+                  kpis.frequencyCapped.value > 0
+                    ? `${formatInt(kpis.frequencyCapped.value)} por limite`
+                    : undefined
+                }
+                current={kpis.failed.value}
+                previous={kpis.failed.previous}
+                invert
+                showComparison={compare}
+              />
+            </div>
+
+            <Card className="mt-6">
+              <CardHeader className="flex-row items-center justify-between">
+                <CardTitle>
+                  Entregas e leituras ao longo do tempo
+                  {focusName ? (
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      · {focusName}
+                    </span>
+                  ) : null}
+                </CardTitle>
+                {focusId ? (
+                  <button
+                    type="button"
+                    onClick={() => setFocusId(null)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Ver todas as campanhas
+                  </button>
+                ) : null}
+              </CardHeader>
+              <CardContent>
+                <EngagementChart
+                  series={series.map((p) => ({
+                    date: p.date,
+                    primary: p.delivered,
+                    secondary: p.read,
+                  }))}
+                  labels={{ primary: "Entregues", secondary: "Lidas" }}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle>Desempenho por campanha</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <WhatsAppTable
+                  rows={waData?.campaigns ?? []}
+                  selectedId={focusId}
+                  onSelect={setFocusId}
+                />
+              </CardContent>
+            </Card>
+          </>
+        ) : null}
+
+        {footer}
+      </>
+    );
+  }
+
+  // ─── E-mail: campanhas e Avante News ─────────────────────────────────
   const kpis = data?.kpis;
   const chartSeries =
     focusId && data?.seriesByCampaign[focusId]
@@ -116,70 +417,24 @@ export function ReportsClient() {
   const focusName = focusId
     ? (data?.campaigns.find((c) => c.id === focusId)?.name ?? null)
     : null;
+  const isNews = scope === "news";
 
   return (
     <>
-      <PageHeader
-        title="Relatórios"
-        description="Desempenho das campanhas de e-mail marketing."
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={load}
-          disabled={loading}
-        >
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-          Atualizar
-        </Button>
-      </PageHeader>
-
-      <ReportsFilters
-        preset={preset}
-        onPreset={setPreset}
-        from={from}
-        to={to}
-        onCustomFrom={setCustomFrom}
-        onCustomTo={setCustomTo}
-        options={options}
-        selectedIds={campaignIds}
-        onToggleCampaign={(id) =>
-          setCampaignIds((cur) =>
-            cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
-          )
-        }
-        onClearCampaigns={() => setCampaignIds([])}
-        compare={compare}
-        onCompare={setCompare}
-      />
-
-      {error ? (
-        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
-          {error}
-        </div>
-      ) : null}
+      {header}
 
       {loading && !data ? (
         <div className="py-20 text-center text-sm text-muted-foreground">
           Carregando métricas...
         </div>
       ) : kpis && kpis.sent.value === 0 && kpis.campaigns.value === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center">
-            <p className="font-medium">Sem dados no período</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Nenhuma campanha foi enviada entre {from.split("-").reverse().join("/")}{" "}
-              e {to.split("-").reverse().join("/")}. Ajuste o período ou dispare
-              uma campanha.
-            </p>
-          </CardContent>
-        </Card>
+        emptyState
       ) : kpis ? (
         <>
           {/* KPIs */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiTile
-              label="Campanhas"
+              label={isNews ? "Edições enviadas" : "Campanhas"}
               value={formatInt(kpis.campaigns.value)}
               current={kpis.campaigns.value}
               previous={kpis.campaigns.previous}
@@ -265,36 +520,41 @@ export function ReportsClient() {
                   onClick={() => setFocusId(null)}
                   className="text-xs text-primary hover:underline"
                 >
-                  Ver todas as campanhas
+                  {isNews ? "Ver todas as edições" : "Ver todas as campanhas"}
                 </button>
               ) : null}
             </CardHeader>
             <CardContent>
-              <EngagementChart series={chartSeries} />
+              <EngagementChart
+                series={chartSeries.map((p) => ({
+                  date: p.date,
+                  primary: p.opened,
+                  secondary: p.clicked,
+                }))}
+              />
             </CardContent>
           </Card>
 
           {/* Tabela */}
           <Card className="mt-6">
             <CardHeader>
-              <CardTitle>Desempenho por campanha</CardTitle>
+              <CardTitle>
+                {isNews ? "Desempenho por edição" : "Desempenho por campanha"}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <CampaignTable
-                rows={data.campaigns}
+                rows={data?.campaigns ?? []}
                 selectedId={focusId}
                 onSelect={setFocusId}
+                nameLabel={isNews ? "Edição" : "Campanha"}
               />
             </CardContent>
           </Card>
         </>
       ) : null}
 
-      {data ? (
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          Última atualização: {timeFmt.format(new Date(data.generatedAt))}
-        </p>
-      ) : null}
+      {footer}
     </>
   );
 }
