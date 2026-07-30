@@ -18,6 +18,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { ResendButton } from "@/components/reports/resend-button";
 import {
   CampaignStatusBadge,
   SendStatusBadge,
@@ -51,6 +52,11 @@ import {
 } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { campaignCost } from "@/lib/pricing";
+import {
+  describeSendOutcome,
+  describeWhatsAppError,
+  isResendableErrorCode,
+} from "@/lib/whatsapp/errors";
 
 /**
  * Relatório de um disparo (campanha ou edição do Avante News). É o mesmo
@@ -113,6 +119,10 @@ export async function SendReport({
 
   const isWhatsApp = campaign.channel === "whatsapp";
   const isNews = campaign.kind === "news";
+  // Envios que a Meta segurou por frequência/vazão: dá para reenviar depois.
+  const resendable = sends.filter(
+    (s) => s.status === "failed" && isResendableErrorCode(s.errorCode)
+  ).length;
   const pending = sends.filter((s) => s.status === "pending").length;
   const failed = sends.filter((s) => s.status === "failed").length;
 
@@ -169,6 +179,12 @@ export async function SendReport({
     const cost = campaignCost({
       channel: "whatsapp",
       chargeable: delivered,
+      whatsappCategory,
+    });
+    // Tarifa de uma mensagem, para avisar o custo antes de reenviar.
+    const unitCost = campaignCost({
+      channel: "whatsapp",
+      chargeable: 1,
       whatsappCategory,
     });
 
@@ -231,6 +247,28 @@ export async function SendReport({
           />
         </div>
 
+        {resendable > 0 ? (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-accent/50 px-4 py-3">
+            <p className="text-sm">
+              <span className="font-medium">
+                {resendable === 1
+                  ? "1 contato não recebeu"
+                  : `${resendable} contatos não receberam`}
+              </span>{" "}
+              porque a Meta segurou a mensagem por limite de frequência. Não é
+              falha técnica e não houve cobrança — dá para reenviar só para
+              eles quando o limite liberar.
+            </p>
+            <ResendButton
+              endpoint={`/api/campaigns/${campaign.id}/resend`}
+              count={resendable}
+              costHint={`${formatUsd(unitCost.usd)} (≈ ${formatBrl(
+                unitCost.brl
+              )}) por mensagem entregue`}
+            />
+          </div>
+        ) : null}
+
         <Card className="mt-6">
           {sends.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">
@@ -249,47 +287,61 @@ export async function SendReport({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sends.map((send) => (
-                  <TableRow key={send.id}>
-                    <TableCell>
-                      <p className="font-medium">{send.contactName}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {formatPhone(send.contactPhone)}
-                        {send.contactCompany ? ` · ${send.contactCompany}` : ""}
-                      </p>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <SendStatusBadge status={send.status} />
-                        {send.status === "failed" && send.errorCode ? (
-                          <Badge
-                            variant={
-                              send.errorCode === "131049"
-                                ? "warning"
-                                : "destructive"
-                            }
-                          >
-                            {send.errorCode === "131049"
-                              ? "Limite do destinatário"
-                              : `Erro ${send.errorCode}`}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(send.sentAt)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(send.deliveredAt)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(send.readAt)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(send.repliedAt)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {sends.map((send) => {
+                  // O que aconteceu, em uma frase — o selo sozinho não conta a
+                  // história (e "Erro 131049" não conta nada).
+                  const outcome = describeSendOutcome(
+                    send.status,
+                    send.errorCode,
+                    send.errorMessage
+                  );
+                  const erro =
+                    send.status === "failed"
+                      ? describeWhatsAppError(send.errorCode, send.errorMessage)
+                      : null;
+                  return (
+                    <TableRow key={send.id}>
+                      <TableCell>
+                        <p className="font-medium">{send.contactName}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatPhone(send.contactPhone)}
+                          {send.contactCompany
+                            ? ` · ${send.contactCompany}`
+                            : ""}
+                        </p>
+                      </TableCell>
+                      <TableCell className="max-w-sm">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <SendStatusBadge status={send.status} />
+                          {erro ? (
+                            <Badge variant={erro.tone}>{erro.label}</Badge>
+                          ) : null}
+                        </div>
+                        <p
+                          className={
+                            outcome.tone === "destructive"
+                              ? "mt-1 text-xs text-destructive-hover"
+                              : "mt-1 text-xs text-muted-foreground"
+                          }
+                        >
+                          {outcome.text}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(send.sentAt)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(send.deliveredAt)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(send.readAt)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(send.repliedAt)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
