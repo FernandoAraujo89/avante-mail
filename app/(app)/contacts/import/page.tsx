@@ -286,8 +286,10 @@ export default function ImportContactsPage() {
                 Colunas esperadas: name, email, company, tags, telefone,
                 aceita_whatsapp
                 <br />
-                (tags separadas por vírgula; aceita_whatsapp = sim/não, marque
-                sim só com consentimento do contato)
+                (tags separadas por vírgula. A coluna aceita_whatsapp é
+                opcional: sem ela, todo contato com telefone entra aceitando
+                WhatsApp; com ela, só quem estiver como sim/1/true aceita —
+                use-a para registrar quem não autorizou)
                 <br />
                 O telefone pode vir em qualquer formato com DDD (ex.: (31)
                 99576-8114 ou 31995768114). Se a célula tiver vários números

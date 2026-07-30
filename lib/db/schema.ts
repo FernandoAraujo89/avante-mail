@@ -86,9 +86,12 @@ export const contacts = pgTable("contacts", {
   company: text("company"),
   tags: text("tags").array(),
   subscribed: boolean("subscribed").notNull().default(true),
-  // Canal WhatsApp: telefone em E.164 (+5548…) e consentimento próprio.
-  // O opt-in de WhatsApp é separado do de e-mail (subscribed) — exigência da
-  // política da Meta e da LGPD; por isso o padrão é false.
+  // Canal WhatsApp: telefone em E.164 (+5548…) e consentimento próprio, separado
+  // do de e-mail (subscribed) — exigência da política da Meta e da LGPD.
+  // O padrão do PRODUTO é "sim": cadastro e importação já marcam o opt-in de
+  // quem tem telefone, e só um "não" explícito o remove (ver as rotas de
+  // contatos). O default da COLUNA continua false de propósito: é a rede de
+  // segurança para qualquer insert que não declare consentimento.
   phone: text("phone").unique(),
   whatsappSubscribed: boolean("whatsapp_subscribed").notNull().default(false),
   whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),

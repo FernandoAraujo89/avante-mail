@@ -24,7 +24,9 @@ export function ContactForm({ contactId }: { contactId?: string }) {
   const [company, setCompany] = useState("");
   const [tags, setTags] = useState("");
   const [subscribed, setSubscribed] = useState(true);
-  const [whatsappSubscribed, setWhatsappSubscribed] = useState(false);
+  // Contato novo já entra com consentimento de WhatsApp; quem não autorizou é
+  // que precisa ser desmarcado. Na edição, o valor salvo é quem manda (abaixo).
+  const [whatsappSubscribed, setWhatsappSubscribed] = useState(true);
   const [availableLists, setAvailableLists] = useState<ListOption[]>([]);
   const [listIds, setListIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(isEditing);
@@ -264,7 +266,7 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                 Aceita campanhas por WhatsApp
                 <span className="text-xs text-muted-foreground">
                   {phone.trim()
-                    ? "(marque só com consentimento do contato — LGPD)"
+                    ? "(desmarque se o contato não autorizou — LGPD)"
                     : "(informe o telefone para habilitar)"}
                 </span>
               </label>

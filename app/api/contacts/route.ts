@@ -220,7 +220,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Opt-in de WhatsApp só com telefone; registra a data (prova LGPD).
-    const whatsappSubscribed = body.whatsappSubscribed === true && phone !== null;
+    // O padrão é "sim": só um `false` explícito (a pessoa desmarcou a opção)
+    // tira o consentimento.
+    const whatsappSubscribed =
+      body.whatsappSubscribed !== false && phone !== null;
 
     const [created] = await db
       .insert(contacts)

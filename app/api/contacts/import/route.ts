@@ -107,14 +107,16 @@ export async function POST(request: NextRequest) {
           else seenPhones.add(phone);
         }
 
-        // Opt-in de WhatsApp só com telefone válido e coluna explícita de
-        // consentimento marcada como "sim" (LGPD).
+        // Opt-in de WhatsApp: quem tem telefone válido entra com consentimento.
+        // Se a planilha trouxer uma coluna de consentimento, ela é que manda —
+        // inclusive para negar (só "sim/true/1..." mantém o opt-in), que é como
+        // se registra quem não autorizou (LGPD).
         const whatsappOptIn =
           phone !== null &&
-          Boolean(mapping.whatsappOptIn) &&
-          TRUTHY.has(
-            (row[mapping.whatsappOptIn as string] ?? "").trim().toLowerCase()
-          );
+          (!mapping.whatsappOptIn ||
+            TRUTHY.has(
+              (row[mapping.whatsappOptIn as string] ?? "").trim().toLowerCase()
+            ));
 
         byEmail.set(email, {
           name,
