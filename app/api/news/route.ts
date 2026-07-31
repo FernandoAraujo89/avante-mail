@@ -98,6 +98,8 @@ export async function POST(request: NextRequest) {
             ? body.templateId
             : null,
         lists: [audience.id],
+        // A lista de colaboradores entra no disparo (resolvida lá), não aqui.
+        newsIncludeTeam: body.newsIncludeTeam === true,
         tagsFilter: null,
         design,
         mjmlContent,

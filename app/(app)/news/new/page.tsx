@@ -4,7 +4,7 @@ import { NewsWizard } from "@/components/news/news-wizard";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { resolveNewsList } from "@/lib/settings";
+import { resolveNewsList, resolveTeamList } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,11 @@ export default async function NewNewsPage({
   searchParams: Promise<{ id?: string; duplicate?: string }>;
 }) {
   const { id, duplicate } = await searchParams;
-  const audience = await resolveNewsList();
+  // A lista de colaboradores é opcional: sem ela, a opção não aparece.
+  const [audience, team] = await Promise.all([
+    resolveNewsList(),
+    resolveTeamList(),
+  ]);
 
   // Sem lista de parceiros White Label Ativos não existe Avante News.
   if (!audience) {
@@ -46,6 +50,7 @@ export default async function NewNewsPage({
     <NewsWizard
       key={id ?? duplicate ?? "new"}
       audience={audience}
+      team={team}
       editId={id}
       duplicateId={duplicate}
     />

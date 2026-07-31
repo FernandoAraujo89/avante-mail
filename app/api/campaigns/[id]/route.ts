@@ -121,6 +121,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if ("tagsFilter" in body && existing.kind !== "news") {
       updates.tagsFilter = normalizeTags(body.tagsFilter);
     }
+    // Só o Avante News tem a opção de incluir os colaboradores.
+    if ("newsIncludeTeam" in body && existing.kind === "news") {
+      updates.newsIncludeTeam = body.newsIncludeTeam === true;
+    }
     if ("recipientIds" in body && existing.kind !== "news") {
       // Ausente/nulo = todos os elegíveis; array (mesmo vazio) = escolha manual.
       updates.recipientIds = Array.isArray(body.recipientIds)

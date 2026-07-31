@@ -212,6 +212,9 @@ export const campaigns = pgTable("campaigns", {
   // "campaign" = campanha comum; "news" = edição do Avante News (sempre
   // e-mail, sempre para a lista de parceiros White Label Ativos).
   kind: text("kind").$type<CampaignKind>().notNull().default("campaign"),
+  // Só para kind = "news": além dos parceiros, manda também para a lista de
+  // colaboradores (resolveTeamList). Escolhido por edição, no wizard.
+  newsIncludeTeam: boolean("news_include_team").notNull().default(false),
   whatsappTemplateId: uuid("whatsapp_template_id").references(
     () => whatsappTemplates.id,
     { onDelete: "set null" }

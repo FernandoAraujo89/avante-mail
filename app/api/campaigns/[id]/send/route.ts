@@ -19,7 +19,7 @@ import {
   type Campaign,
 } from "@/lib/db";
 import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
-import { resolveNewsList } from "@/lib/settings";
+import { resolveNewsList, resolveTeamList } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { missingVariableSources } from "@/lib/whatsapp/variables";
@@ -239,6 +239,24 @@ export async function POST(_request: NextRequest, context: RouteContext) {
         );
       }
       targetLists = [audience.id];
+
+      // Opção da edição: manda também para os colaboradores. Se a lista sumiu
+      // depois que a opção foi marcada, falha em vez de enviar calado para
+      // menos gente do que o usuário pediu.
+      if (campaign.newsIncludeTeam) {
+        const team = await resolveTeamList();
+        if (!team) {
+          return NextResponse.json(
+            {
+              error:
+                "Esta edição inclui os colaboradores, mas não há lista de colaboradores definida. Escolha a lista em Avante News ou desmarque a opção.",
+            },
+            { status: 400 }
+          );
+        }
+        targetLists = [audience.id, team.id];
+      }
+
       await db
         .update(campaigns)
         .set({ lists: targetLists })

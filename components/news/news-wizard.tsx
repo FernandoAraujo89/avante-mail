@@ -59,6 +59,8 @@ type WizardData = {
   scheduledAt: string;
   templateId: string;
   design: EmailDesign | null;
+  /** Manda também para a lista de colaboradores, além dos parceiros. */
+  newsIncludeTeam: boolean;
 };
 
 const EMPTY_DATA: WizardData = {
@@ -68,6 +70,7 @@ const EMPTY_DATA: WizardData = {
   scheduledAt: "",
   templateId: "",
   design: null,
+  newsIncludeTeam: false,
 };
 
 // Sem passo de destinatários: o Avante News vai sempre para a lista de
@@ -90,10 +93,13 @@ function toLocalInputValue(iso: string | null): string {
 
 export function NewsWizard({
   audience,
+  team,
   editId,
   duplicateId,
 }: {
   audience: NewsAudience;
+  /** Lista de colaboradores; null = não existe, e a opção não aparece. */
+  team: NewsAudience | null;
   editId?: string;
   duplicateId?: string;
 }) {
@@ -168,6 +174,7 @@ export function NewsWizard({
           scheduledAt: duplicateId ? "" : toLocalInputValue(json.scheduledAt),
           templateId: json.templateId ?? "",
           design,
+          newsIncludeTeam: json.newsIncludeTeam === true,
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -234,10 +241,15 @@ export function NewsWizard({
 
     (async () => {
       try {
+        // Com os colaboradores marcados, a contagem soma as duas listas —
+        // quem está nas duas é contado uma vez só (o filtro é por contato).
         const params = new URLSearchParams({
           count: "true",
           subscribed: "true",
-          lists: audience.id,
+          lists: [
+            audience.id,
+            ...(data.newsIncludeTeam && team ? [team.id] : []),
+          ].join(","),
         });
         const res = await fetch(`/api/contacts?${params.toString()}`);
         const json = await res.json();
@@ -250,7 +262,7 @@ export function NewsWizard({
     return () => {
       cancelled = true;
     };
-  }, [step, audience.id]);
+  }, [step, audience.id, data.newsIncludeTeam, team]);
 
   function update(patch: Partial<WizardData>) {
     setData((current) => ({ ...current, ...patch }));
@@ -311,6 +323,7 @@ export function NewsWizard({
       scheduledAt: data.scheduledAt
         ? new Date(data.scheduledAt).toISOString()
         : null,
+      newsIncludeTeam: data.newsIncludeTeam,
     };
   }
 
@@ -464,6 +477,12 @@ export function NewsWizard({
     Boolean(data.scheduledAt) &&
     new Date(data.scheduledAt).getTime() > Date.now();
 
+  // Para onde a edição vai, em texto — usado na confirmação do disparo.
+  const destinoLabel =
+    data.newsIncludeTeam && team
+      ? `${audience.name} e ${team.name}`
+      : audience.name;
+
   if (initializing) {
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
@@ -587,10 +606,40 @@ export function NewsWizard({
                     {audience.name}
                   </span>{" "}
                   ({audience.contactCount} contato
-                  {audience.contactCount === 1 ? "" : "s"}) — o destinatário do
-                  Avante News é sempre a lista de parceiros White Label Ativos.
+                  {audience.contactCount === 1 ? "" : "s"}) — a lista de
+                  parceiros White Label Ativos é o público padrão do Avante
+                  News.
                 </span>
               </div>
+
+              {team ? (
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-4 py-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={data.newsIncludeTeam}
+                    onChange={(e) =>
+                      update({ newsIncludeTeam: e.target.checked })
+                    }
+                    className="mt-0.5 size-4 accent-[#1D50DC]"
+                  />
+                  <span>
+                    Enviar também para{" "}
+                    <span className="font-medium">{team.name}</span> (
+                    {team.contactCount} contato
+                    {team.contactCount === 1 ? "" : "s"})
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Os colaboradores recebem a mesma edição. Quem estiver nas
+                      duas listas recebe uma vez só.
+                    </span>
+                  </span>
+                </label>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Para enviar também aos colaboradores, crie uma lista com
+                  &quot;colaboradores&quot; no nome em{" "}
+                  <span className="font-medium">Listas</span>.
+                </p>
+              )}
             </CardContent>
           </Card>
         ) : null}
@@ -730,7 +779,13 @@ export function NewsWizard({
                         label: "Modelo de origem",
                         value: originTemplate?.name ?? "Começado do zero",
                       },
-                      { label: "Lista", value: audience.name },
+                      {
+                        label: "Listas",
+                        value:
+                          data.newsIncludeTeam && team
+                            ? `${audience.name} + ${team.name}`
+                            : audience.name,
+                      },
                       {
                         label: "Envio",
                         value: isScheduled
@@ -757,8 +812,10 @@ export function NewsWizard({
                     </div>
                   </dl>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    Parceiros da lista {audience.name} que continuam inscritos —
-                    descadastrados são excluídos automaticamente.
+                    {data.newsIncludeTeam && team
+                      ? `Contatos de ${audience.name} e ${team.name} que continuam inscritos`
+                      : `Parceiros da lista ${audience.name} que continuam inscritos`}{" "}
+                    — descadastrados são excluídos automaticamente.
                   </p>
                 </CardContent>
               </Card>
@@ -949,12 +1006,12 @@ export function NewsWizard({
               {isScheduled
                 ? `"${data.name}" será enviada para ${
                     recipientCount ?? "—"
-                  } parceiros de ${audience.name} em ${new Date(
+                  } contatos de ${destinoLabel} em ${new Date(
                     data.scheduledAt
                   ).toLocaleString("pt-BR")}.`
                 : `O Avante News será enviado agora para ${
                     recipientCount ?? "—"
-                  } parceiros de ${audience.name}. Essa ação não pode ser desfeita.`}
+                  } contatos de ${destinoLabel}. Essa ação não pode ser desfeita.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
