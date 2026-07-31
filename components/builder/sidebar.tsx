@@ -382,12 +382,14 @@ function BlockInspector({
       {block.type === "text" ? (
         <>
           <p className="text-xs text-muted-foreground">
-            Edite o texto direto no e-mail. Selecione um trecho e use
-            negrito/itálico/link na barra do bloco. Variáveis:{" "}
+            Edite o texto direto no e-mail. Selecione um trecho e use a barra do
+            bloco para negrito/itálico/link, aumentar ou diminuir a fonte só
+            daquele trecho, ou limpar a formatação. Texto colado de fora entra
+            com a tipografia do e-mail. Variáveis:{" "}
             {"{{nome_parceiro}}, {{titulo}}, {{subtitulo}}, {{corpo}}"}.
           </p>
           <NumberField
-            label="Tamanho da fonte"
+            label="Tamanho da fonte (bloco todo)"
             value={block.attrs.fontSize}
             min={8}
             max={60}

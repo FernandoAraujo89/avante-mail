@@ -2,6 +2,8 @@
 
 import { Fragment, useState } from "react";
 import {
+  AArrowDown,
+  AArrowUp,
   Bold,
   Bookmark,
   ChevronDown,
@@ -14,12 +16,14 @@ import {
   Minus,
   MousePointerClick,
   MoveVertical,
+  RemoveFormatting,
   Share2,
   Trash2,
   Type,
   Underline,
 } from "lucide-react";
 
+import { limparHtmlColado, textoParaHtml } from "@/lib/email-builder/paste";
 import { BLOCK_LABELS } from "@/lib/email-builder/presets";
 import type {
   Block,
@@ -122,6 +126,98 @@ function ToolbarButton({
 
 function exec(command: string, value?: string) {
   document.execCommand(command, false, value);
+}
+
+// Nota: o tipo `Selection` deste arquivo é o de blocos selecionados e sombreia
+// o do DOM — por isso estas funções leem a seleção do navegador sem anotá-la.
+
+/** Elemento onde a seleção do navegador começa. */
+function elementoDaSelecao(): HTMLElement | null {
+  const node = window.getSelection()?.anchorNode ?? null;
+  if (node instanceof HTMLElement) return node;
+  return node?.parentElement ?? null;
+}
+
+/** Bloco editável que contém a seleção atual. */
+function editavelDaSelecao(): HTMLElement | null {
+  return (
+    elementoDaSelecao()?.closest<HTMLElement>('[contenteditable="true"]') ?? null
+  );
+}
+
+/**
+ * Elemento de onde ler/atualizar o tamanho da fonte. Quando a seleção envolve
+ * um elemento inteiro (o que acontece depois de aplicar um tamanho), a âncora
+ * é o bloco PAI — medir nele leria o tamanho do bloco, e os cliques seguintes
+ * não acumulariam. Aqui o span de dentro tem precedência.
+ */
+function elementoParaMedir(): HTMLElement | null {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    const inicio = range.startContainer;
+    if (inicio instanceof HTMLElement) {
+      const filho = inicio.childNodes[range.startOffset];
+      if (filho instanceof HTMLElement) return filho;
+    }
+  }
+  return elementoDaSelecao();
+}
+
+/**
+ * Tamanho de fonte do TRECHO selecionado. O execCommand("fontSize") só aceita
+ * os tamanhos legados 1–7 e gera <font size="7">; trocamos por um <span> com o
+ * tamanho real em px, que é o que o e-mail entende.
+ */
+function aplicarTamanho(px: number) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const raiz = editavelDaSelecao();
+  if (!raiz) return;
+
+  // Clique repetido no mesmo trecho: atualiza o span que já existe. Sem isto
+  // eles se aninhariam, e o span de DENTRO (o tamanho antigo) venceria.
+  const range = sel.getRangeAt(0);
+  const existente = elementoParaMedir()?.closest<HTMLElement>("span[style]");
+  if (
+    existente &&
+    existente !== raiz &&
+    raiz.contains(existente) &&
+    existente.style.fontSize &&
+    range.toString() === existente.textContent
+  ) {
+    existente.style.fontSize = `${px}px`;
+    return;
+  }
+
+  exec("fontSize", "7");
+  const novos: HTMLElement[] = [];
+  for (const fonte of Array.from(raiz.querySelectorAll('font[size="7"]'))) {
+    const span = document.createElement("span");
+    span.style.fontSize = `${px}px`;
+    span.innerHTML = fonte.innerHTML;
+    fonte.replaceWith(span);
+    novos.push(span);
+  }
+
+  // Trocar o elemento apaga a seleção — devolvê-la deixa clicar de novo para
+  // continuar aumentando/diminuindo.
+  if (novos.length > 0) {
+    const novoRange = document.createRange();
+    novoRange.setStartBefore(novos[0]);
+    novoRange.setEndAfter(novos[novos.length - 1]);
+    sel.removeAllRanges();
+    sel.addRange(novoRange);
+  }
+}
+
+/** Aumenta/diminui o tamanho do trecho selecionado a partir do atual. */
+function ajustarTamanho(delta: number) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const el = elementoParaMedir();
+  const atual = el ? parseFloat(window.getComputedStyle(el).fontSize) || 16 : 16;
+  aplicarTamanho(Math.min(72, Math.max(8, Math.round(atual + delta))));
 }
 
 /** Alça de arrastar (blocos e linhas). */
@@ -298,6 +394,33 @@ function BlockToolbar({
           >
             <Link2 />
           </ToolbarButton>
+          <ToolbarButton
+            label="Diminuir a fonte do trecho selecionado"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              ajustarTamanho(-2);
+            }}
+          >
+            <AArrowDown />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Aumentar a fonte do trecho selecionado"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              ajustarTamanho(2);
+            }}
+          >
+            <AArrowUp />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Limpar formatação do trecho selecionado"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              exec("removeFormat");
+            }}
+          >
+            <RemoveFormatting />
+          </ToolbarButton>
           <span className="mx-0.5 h-4 w-px bg-border" />
         </>
       ) : null}
@@ -355,6 +478,18 @@ function BlockView({
             fontFamily: settings.fontFamily,
             outline: "none",
             wordBreak: "break-word",
+          }}
+          onPaste={(e) => {
+            // Sem isto o navegador insere o HTML da ORIGEM (fontes, tamanhos,
+            // <p> aninhados), que quebra o layout, ignora a tipografia do
+            // e-mail e ainda vai parar no <mj-text> do envio.
+            e.preventDefault();
+            const html = e.clipboardData.getData("text/html");
+            const texto = e.clipboardData.getData("text/plain");
+            const limpo = html
+              ? limparHtmlColado(html)
+              : textoParaHtml(texto);
+            if (limpo) exec("insertHTML", limpo);
           }}
           onBlur={(e) => onTextCommit(e.currentTarget.innerHTML)}
           dangerouslySetInnerHTML={{ __html: block.html }}
