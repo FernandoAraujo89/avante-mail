@@ -23,7 +23,7 @@ echo "→ Build da imagem, migrações e subida dos contêineres..."
 # O `|| exit 1` no loop é obrigatório: sem ele, só o status da ÚLTIMA
 # migração contaria e falhas anteriores passariam em silêncio.
 ssh "$SERVER" "cd $DIR \
-  && sed -i 's|^NEXT_PUBLIC_BASE_URL=.*$|NEXT_PUBLIC_BASE_URL=https://mail.avantetools.com.br|' .env.local \
+  && sed -i 's|^NEXT_PUBLIC_BASE_URL=.*$|NEXT_PUBLIC_BASE_URL=https://campanhas.avantetools.com.br|' .env.local \
   && docker compose build \
   && docker compose up -d --wait db redis \
   && for m in scripts/migrate-*.ts; do \
@@ -45,4 +45,4 @@ echo "  FALHA: app não respondeu saudável em 60s"
 cd /root/avante-mail && docker compose logs --tail 30 app
 exit 1'
 
-echo "✓ Deploy concluído — https://mail.avantetools.com.br"
+echo "✓ Deploy concluído — https://campanhas.avantetools.com.br"
