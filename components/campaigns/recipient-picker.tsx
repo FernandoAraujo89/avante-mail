@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 
+import {
+  NumberFilterDialog,
+  type NumberFilterResult,
+} from "@/components/campaigns/number-filter-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -52,6 +56,9 @@ export function RecipientPicker({
   const [error, setError] = useState("");
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [page, setPage] = useState(1);
+  // Resumo do último filtro por lista de números, para o usuário não perder de
+  // vista o que a seleção atual significa depois de fechar a janela.
+  const [filtro, setFiltro] = useState<NumberFilterResult | null>(null);
 
   // Callbacks e valor por ref: a lista só é recarregada quando o público muda
   // (canal/listas/tags), não a cada clique numa linha.
@@ -193,12 +200,24 @@ export function RecipientPicker({
             </>
           )}
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {channel === "whatsapp" ? (
+            <NumberFilterDialog
+              contacts={contacts}
+              onApply={(ids, resultado) => {
+                onChange(ids);
+                setFiltro(resultado);
+              }}
+            />
+          ) : null}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => onChange(null)}
+            onClick={() => {
+              onChange(null);
+              setFiltro(null);
+            }}
             disabled={contacts === null || value === null}
           >
             Selecionar todos
@@ -207,13 +226,37 @@ export function RecipientPicker({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => onChange([])}
+            onClick={() => {
+              onChange([]);
+              setFiltro(null);
+            }}
             disabled={contacts === null || selectedCount === 0}
           >
             Desmarcar todos
           </Button>
         </div>
       </div>
+
+      {filtro ? (
+        <p className="rounded-lg border border-border bg-accent/50 px-3 py-2 text-xs">
+          Filtrado por lista de números:{" "}
+          <span className="font-medium">
+            {filtro.encontrados} de {filtro.total}
+          </span>{" "}
+          encontrados
+          {filtro.naoEncontrados.length > 0 ? (
+            <>
+              {" "}
+              ·{" "}
+              <span className="font-medium text-destructive-hover">
+                {filtro.naoEncontrados.length} não encontrado
+                {filtro.naoEncontrados.length === 1 ? "" : "s"}
+              </span>{" "}
+              (abra o filtro para ver quais)
+            </>
+          ) : null}
+        </p>
+      ) : null}
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
