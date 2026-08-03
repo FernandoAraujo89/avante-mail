@@ -1,0 +1,182 @@
+import type {
+  AutomationStepType,
+  AutomationStatus,
+  AutomationTriggerType,
+} from "@/lib/db/schema";
+import type { StepDraft, TriggerDraft } from "@/lib/automations/arvore";
+
+// Rótulos e resumos em português da tela de automações. Um lugar só: o cartão
+// do passo, o painel lateral e a lista mostram o mesmo texto.
+
+export const STATUS_LABEL: Record<AutomationStatus, string> = {
+  draft: "Rascunho",
+  active: "Ativa",
+  paused: "Pausada",
+  archived: "Arquivada",
+};
+
+export const STEP_LABEL: Record<AutomationStepType, string> = {
+  send_email: "Enviar e-mail",
+  send_whatsapp: "Enviar WhatsApp",
+  wait: "Aguardar",
+  if_else: "Se/Então",
+  add_tag: "Adicionar tag",
+  remove_tag: "Remover tag",
+  subscribe_list: "Inscrever na lista",
+  unsubscribe_list: "Cancelar inscrição na lista",
+  update_field: "Atualizar campo",
+  webhook: "Webhook",
+  end: "Fim",
+};
+
+/** Tipos oferecidos no "+", agrupados como no plano. */
+export const STEP_MENU: { grupo: string; tipos: AutomationStepType[] }[] = [
+  { grupo: "Envio", tipos: ["send_email", "send_whatsapp"] },
+  { grupo: "Fluxo", tipos: ["wait", "if_else", "end"] },
+  {
+    grupo: "Contato",
+    tipos: ["add_tag", "remove_tag", "subscribe_list", "unsubscribe_list"],
+  },
+];
+
+export const TRIGGER_LABEL: Record<AutomationTriggerType, string> = {
+  tag_added: "Tag adicionada",
+  tag_removed: "Tag removida",
+  list_subscribed: "Inscrito na lista",
+  list_unsubscribed: "Inscrição cancelada",
+  contact_created: "Contato criado",
+  email_opened: "E-mail aberto",
+  email_clicked: "Link clicado",
+  whatsapp_replied: "Respondeu no WhatsApp",
+  manual: "Manual",
+};
+
+/** Gatilhos que o motor realmente consome hoje (fase 1 do plano). */
+export const TRIGGER_TYPES_DISPONIVEIS: AutomationTriggerType[] = [
+  "tag_added",
+  "tag_removed",
+  "list_subscribed",
+  "list_unsubscribed",
+  "contact_created",
+];
+
+export const CONDITION_LABEL: Record<string, string> = {
+  has_tag: "Tem a tag",
+  in_list: "Está na lista",
+  email_opened: "Abriu o e-mail",
+  email_clicked: "Clicou no e-mail",
+  whatsapp_replied: "Respondeu no WhatsApp",
+  whatsapp_subscribed: "Aceita WhatsApp",
+  field_equals: "Campo é igual a",
+};
+
+export const FIELD_LABEL: Record<string, string> = {
+  name: "Nome",
+  email: "E-mail",
+  company: "Empresa",
+  phone: "Telefone",
+};
+
+/** Nomes que o resumo precisa para não mostrar uuid na tela. */
+export interface Catalogo {
+  lists: { id: string; name: string }[];
+  templates: { id: string; name: string }[];
+  waTemplates: { id: string; name: string }[];
+}
+
+const VAZIO: Catalogo = { lists: [], templates: [], waTemplates: [] };
+
+function nome(itens: { id: string; name: string }[], id: unknown): string {
+  const achado = itens.find((i) => i.id === id);
+  return achado?.name ?? "—";
+}
+
+function texto(valor: unknown): string {
+  return typeof valor === "string" ? valor.trim() : "";
+}
+
+/** "2 dias e 3 horas" a partir do config do Aguardar. */
+export function resumoDaEspera(config: Record<string, unknown>): string {
+  const partes: string[] = [];
+  const dias = Number(config.days ?? 0);
+  const horas = Number(config.hours ?? 0);
+  const minutos = Number(config.minutes ?? 0);
+  if (dias > 0) partes.push(`${dias} ${dias === 1 ? "dia" : "dias"}`);
+  if (horas > 0) partes.push(`${horas} ${horas === 1 ? "hora" : "horas"}`);
+  if (minutos > 0)
+    partes.push(`${minutos} ${minutos === 1 ? "minuto" : "minutos"}`);
+  if (partes.length === 0) return "sem tempo definido";
+  return partes.join(" e ");
+}
+
+export function resumoDaCondicao(
+  cond: Record<string, unknown>,
+  catalogo: Catalogo = VAZIO
+): string {
+  const rotulo = CONDITION_LABEL[String(cond.type)] ?? String(cond.type);
+  const nao = cond.negate ? "não " : "";
+  switch (cond.type) {
+    case "has_tag":
+      return `${nao}tem a tag "${texto(cond.tag) || "—"}"`;
+    case "in_list":
+      return `${nao}está na lista ${nome(catalogo.lists, cond.listId)}`;
+    case "field_equals":
+      return `${FIELD_LABEL[String(cond.field)] ?? "campo"} ${nao ? "≠" : "="} "${texto(cond.value)}"`;
+    default:
+      return `${nao}${rotulo.toLowerCase()}`;
+  }
+}
+
+/** Uma linha por passo, do jeito que aparece no cartão da árvore. */
+export function resumoDoPasso(
+  step: StepDraft,
+  catalogo: Catalogo = VAZIO
+): string {
+  const c = step.config ?? {};
+  switch (step.type) {
+    case "wait":
+      return resumoDaEspera(c);
+    case "add_tag":
+    case "remove_tag":
+      return texto(c.tag) ? `"${texto(c.tag)}"` : "sem tag definida";
+    case "subscribe_list":
+    case "unsubscribe_list":
+      return texto(c.listId) ? nome(catalogo.lists, c.listId) : "sem lista definida";
+    case "send_email":
+      return texto(c.subject) || "sem assunto definido";
+    case "send_whatsapp":
+      return texto(c.whatsappTemplateId)
+        ? nome(catalogo.waTemplates, c.whatsappTemplateId)
+        : "sem modelo definido";
+    case "if_else": {
+      const conds = Array.isArray(c.conditions) ? c.conditions : [];
+      if (conds.length === 0) return "sem condição definida";
+      const juncao = c.match === "any" ? " ou " : " e ";
+      return conds
+        .map((cond) => resumoDaCondicao(cond as Record<string, unknown>, catalogo))
+        .join(juncao);
+    }
+    case "end":
+      return "encerra o percurso";
+    default:
+      return "";
+  }
+}
+
+export function resumoDoGatilho(
+  trigger: TriggerDraft,
+  catalogo: Catalogo = VAZIO
+): string {
+  const rotulo = TRIGGER_LABEL[trigger.type] ?? trigger.type;
+  const c = trigger.config ?? {};
+  switch (trigger.type) {
+    case "tag_added":
+    case "tag_removed":
+      return `${rotulo}: "${texto(c.tag) || "—"}"`;
+    case "list_subscribed":
+    case "list_unsubscribed":
+      return `${rotulo}: ${nome(catalogo.lists, c.listId)}`;
+    default:
+      return rotulo;
+  }
+}

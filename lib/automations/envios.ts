@@ -53,14 +53,12 @@ export function lerConfigDeEmail(config: Record<string, unknown> | null): {
 } {
   const c = config ?? {};
   const subject = texto(c.subject);
-  if (!subject) throw new Error("passo de e-mail sem assunto configurado");
+  if (!subject) throw new Error("Defina o assunto do e-mail.");
 
   const mjmlContent = texto(c.mjmlContent);
   const templateId = texto(c.templateId);
   if (!mjmlContent && !templateId) {
-    throw new Error(
-      "passo de e-mail sem conteúdo: defina mjmlContent ou templateId no config"
-    );
+    throw new Error("Monte o e-mail deste passo ou escolha um modelo.");
   }
 
   return {
@@ -83,7 +81,7 @@ export function lerConfigDeWhatsApp(config: Record<string, unknown> | null): {
   const c = config ?? {};
   const whatsappTemplateId = texto(c.whatsappTemplateId);
   if (!whatsappTemplateId) {
-    throw new Error("passo de WhatsApp sem modelo configurado");
+    throw new Error("Escolha o modelo de WhatsApp deste passo.");
   }
   return {
     whatsappTemplateId,

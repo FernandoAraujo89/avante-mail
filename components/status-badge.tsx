@@ -1,5 +1,9 @@
 import { Badge } from "@/components/ui/badge";
-import type { CampaignStatus, SendStatus } from "@/lib/db/schema";
+import type {
+  AutomationStatus,
+  CampaignStatus,
+  SendStatus,
+} from "@/lib/db/schema";
 
 const CAMPAIGN_STATUS: Record<
   CampaignStatus,
@@ -44,5 +48,20 @@ export function sendStatusLabel(status: string): string {
 
 export function SendStatusBadge({ status }: { status: SendStatus }) {
   const config = SEND_STATUS[status] ?? SEND_STATUS.pending;
+  return <Badge variant={config.variant}>{config.label}</Badge>;
+}
+
+const AUTOMATION_STATUS: Record<
+  AutomationStatus,
+  { label: string; variant: "secondary" | "success" | "warning" | "outline" }
+> = {
+  draft: { label: "Rascunho", variant: "secondary" },
+  active: { label: "Ativa", variant: "success" },
+  paused: { label: "Pausada", variant: "warning" },
+  archived: { label: "Arquivada", variant: "outline" },
+};
+
+export function AutomationStatusBadge({ status }: { status: AutomationStatus }) {
+  const config = AUTOMATION_STATUS[status] ?? AUTOMATION_STATUS.draft;
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }

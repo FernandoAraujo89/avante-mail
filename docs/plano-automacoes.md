@@ -8,17 +8,17 @@ ações sobre o contato.
 
 ## ▶ ESTADO ATUAL (03/08/2026)
 
-**Fases 0, 1 e 2 estão EM PRODUÇÃO; a 3 está pronta, aguardando deploy.**
-A próxima é a fase 4 (a tela) — e é a maior de todas.
+**Fases 0, 1 e 2 estão EM PRODUÇÃO; a 3 e a 4 estão prontas, aguardando
+deploy.** Falta só a fase 5 (relatórios).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | 0 — Eventos | ✅ produção | `4bd0c62` |
 | 1 — Motor | ✅ produção | `2f9d39d` |
 | 2 — Envios | ✅ produção | `fcbfa1d` |
-| 3 — Se/Então | ✅ pronta (falta deploy) | |
-| 4 — Tela | ⬜ próxima | |
-| 5 — Relatórios | ⬜ | |
+| 3 — Se/Então | ✅ pronta (falta deploy) | `531360b` |
+| 4 — Tela | ✅ pronta (falta deploy) | |
+| 5 — Relatórios | ⬜ próxima | |
 
 **O que já roda:** `contact_events` registra o que muda no contato (7 pontos
 instrumentados); `worker/automation-worker.ts` consome os eventos, abre
@@ -108,6 +108,39 @@ foi parar nesse lado?" sem precisar reproduzir o percurso.
 "tem a tag vip? → +rota-vip, senão +rota-comum". Não envia nada — dá para
 exercitar os dois lados só mexendo nas tags.
 
+### A tela (fase 4)
+
+`/automations` lista e `/automations/[id]` edita. **Sem migração** — a fase 4 é
+só tela e API.
+
+- **Coluna vertical com "+" entre os passos**, e o Se/Então abrindo as colunas
+  "Sim" e "Não" (`components/automations/step-tree.tsx`). Nada de canvas livre:
+  o fluxo é um trilho, não um grafo — sem dependência nova, sem x/y para
+  guardar, e funciona no celular.
+- **Arrastar para reordenar** com `draggable` + `dataTransfer`, o mesmo padrão
+  nativo do Criador de e-mails. Dá para mover entre ramos; soltar um Se/Então
+  dentro do próprio ramo é recusado (viraria ciclo).
+- **Painel lateral** configura o passo selecionado, reaproveitando o
+  `DesignEditor` (e-mail do passo) e o `WhatsAppMessageStep` (modelo +
+  variáveis) das campanhas.
+- A coluna **termina no Se/Então**: como nada roda depois dele, a tela não
+  oferece "+" abaixo — e a validação acusa passo inalcançável se algum vier
+  por API.
+
+**Rascunho pela metade pode ser salvo; ativar é que exige fluxo válido.** Quem
+edita um fluxo grande não o termina de uma vez — mas automação erra em silêncio
+e em escala, então a hora de barrar é a de ligar. `lib/automations/validacao.ts`
+é a fonte única: as mesmas funções que o motor usa para ler o config (
+`lerConfigDeEmail`, `lerCondicoes`…) são as que validam a tela, então não existe
+"a tela deixou salvar e o motor recusou".
+
+Barrado na ativação: passo sem configuração, ramo vazio, passo inalcançável,
+**laço** (gatilho que casa com uma ação da própria automação) e o **teto de 5
+ativas** (`app_settings.automations_max_active`, mudável sem deploy).
+
+**Salvar uma automação em uso cria uma versão nova** — quem está no meio do
+fluxo termina pela versão em que entrou. Rascunho é reescrito no lugar.
+
 **Armadilhas já pagas (não repetir):**
 - O BullMQ **recusa `:` no jobId** — o identificador usa `__`.
 - Percurso recém-criado nasce com `next_run_at = agora` de propósito: se o
@@ -131,6 +164,12 @@ exercitar os dois lados só mexendo nas tags.
   de configuração, não característica do contato.
 - Se/Então **sem condição válida falha o percurso** em vez de assumir um lado.
   Chutar um ramo manda a mensagem errada para o grupo errado, calado.
+- Mudar o estado dentro do `dragstart` faz o Chrome **cancelar o arraste** — as
+  zonas de soltura só aparecem depois de um `setTimeout(…, 0)`. Mesma pedra já
+  paga no Criador de e-mails.
+- Os problemas mostrados na tela são os do **último salvamento** (a validação
+  vive no servidor, junto do motor). Editar limpa os avisos em vez de deixá-los
+  contradizendo o que o usuário acabou de corrigir.
 
 **O que ainda não aparece nas telas:** o histórico do contato e os relatórios
 por campanha continuam lendo só envios com campanha (`innerJoin`), então o

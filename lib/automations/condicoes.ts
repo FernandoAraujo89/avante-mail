@@ -63,7 +63,7 @@ export function lerCondicoes(
   const c = config ?? {};
   const bruto = Array.isArray(c.conditions) ? c.conditions : [];
   if (bruto.length === 0) {
-    throw new Error("passo Se/Então sem condição configurada");
+    throw new Error("Adicione ao menos uma condição ao Se/Então.");
   }
 
   const match = c.match === "any" ? "any" : "all";
@@ -72,17 +72,17 @@ export function lerCondicoes(
     const type = texto(cond.type) as AutomationConditionType;
     if (!AUTOMATION_CONDITION_TYPES.includes(type)) {
       throw new Error(
-        `condição ${i + 1} do Se/Então tem tipo desconhecido: "${cond.type}"`
+        `A condição ${i + 1} do Se/Então tem um tipo desconhecido: "${cond.type}".`
       );
     }
     if (type === "has_tag" && !texto(cond.tag)) {
-      throw new Error(`condição ${i + 1} do Se/Então sem tag`);
+      throw new Error(`Escolha a tag da condição ${i + 1}.`);
     }
     if (type === "in_list" && !texto(cond.listId)) {
-      throw new Error(`condição ${i + 1} do Se/Então sem lista`);
+      throw new Error(`Escolha a lista da condição ${i + 1}.`);
     }
     if (type === "field_equals" && !texto(cond.field)) {
-      throw new Error(`condição ${i + 1} do Se/Então sem campo`);
+      throw new Error(`Escolha o campo da condição ${i + 1}.`);
     }
     return {
       type,
