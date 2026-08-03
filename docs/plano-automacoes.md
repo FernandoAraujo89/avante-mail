@@ -124,8 +124,12 @@ só tela e API.
   `DesignEditor` (e-mail do passo) e o `WhatsAppMessageStep` (modelo +
   variáveis) das campanhas.
 - A coluna **termina no Se/Então**: como nada roda depois dele, a tela não
-  oferece "+" abaixo — e a validação acusa passo inalcançável se algum vier
-  por API.
+  oferece "+" abaixo. Um Se/Então inserido no MEIO da coluna leva os passos que
+  estavam abaixo dele para o lado "Sim" (com aviso na tela) — deixá-los onde
+  estavam criaria trecho morto, e apagá-los seria pior.
+- Passo inalcançável que já exista **aparece na tela**, apagado e com o motivo,
+  para poder ser arrastado ou removido. Esconder um passo que a validação acusa
+  deixa o usuário sem como consertar o que a mensagem está pedindo.
 
 **Rascunho pela metade pode ser salvo; ativar é que exige fluxo válido.** Quem
 edita um fluxo grande não o termina de uma vez — mas automação erra em silêncio

@@ -301,9 +301,18 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
                 catalogo={catalogo}
                 onSelect={setSelectedId}
                 onInsert={(destino: Destino, tipo: AutomationStepType) => {
-                  const { steps: novos, novo } = inserir(steps, destino, tipo);
+                  const { steps: novos, novo, herdados } = inserir(
+                    steps,
+                    destino,
+                    tipo
+                  );
                   mexeu(novos, setSteps);
                   setSelectedId(novo.id);
+                  if (herdados > 0) {
+                    setAviso(
+                      `Como nada roda depois de um Se/Então, ${herdados === 1 ? "o passo que estava" : `os ${herdados} passos que estavam`} abaixo dele ${herdados === 1 ? "foi" : "foram"} para o lado "Sim". Arraste para o "Não" o que precisar mudar de lado.`
+                    );
+                  }
                 }}
                 onRemove={(id) => {
                   mexeu(remover(steps, id), setSteps);

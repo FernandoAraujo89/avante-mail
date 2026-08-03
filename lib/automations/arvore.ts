@@ -100,7 +100,7 @@ export function inserir(
   steps: StepDraft[],
   destino: Destino,
   type: AutomationStepType
-): { steps: StepDraft[]; novo: StepDraft } {
+): { steps: StepDraft[]; novo: StepDraft; herdados: number } {
   const novo: StepDraft = {
     id: novoId(),
     parentId: destino.parentId,
@@ -110,7 +110,28 @@ export function inserir(
     type,
     config: configPadrao(type),
   };
-  return { steps: reindexar([...steps, novo]), novo };
+
+  let proximos = [...steps, novo];
+  let herdados = 0;
+
+  // Se/Então enfiado no MEIO da coluna: o que estava abaixo dele passa para o
+  // lado "Sim". Nada roda depois de um Se/Então, então deixar os passos onde
+  // estavam criaria trecho morto — e apagá-los seria pior. Assim o trabalho do
+  // usuário continua no fluxo, num lado que de fato executa.
+  if (type === "if_else") {
+    proximos = proximos.map((s) => {
+      const mesmoGrupo =
+        s.id !== novo.id &&
+        s.parentId === destino.parentId &&
+        s.branch === destino.branch &&
+        s.position >= destino.position;
+      if (!mesmoGrupo) return s;
+      herdados += 1;
+      return { ...s, parentId: novo.id, branch: "yes" as Branch };
+    });
+  }
+
+  return { steps: reindexar(proximos), novo, herdados };
 }
 
 /** Remove o passo e o que pende dele. */

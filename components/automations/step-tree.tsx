@@ -148,25 +148,29 @@ function Coluna(props: ColunaProps) {
   const { steps, parentId, branch } = props;
   const itens = filhosDe(steps, parentId, branch);
 
-  // Nada roda depois de um Se/Então: o percurso entra no ramo e não volta.
-  // A coluna termina nele, e é por isso que não há "+" abaixo.
+  // Nada roda depois de um Se/Então: o percurso entra no ramo e não volta. Por
+  // isso não há "+" abaixo dele — mas o que JÁ estiver ali continua na tela,
+  // marcado. Esconder um passo que a validação acusa deixaria o usuário sem
+  // como consertar o que a mensagem de erro está pedindo.
   const corte = itens.findIndex((s) => s.type === "if_else");
-  const visiveis = corte >= 0 ? itens.slice(0, corte + 1) : itens;
-  const fechada = corte >= 0;
 
   return (
     <div className="flex min-w-56 flex-col items-center">
       <Zona {...props} position={0} />
-      {visiveis.map((step, i) => (
+      {itens.map((step, i) => (
         <Fragment key={step.id}>
-          <Cartao {...props} step={step} />
+          <Cartao
+            {...props}
+            step={step}
+            inalcancavel={corte >= 0 && i > corte}
+          />
           {step.type === "if_else" ? <Ramos {...props} pai={step} /> : null}
           {step.type === "if_else" ? null : (
             <Zona {...props} position={i + 1} />
           )}
         </Fragment>
       ))}
-      {visiveis.length === 0 && !fechada ? (
+      {itens.length === 0 ? (
         <p className="py-2 text-xs text-muted-foreground">Nenhum passo aqui</p>
       ) : null}
     </div>
@@ -245,10 +249,14 @@ function Cartao({
   onSelect,
   onRemove,
   setDragId,
-}: ColunaProps & { step: StepDraft }) {
+  inalcancavel = false,
+}: ColunaProps & { step: StepDraft; inalcancavel?: boolean }) {
   const Icone = ICONE[step.type];
   const problemasDoPasso = problemas.get(step.id) ?? [];
   const selecionado = selectedId === step.id;
+  const alerta = inalcancavel
+    ? "Nada roda depois de um Se/Então — arraste este passo para dentro do lado Sim ou Não, ou remova-o."
+    : problemasDoPasso[0];
 
   return (
     <div
@@ -258,7 +266,10 @@ function Cartao({
         selecionado
           ? "border-primary ring-[3px] ring-ring/30"
           : "border-border hover:border-primary/60",
-        problemasDoPasso.length > 0 ? "border-destructive/60" : ""
+        alerta ? "border-destructive/60" : "",
+        // Passo que não executa fica visivelmente apagado: ele está na tela
+        // para ser consertado, não para parecer parte do fluxo.
+        inalcancavel ? "opacity-70" : ""
       )}
     >
       <div className="flex items-start gap-2.5">
@@ -304,10 +315,10 @@ function Cartao({
         </button>
       </div>
 
-      {problemasDoPasso.length > 0 ? (
+      {alerta ? (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive-hover">
           <AlertTriangle className="mt-px size-3.5 shrink-0" />
-          {problemasDoPasso[0]}
+          {alerta}
         </p>
       ) : null}
     </div>
@@ -324,7 +335,12 @@ function Ramos(props: ColunaProps & { pai: StepDraft }) {
       <div className="mx-auto h-3 w-px bg-border" />
       <div className="flex flex-col gap-4 @lg:flex-row @lg:items-start @lg:justify-center @lg:gap-6">
         {(["yes", "no"] as const).map((ramo) => (
-          <div key={ramo} className="flex flex-col items-center">
+          // Empilhados (pouca largura), os dois lados viram um bloco só de
+          // cartões — o fundo separa onde termina o "Sim" e começa o "Não".
+          <div
+            key={ramo}
+            className="flex flex-col items-center rounded-xl bg-muted/40 p-3 @lg:bg-transparent @lg:p-0"
+          >
             <span
               className={cn(
                 "rounded-sm px-2 py-1 text-xs font-semibold",
