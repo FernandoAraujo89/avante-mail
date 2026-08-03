@@ -75,7 +75,11 @@ export function WhatsAppMessageStep({
 
   if (!selected) {
     return (
-      <div className="space-y-6">
+      // @container: este passo aparece tanto na largura do wizard quanto no
+      // painel estreito da automação. As colunas respondem ao ESPAÇO REAL do
+      // componente, não à largura da janela — que é o que fazia os modelos
+      // ficarem espremidos e o nome vazar por cima do vizinho.
+      <div className="@container space-y-6">
         <div>
           <h2 className="text-lg font-semibold">Escolha o modelo da mensagem</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -102,23 +106,28 @@ export function WhatsAppMessageStep({
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 @md:grid-cols-2 @4xl:grid-cols-3">
             {approved.map((template) => (
               <button
                 key={template.id}
                 type="button"
                 onClick={() => onSelect(template.id)}
-                className="flex min-h-32 flex-col justify-between rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary hover:bg-primary/5"
+                className="flex min-h-32 flex-col justify-between gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 @md:p-5"
               >
-                <div>
-                  <p className="font-mono text-sm font-medium">
+                {/* min-w-0 é o que autoriza o truncate dentro do grid: sem ele
+                    o item fica do tamanho do conteúdo e o nome vaza. */}
+                <div className="min-w-0">
+                  <p
+                    className="truncate font-mono text-sm font-medium"
+                    title={template.name}
+                  >
                     {template.name}
                   </p>
                   <p className="mt-2 line-clamp-3 text-xs text-muted-foreground">
                     {template.bodyText}
                   </p>
                 </div>
-                <Badge variant="outline" className="mt-3 w-fit">
+                <Badge variant="outline" className="w-fit">
                   {CATEGORY_LABELS[template.category] ?? template.category}
                 </Badge>
               </button>
@@ -160,14 +169,21 @@ export function WhatsAppMessageStep({
   }
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[1fr_360px]">
+    // Prévia ao lado só quando cabe de verdade (≈ 56rem de componente); abaixo
+    // disso ela vai para baixo, em vez de espremer as duas colunas.
+    <div className="@container grid items-start gap-6 @4xl:grid-cols-[1fr_360px]">
       <Card>
-        <CardContent className="grid gap-5 p-6">
+        <CardContent className="grid gap-5 p-4 @md:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Modelo:</span>
-              <span className="font-mono font-medium">{selected.name}</span>
-              <Badge variant="outline">
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="shrink-0 text-muted-foreground">Modelo:</span>
+              <span
+                className="truncate font-mono font-medium"
+                title={selected.name}
+              >
+                {selected.name}
+              </span>
+              <Badge variant="outline" className="shrink-0">
                 {CATEGORY_LABELS[selected.category] ?? selected.category}
               </Badge>
             </div>
@@ -199,7 +215,9 @@ export function WhatsAppMessageStep({
                       value={source?.source}
                       onValueChange={(value) => setVariableSource(n, value)}
                     >
-                      <SelectTrigger className="w-48">
+                      {/* Largura fixa só quando sobra espaço: no painel
+                          estreito o seletor ocupa a linha inteira. */}
+                      <SelectTrigger className="w-full @sm:w-48">
                         <SelectValue placeholder="Escolher fonte" />
                       </SelectTrigger>
                       <SelectContent>
@@ -215,7 +233,7 @@ export function WhatsAppMessageStep({
                         value={source.value ?? ""}
                         onChange={(e) => setStaticValue(n, e.target.value)}
                         placeholder="Texto enviado a todos"
-                        className="min-w-48 flex-1"
+                        className="w-full flex-1 @sm:min-w-48"
                       />
                     ) : null}
                   </div>
@@ -230,7 +248,7 @@ export function WhatsAppMessageStep({
         </CardContent>
       </Card>
 
-      <div className="lg:sticky lg:top-6">
+      <div className="@4xl:sticky @4xl:top-6">
         <p className="mb-2 text-sm font-medium text-muted-foreground">
           Prévia (contato de exemplo)
         </p>

@@ -78,7 +78,7 @@ export function StepTree(props: TreeProps) {
 
   return (
     <>
-      <div className="overflow-x-auto pb-2">
+      <div className="@container overflow-x-auto pb-2">
         <Coluna
           {...props}
           parentId={null}
@@ -314,12 +314,15 @@ function Cartao({
   );
 }
 
-/** Os dois lados de um Se/Então, lado a lado. */
+/** Os dois lados de um Se/Então, lado a lado — empilhados se não couberem. */
 function Ramos(props: ColunaProps & { pai: StepDraft }) {
   return (
-    <div className="w-full">
+    // Cada Se/Então é um container próprio: um aninhado dentro de um ramo tem
+    // metade do espaço, e é a largura DELE que decide se os dois lados cabem
+    // lado a lado. Com breakpoint de janela, o de dentro ficaria espremido.
+    <div className="@container w-full">
       <div className="mx-auto h-3 w-px bg-border" />
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-center sm:gap-6">
+      <div className="flex flex-col gap-4 @lg:flex-row @lg:items-start @lg:justify-center @lg:gap-6">
         {(["yes", "no"] as const).map((ramo) => (
           <div key={ramo} className="flex flex-col items-center">
             <span

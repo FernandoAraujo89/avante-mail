@@ -274,7 +274,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_20rem] lg:items-start">
+      <div className="grid gap-6 lg:grid-cols-[1fr_22rem] lg:items-start">
         <div className="grid gap-6">
           <Card>
             <CardContent className="grid gap-4 p-5">
