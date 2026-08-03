@@ -195,18 +195,19 @@ export const AUTOMATION_TRIGGER_TYPES = [
 export type AutomationTriggerType = (typeof AUTOMATION_TRIGGER_TYPES)[number];
 
 export const AUTOMATION_STEP_TYPES = [
-  // Fase 1
+  // Fase 1 — fluxo e ações sobre o contato
   "wait",
   "add_tag",
   "remove_tag",
   "subscribe_list",
   "unsubscribe_list",
   "end",
-  // Fases seguintes — declarados aqui para o schema não mudar depois; o motor
-  // recusa com mensagem clara enquanto não estiverem implementados.
+  // Fase 2 — envios
   "send_email",
   "send_whatsapp",
+  // Fase 3 — ramificação
   "if_else",
+  // Ainda não implementados; o motor recusa com mensagem clara.
   "update_field",
   "webhook",
 ] as const;

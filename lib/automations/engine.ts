@@ -12,10 +12,12 @@ import {
   contacts,
   getDb,
   type AutomationStepType,
+  type Contact,
   type ContactEventType,
 } from "@/lib/db";
 import { emitListDiff, emitTagDiff } from "@/lib/events";
 
+import { avaliarCondicoes } from "./condicoes";
 import { enviarEmailDoPasso, enviarWhatsAppDoPasso } from "./envios";
 
 // Motor das automações (docs/plano-automacoes.md, fases 1 e 2).
@@ -189,6 +191,30 @@ async function proximoPasso(passo: Passo): Promise<Passo | undefined> {
   return seguinte;
 }
 
+/**
+ * Primeiro passo de um ramo do Se/Então. Ramo vazio (ex.: nada configurado no
+ * "não") encerra o percurso — é o mesmo fim de trilho de qualquer ramificação.
+ */
+async function primeiroFilho(
+  passo: Passo,
+  branch: "yes" | "no"
+): Promise<Passo | undefined> {
+  const db = getDb();
+  const [filho] = await db
+    .select()
+    .from(automationSteps)
+    .where(
+      and(
+        eq(automationSteps.versionId, passo.versionId),
+        eq(automationSteps.parentId, passo.id),
+        eq(automationSteps.branch, branch)
+      )
+    )
+    .orderBy(asc(automationSteps.position))
+    .limit(1);
+  return filho;
+}
+
 /** Milissegundos de espera configurados no passo. */
 export function esperaEmMs(config: Record<string, unknown> | null): number {
   const dias = Number(config?.days ?? 0);
@@ -322,8 +348,9 @@ export async function avancarPercurso(
   }
 
   // Demais passos: executa e segue.
+  let resultado: Record<string, unknown>;
   try {
-    const resultado = await executarPasso(passo, run.id, run.contactId);
+    resultado = await executarPasso(passo, run.id, contato);
     await registrar(runId, passo.id, statusDoResultado(resultado), resultado);
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : String(error);
@@ -339,6 +366,18 @@ export async function avancarPercurso(
   if (passo.type === "end") {
     await encerrar(runId, "done");
     return { proximo: "nada", passosExecutados: run.stepsExecuted, detalhe: "passo final" };
+  }
+
+  // Se/Então: o percurso ENTRA no ramo escolhido (primeiro filho), em vez de
+  // seguir para o irmão. Ramos não se reencontram — o fim do ramo é o fim do
+  // percurso, e é por isso que o "senão" precisa ser montado por inteiro.
+  if (passo.type === "if_else") {
+    const ramo = resultado.ramo === "yes" ? "yes" : "no";
+    return seguirPara(
+      runId,
+      await primeiroFilho(passo, ramo),
+      run.stepsExecuted
+    );
   }
 
   return seguirPara(runId, await proximoPasso(passo), run.stepsExecuted);
@@ -375,18 +414,27 @@ async function seguirPara(
   };
 }
 
-/** Efeito de cada tipo de passo. Lança para o percurso falhar com motivo. */
+/**
+ * Efeito de cada tipo de passo. Lança para o percurso falhar com motivo.
+ * O contato vem carregado de avancarPercurso — é o mesmo que acabou de ter a
+ * elegibilidade revalidada, então nenhum passo trabalha sobre estado anterior.
+ */
 async function executarPasso(
   passo: Passo,
   runId: string,
-  contactId: string
+  contato: Contact
 ): Promise<Record<string, unknown>> {
   const db = getDb();
   const config = passo.config ?? {};
+  const contactId = contato.id;
 
   switch (passo.type as AutomationStepType) {
     case "end":
       return {};
+
+    // Decide o ramo; quem navega até o filho é avancarPercurso.
+    case "if_else":
+      return { ...(await avaliarCondicoes({ config: passo.config, contato, runId })) };
 
     // Envio: grava em campaign_sends e enfileira. O percurso NÃO espera a
     // entrega — o intervalo entre passos é papel do "Aguarde". A elegibilidade
@@ -465,7 +513,7 @@ async function executarPasso(
     }
 
     default:
-      // if_else (fase 3), update_field e webhook.
+      // update_field e webhook — ainda sem fase marcada no plano.
       throw new Error(
         `passo "${passo.type}" ainda não implementado (ver docs/plano-automacoes.md)`
       );

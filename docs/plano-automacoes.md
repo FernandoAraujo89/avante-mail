@@ -8,24 +8,28 @@ ações sobre o contato.
 
 ## ▶ ESTADO ATUAL (03/08/2026)
 
-**Fases 0, 1 e 2 estão EM PRODUÇÃO.** A próxima é a fase 3 (Se/Então).
+**Fases 0, 1 e 2 estão EM PRODUÇÃO; a 3 está pronta, aguardando deploy.**
+A próxima é a fase 4 (a tela) — e é a maior de todas.
 
 | Fase | Situação | Commit |
 |---|---|---|
 | 0 — Eventos | ✅ produção | `4bd0c62` |
 | 1 — Motor | ✅ produção | `2f9d39d` |
 | 2 — Envios | ✅ produção | `fcbfa1d` |
-| 3 — Se/Então | ⬜ próxima | |
-| 4 — Tela | ⬜ | |
+| 3 — Se/Então | ✅ pronta (falta deploy) | |
+| 4 — Tela | ⬜ próxima | |
 | 5 — Relatórios | ⬜ | |
 
 **O que já roda:** `contact_events` registra o que muda no contato (7 pontos
 instrumentados); `worker/automation-worker.ts` consome os eventos, abre
 percursos e executa os passos `wait`, `add_tag`, `remove_tag`,
-`subscribe_list`, `unsubscribe_list`, `send_email`, `send_whatsapp` e `end`.
-`lib/automations/engine.ts` concentra a lógica do fluxo e
-`lib/automations/envios.ts`, a dos passos de envio. Serviço
-`automation-worker` no compose.
+`subscribe_list`, `unsubscribe_list`, `send_email`, `send_whatsapp`, `if_else`
+e `end`. `lib/automations/engine.ts` concentra a lógica do fluxo,
+`lib/automations/envios.ts` a dos envios e `lib/automations/condicoes.ts` a das
+condições. Serviço `automation-worker` no compose.
+
+Faltam só `update_field` e `webhook` — sem fase marcada; o motor recusa os dois
+com mensagem clara.
 
 **Migração da fase 2** (`scripts/migrate-automation-sends.ts`) já aplicada em
 produção — o `deploy.sh` roda todo `scripts/migrate-*.ts` antes de subir o app.
@@ -66,6 +70,44 @@ aprovado → aguarda 2min → +boas-vindas-enviado → fim). `… remover` apaga
 ⚠️ Com o worker no ar, marcar um contato com essa tag **envia de verdade**.
 (`seed-automation-teste.ts` continua sendo o teste do motor sem envio.)
 
+### Como funciona o Se/Então (fase 3)
+
+**Não precisou de migração** — `parent_id + branch + position` já estavam no
+modelo desde a fase 1, esperando exatamente por isto.
+
+O passo decide o ramo e o percurso **entra nele**: o próximo passo é o primeiro
+filho com `branch = 'yes'` ou `'no'`. Ramos **não se reencontram** — o fim de um
+ramo é o fim do percurso, então o "senão" precisa ser montado por inteiro. Ramo
+vazio encerra o percurso como `done`, sem travar.
+
+```jsonc
+// config do passo if_else
+{
+  "match": "all",                       // "all" (padrão) ou "any"
+  "conditions": [
+    { "type": "has_tag", "tag": "vip" },
+    { "type": "email_opened", "stepId": "<passo de envio>", "negate": true }
+  ]
+}
+```
+
+Condições: `has_tag`, `in_list`, `email_opened`, `email_clicked`,
+`whatsapp_replied`, `whatsapp_subscribed`, `field_equals`. Qualquer uma aceita
+`"negate": true`.
+
+Abertura, clique e resposta olham os envios **deste percurso**
+(`campaign_sends.automation_run_id`) — é o que a fase 2 destravou, e é o que
+permite o fluxo clássico "manda o e-mail → aguarda 2 dias → abriu?". Com
+`stepId`, olha um passo específico; sem ele, qualquer envio do percurso.
+
+O log do passo grava o ramo escolhido **e o resultado de cada condição**
+(`{"ramo":"no","detalhes":[…]}`), que é o que responde "por que este contato
+foi parar nesse lado?" sem precisar reproduzir o percurso.
+
+**Como testar:** `npx tsx scripts/seed-automation-condicao.ts` cria o fluxo
+"tem a tag vip? → +rota-vip, senão +rota-comum". Não envia nada — dá para
+exercitar os dois lados só mexendo nas tags.
+
 **Armadilhas já pagas (não repetir):**
 - O BullMQ **recusa `:` no jobId** — o identificador usa `__`.
 - Percurso recém-criado nasce com `next_run_at = agora` de propósito: se o
@@ -87,11 +129,13 @@ aprovado → aguarda 2min → +boas-vindas-enviado → fim). `… remover` apaga
   de derrubar o percurso — um fluxo com e-mail e WhatsApp continua valendo
   pelo e-mail. Já modelo inexistente ou não aprovado **falha**, porque é erro
   de configuração, não característica do contato.
+- Se/Então **sem condição válida falha o percurso** em vez de assumir um lado.
+  Chutar um ramo manda a mensagem errada para o grupo errado, calado.
 
-**O que a fase 2 ainda não mostra:** as telas de histórico do contato e os
-relatórios por campanha continuam lendo só envios com campanha (`innerJoin`),
-então o envio de automação aparece no **custo consolidado**, mas não nelas.
-É exatamente o escopo da fase 5.
+**O que ainda não aparece nas telas:** o histórico do contato e os relatórios
+por campanha continuam lendo só envios com campanha (`innerJoin`), então o
+envio de automação aparece no **custo consolidado**, mas não neles. É
+exatamente o escopo da fase 5.
 
 ---
 
