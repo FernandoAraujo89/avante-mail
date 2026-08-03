@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pause, Play, Plus, Trash2, Workflow } from "lucide-react";
+import { BarChart3, Pause, Play, Plus, Trash2, Workflow } from "lucide-react";
 
 import { AutomationStatusBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
@@ -219,6 +219,16 @@ export default function AutomationsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        asChild
+                        aria-label={`Relatório de ${row.name}`}
+                      >
+                        <Link href={`/automations/${row.id}/report`}>
+                          <BarChart3 className="text-muted-foreground" />
+                        </Link>
+                      </Button>
                       {row.status === "active" ? (
                         <Button
                           variant="ghost"

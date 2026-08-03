@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Pause, Play, Save } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  BarChart3,
+  Pause,
+  Play,
+  Save,
+} from "lucide-react";
 
 import { AutomationStatusBadge } from "@/components/status-badge";
 import type { WaTemplateOption } from "@/components/campaigns/whatsapp-message-step";
@@ -23,7 +30,7 @@ import type { AutomationStatus, AutomationStepType } from "@/lib/db/schema";
 
 import { type Catalogo } from "./labels";
 import { StepPanel } from "./step-panel";
-import { StepTree } from "./step-tree";
+import { StepTree, type MetricaDoCartao } from "./step-tree";
 import { TriggerEditor } from "./trigger-editor";
 
 // Editor da automação: gatilhos, a árvore do fluxo e o painel do passo.
@@ -56,6 +63,10 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
   });
   const [waTemplates, setWaTemplates] = useState<WaTemplateOption[] | null>(null);
 
+  const [metricas, setMetricas] = useState<Map<string, MetricaDoCartao>>(
+    new Map()
+  );
+
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [alterado, setAlterado] = useState(false);
@@ -87,6 +98,30 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Números por passo (fase 5). Chega depois do fluxo, sem segurar a tela: se
+  // falhar, o editor continua servindo — só fica sem os contadores.
+  const carregarMetricas = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/automations/${automationId}/metrics`);
+      if (!res.ok) return;
+      const json = await res.json();
+      setMetricas(
+        new Map<string, MetricaDoCartao>(
+          (json.passos ?? []).map((p: MetricaDoCartao & { stepId: string }) => [
+            p.stepId,
+            { agora: p.agora, passaram: p.passaram, envios: p.envios },
+          ])
+        )
+      );
+    } catch {
+      // sem contadores; o resto da tela não depende deles
+    }
+  }, [automationId]);
+
+  useEffect(() => {
+    carregarMetricas();
+  }, [carregarMetricas]);
 
   // Catálogo dos seletores (listas, modelos de e-mail e de WhatsApp).
   useEffect(() => {
@@ -225,6 +260,12 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
           <div className="flex items-center gap-2">
             <AutomationStatusBadge status={status} />
             <span className="text-xs text-muted-foreground">v{version}</span>
+            <Button variant="ghost" asChild>
+              <Link href={`/automations/${automationId}/report`}>
+                <BarChart3 />
+                Relatório
+              </Link>
+            </Button>
             <Button variant="outline" onClick={salvar} disabled={salvando}>
               <Save />
               {salvando ? "Salvando..." : "Salvar"}
@@ -298,6 +339,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
                 steps={steps}
                 selectedId={selectedId}
                 problemas={problemasPorPasso}
+                metricas={metricas}
                 catalogo={catalogo}
                 onSelect={setSelectedId}
                 onInsert={(destino: Destino, tipo: AutomationStepType) => {

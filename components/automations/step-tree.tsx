@@ -60,11 +60,25 @@ const ICONE: Record<AutomationStepType, typeof Mail> = {
   end: Flag,
 };
 
+/** Números do passo, quando a automação já rodou (fase 5). */
+export interface MetricaDoCartao {
+  agora: number;
+  passaram: number;
+  envios: {
+    enviados: number;
+    entregues: number;
+    abertos: number;
+    cliques: number;
+  } | null;
+}
+
 interface TreeProps {
   steps: StepDraft[];
   selectedId: string | null;
   /** stepId → problemas do passo (mostra o alerta no cartão). */
   problemas: Map<string, string[]>;
+  /** stepId → contadores; vazio enquanto ninguém percorreu o fluxo. */
+  metricas: Map<string, MetricaDoCartao>;
   catalogo: Catalogo;
   onSelect: (id: string) => void;
   onInsert: (destino: Destino, type: AutomationStepType) => void;
@@ -245,6 +259,7 @@ function Cartao({
   step,
   selectedId,
   problemas,
+  metricas,
   catalogo,
   onSelect,
   onRemove,
@@ -253,6 +268,7 @@ function Cartao({
 }: ColunaProps & { step: StepDraft; inalcancavel?: boolean }) {
   const Icone = ICONE[step.type];
   const problemasDoPasso = problemas.get(step.id) ?? [];
+  const metrica = metricas.get(step.id);
   const selecionado = selectedId === step.id;
   const alerta = inalcancavel
     ? "Nada roda depois de um Se/Então — arraste este passo para dentro do lado Sim ou Não, ou remova-o."
@@ -314,6 +330,30 @@ function Cartao({
           <Trash2 className="size-4" />
         </button>
       </div>
+
+      {/* Números do passo: quantos estão parados AQUI e o que já saiu daqui.
+          Ficam no cartão porque é onde a pergunta aparece — "o fluxo está
+          andando?" se responde olhando o desenho, não uma tabela à parte. */}
+      {metrica && (metrica.agora > 0 || metrica.passaram > 0) ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2 text-xs">
+          {metrica.agora > 0 ? (
+            <span className="rounded-sm bg-info-light px-1.5 py-0.5 font-semibold text-info-dark">
+              {metrica.agora} aqui agora
+            </span>
+          ) : null}
+          <span className="text-muted-foreground">
+            {metrica.passaram === 1 ? "1 passou" : `${metrica.passaram} passaram`}
+          </span>
+          {metrica.envios && metrica.envios.enviados > 0 ? (
+            <span className="text-muted-foreground">
+              · {metrica.envios.enviados} enviados
+              {metrica.envios.abertos > 0
+                ? ` · ${Math.round((metrica.envios.abertos / metrica.envios.enviados) * 100)}% abertura`
+                : ""}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {alerta ? (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive-hover">

@@ -8,6 +8,7 @@ import {
   Pencil,
   Reply,
   Send,
+  Workflow,
 } from "lucide-react";
 import { desc, eq } from "drizzle-orm";
 
@@ -26,6 +27,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  automationRuns,
+  automations,
   campaigns,
   campaignSends,
   contactLists,
@@ -64,6 +67,8 @@ export default async function ContactHistoryPage({
       sendId: campaignSends.id,
       campaignId: campaigns.id,
       campaignName: campaigns.name,
+      automationId: automations.id,
+      automationName: automations.name,
       subject: campaigns.subject,
       status: campaignSends.status,
       sentAt: campaignSends.sentAt,
@@ -72,7 +77,15 @@ export default async function ContactHistoryPage({
       repliedAt: campaignSends.repliedAt,
     })
     .from(campaignSends)
-    .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+    // Joins à ESQUERDA: desde a fase 2 das automações, um envio pode vir de um
+    // passo de fluxo em vez de campanha. Com innerJoin, esses envios sumiam do
+    // histórico do contato — ele recebeu a mensagem e a ficha não mostrava.
+    .leftJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+    .leftJoin(
+      automationRuns,
+      eq(automationRuns.id, campaignSends.automationRunId)
+    )
+    .leftJoin(automations, eq(automations.id, automationRuns.automationId))
     .where(eq(campaignSends.contactId, id))
     .orderBy(desc(campaignSends.sentAt));
 
@@ -168,15 +181,38 @@ export default async function ContactHistoryPage({
               {history.map((h) => (
                 <TableRow key={h.sendId}>
                   <TableCell>
-                    <Link
-                      href={`/campaigns/${h.campaignId}/report`}
-                      className="font-medium hover:underline"
-                    >
-                      {h.campaignName}
-                    </Link>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {h.subject}
-                    </p>
+                    {h.campaignId ? (
+                      <>
+                        <Link
+                          href={`/campaigns/${h.campaignId}/report`}
+                          className="font-medium hover:underline"
+                        >
+                          {h.campaignName}
+                        </Link>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {h.subject}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        {h.automationId ? (
+                          <Link
+                            href={`/automations/${h.automationId}/report`}
+                            className="font-medium hover:underline"
+                          >
+                            {h.automationName}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">
+                            Automação removida
+                          </span>
+                        )}
+                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Workflow className="size-3" />
+                          Passo de automação
+                        </p>
+                      </>
+                    )}
                   </TableCell>
                   <TableCell>
                     <SendStatusBadge status={h.status} />

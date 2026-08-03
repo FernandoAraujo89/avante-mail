@@ -8,8 +8,9 @@ ações sobre o contato.
 
 ## ▶ ESTADO ATUAL (03/08/2026)
 
-**Fases 0, 1 e 2 estão EM PRODUÇÃO; a 3 e a 4 estão prontas, aguardando
-deploy.** Falta só a fase 5 (relatórios).
+**Fases 0, 1 e 2 estão EM PRODUÇÃO; 3, 4 e 5 estão prontas, aguardando
+deploy.** O plano está completo — o que sobra é `update_field` e `webhook`,
+que nunca tiveram fase marcada.
 
 | Fase | Situação | Commit |
 |---|---|---|
@@ -17,8 +18,8 @@ deploy.** Falta só a fase 5 (relatórios).
 | 1 — Motor | ✅ produção | `2f9d39d` |
 | 2 — Envios | ✅ produção | `fcbfa1d` |
 | 3 — Se/Então | ✅ pronta (falta deploy) | `531360b` |
-| 4 — Tela | ✅ pronta (falta deploy) | |
-| 5 — Relatórios | ⬜ próxima | |
+| 4 — Tela | ✅ pronta (falta deploy) | `d3d7108` |
+| 5 — Relatórios | ✅ pronta (falta deploy) | |
 
 **O que já roda:** `contact_events` registra o que muda no contato (7 pontos
 instrumentados); `worker/automation-worker.ts` consome os eventos, abre
@@ -138,6 +139,32 @@ e em escala, então a hora de barrar é a de ligar. `lib/automations/validacao.t
 `lerConfigDeEmail`, `lerCondicoes`…) são as que validam a tela, então não existe
 "a tela deixou salvar e o motor recusou".
 
+### O relatório (fase 5)
+
+`/automations/[id]/report`, com atalho na lista e no editor. **Sem migração
+nova** para os números — eles saem do que as fases 1 e 2 já gravavam.
+
+Duas perguntas, dois caminhos:
+
+- **"onde os contatos estão AGORA?"** → `automation_runs.current_step_id`. Vira
+  a seção *Onde os contatos estão*, com barra proporcional à maior fila: o
+  gargalo salta à vista. Os mesmos números aparecem **no cartão de cada passo
+  do editor** ("3 aqui agora · 12 passaram · 40% abertura"), porque é ali que a
+  pergunta nasce.
+- **"o que já aconteceu?"** → `automation_run_steps` (quem executou cada passo)
+  e `campaign_sends` (enviado, entregue, aberto, clicado, respondido e custo).
+
+Os passos saem na ordem em que o contato os percorre (tronco, depois o lado
+"Sim" inteiro, depois o "Não"), com indentação por profundidade — ordenar por
+`position` cru misturaria ramo e tronco, porque cada grupo começa do zero.
+
+As métricas **por passo** valem para a versão corrente; o resumo cobre todas.
+Percursos que entraram por versões anteriores aparecem contados à parte.
+
+O histórico do contato também passou a mostrar envio de automação (era
+`innerJoin` com campanha, então o contato recebia a mensagem e a ficha dele não
+mostrava nada).
+
 Barrado na ativação: passo sem configuração, ramo vazio, passo inalcançável,
 **laço** (gatilho que casa com uma ação da própria automação) e o **teto de 5
 ativas** (`app_settings.automations_max_active`, mudável sem deploy).
@@ -174,11 +201,16 @@ fluxo termina pela versão em que entrou. Rascunho é reescrito no lugar.
 - Os problemas mostrados na tela são os do **último salvamento** (a validação
   vive no servidor, junto do motor). Editar limpa os avisos em vez de deixá-los
   contradizendo o que o usuário acabou de corrigir.
+- A restrição `campaign_sends_origem_check` e o `ON DELETE SET NULL` do
+  percurso **se contradiziam**: apagar uma automação que já tinha enviado
+  zerava o `automation_run_id` e a linha passava a violar a própria restrição,
+  então o DELETE morria com erro de constraint. Corrigido em
+  `migrate-campaign-sends-origem.ts` — a restrição aceita também o
+  `automation_step_id`, que fica na linha e mantém o histórico de custo em pé.
 
-**O que ainda não aparece nas telas:** o histórico do contato e os relatórios
-por campanha continuam lendo só envios com campanha (`innerJoin`), então o
-envio de automação aparece no **custo consolidado**, mas não neles. É
-exatamente o escopo da fase 5.
+**No deploy destas fases:** roda a migração
+`scripts/migrate-campaign-sends-origem.ts` (o `deploy.sh` já varre
+`migrate-*.ts`). O resto — fases 3, 4 e 5 — é só código.
 
 ---
 
