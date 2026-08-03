@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import { SendStatusBadge, sendStatusLabel } from "@/components/status-badge";
@@ -34,6 +35,7 @@ type Data = Date | string | null;
 
 export interface SendTableRow {
   id: string;
+  contactId: string;
   status: string;
   sentAt: Data;
   openedAt: Data;
@@ -223,7 +225,12 @@ export function SendsTable({
               return (
                 <TableRow key={send.id}>
                   <TableCell>
-                    <p className="font-medium">{send.contactName}</p>
+                    <Link
+                      href={`/contacts/${send.contactId}`}
+                      className="font-medium hover:text-primary hover:underline"
+                    >
+                      {send.contactName}
+                    </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {isWhats
                         ? formatPhone(send.contactPhone)

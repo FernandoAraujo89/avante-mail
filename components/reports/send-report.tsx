@@ -102,6 +102,8 @@ export async function SendReport({
       errorMessage: campaignSends.errorMessage,
       bounceType: campaignSends.bounceType,
       complainedAt: campaignSends.complainedAt,
+      // O id vai junto para a linha levar à ficha do contato.
+      contactId: campaignSends.contactId,
       contactName: contacts.name,
       contactEmail: contacts.email,
       contactPhone: contacts.phone,
