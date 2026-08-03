@@ -19,21 +19,11 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { ResendButton } from "@/components/reports/resend-button";
-import {
-  CampaignStatusBadge,
-  SendStatusBadge,
-} from "@/components/status-badge";
+import { SendsTable } from "@/components/reports/sends-table";
+import { CampaignStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   campaigns,
   campaignSends,
@@ -50,13 +40,8 @@ import {
   formatUsd,
   listsLabel,
 } from "@/lib/format";
-import { formatPhone } from "@/lib/phone";
 import { campaignCost } from "@/lib/pricing";
-import {
-  describeSendOutcome,
-  describeWhatsAppError,
-  isResendableErrorCode,
-} from "@/lib/whatsapp/errors";
+import { isResendableErrorCode } from "@/lib/whatsapp/errors";
 
 /**
  * Relatório de um disparo (campanha ou edição do Avante News). É o mesmo
@@ -270,81 +255,11 @@ export async function SendReport({
         ) : null}
 
         <Card className="mt-6">
-          {sends.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              Nenhum envio registrado para esta campanha.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Enviada em</TableHead>
-                  <TableHead>Entregue em</TableHead>
-                  <TableHead>Lida em</TableHead>
-                  <TableHead>Respondeu</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sends.map((send) => {
-                  // O que aconteceu, em uma frase — o selo sozinho não conta a
-                  // história (e "Erro 131049" não conta nada).
-                  const outcome = describeSendOutcome(
-                    send.status,
-                    send.errorCode,
-                    send.errorMessage
-                  );
-                  const erro =
-                    send.status === "failed"
-                      ? describeWhatsAppError(send.errorCode, send.errorMessage)
-                      : null;
-                  return (
-                    <TableRow key={send.id}>
-                      <TableCell>
-                        <p className="font-medium">{send.contactName}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatPhone(send.contactPhone)}
-                          {send.contactCompany
-                            ? ` · ${send.contactCompany}`
-                            : ""}
-                        </p>
-                      </TableCell>
-                      <TableCell className="max-w-sm">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <SendStatusBadge status={send.status} />
-                          {erro ? (
-                            <Badge variant={erro.tone}>{erro.label}</Badge>
-                          ) : null}
-                        </div>
-                        <p
-                          className={
-                            outcome.tone === "destructive"
-                              ? "mt-1 text-xs text-destructive-hover"
-                              : "mt-1 text-xs text-muted-foreground"
-                          }
-                        >
-                          {outcome.text}
-                        </p>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(send.sentAt)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(send.deliveredAt)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(send.readAt)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(send.repliedAt)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
+          <SendsTable
+            sends={sends}
+            channel="whatsapp"
+            vazio="Nenhum envio registrado para esta campanha."
+          />
         </Card>
       </>
     );
@@ -426,55 +341,15 @@ export async function SendReport({
       </div>
 
       <Card className="mt-6">
-        {sends.length === 0 ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">
-            {isNews
+        <SendsTable
+          sends={sends}
+          channel="email"
+          vazio={
+            isNews
               ? "Nenhum envio registrado para esta edição."
-              : "Nenhum envio registrado para esta campanha."}
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Contato</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Enviado em</TableHead>
-                <TableHead>Aberto em</TableHead>
-                <TableHead>Clicado em</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sends.map((send) => (
-                <TableRow key={send.id}>
-                  <TableCell>
-                    <p className="font-medium">{send.contactName}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {send.contactEmail}
-                      {send.contactCompany ? ` · ${send.contactCompany}` : ""}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <SendStatusBadge status={send.status} />
-                      {send.complainedAt ? (
-                        <Badge variant="warning">Spam</Badge>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(send.sentAt)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(send.openedAt)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(send.clickedAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+              : "Nenhum envio registrado para esta campanha."
+          }
+        />
       </Card>
     </>
   );

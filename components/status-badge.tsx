@@ -34,6 +34,14 @@ const SEND_STATUS: Record<
   read: { label: "Lida", variant: "success" },
 };
 
+/** Rótulo do status fora do selo (filtros, listas). Mesma fonte do badge. */
+export function sendStatusLabel(status: string): string {
+  return (
+    (SEND_STATUS as Record<string, { label: string } | undefined>)[status]
+      ?.label ?? status
+  );
+}
+
 export function SendStatusBadge({ status }: { status: SendStatus }) {
   const config = SEND_STATUS[status] ?? SEND_STATUS.pending;
   return <Badge variant={config.variant}>{config.label}</Badge>;
