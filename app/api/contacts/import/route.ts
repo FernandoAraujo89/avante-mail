@@ -3,6 +3,7 @@ import { inArray } from "drizzle-orm";
 import Papa from "papaparse";
 
 import { contactLists, contacts, getDb, lists, type NewContact } from "@/lib/db";
+import { emitContactEvents } from "@/lib/events";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
 
@@ -162,18 +163,24 @@ export async function POST(request: NextRequest) {
 
     let imported = 0;
 
+    // Guarda os criados para registrar os eventos depois: o onConflictDoNothing
+    // só devolve quem entrou de fato, então esta é a lista dos NOVOS.
+    const criados: { id: string; email: string }[] = [];
+
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
       const inserted = await db
         .insert(contacts)
         .values(chunk)
         .onConflictDoNothing({ target: contacts.email })
-        .returning({ id: contacts.id });
+        .returning({ id: contacts.id, email: contacts.email });
       imported += inserted.length;
+      criados.push(...inserted);
     }
 
     // Associa à lista TODOS os contatos do arquivo (novos + já existentes).
     let addedToList = 0;
+    const entraramNaLista: string[] = [];
     if (listId && rows.length > 0) {
       const emails = rows.map((r) => r.email);
       const matched: { id: string }[] = [];
@@ -193,8 +200,32 @@ export async function POST(request: NextRequest) {
           .onConflictDoNothing()
           .returning({ contactId: contactLists.contactId });
         addedToList += added.length;
+        entraramNaLista.push(...added.map((a) => a.contactId));
       }
     }
+
+    // Eventos da importação. `entraramNaLista` traz só quem realmente entrou
+    // (o onConflictDoNothing filtra quem já estava), então reimportar o mesmo
+    // arquivo não gera evento repetido.
+    const tagsPorEmail = new Map(rows.map((r) => [r.email, r.tags ?? []]));
+    await emitContactEvents([
+      ...criados.map((c) => ({
+        type: "contact_created" as const,
+        contactId: c.id,
+      })),
+      ...criados.flatMap((c) =>
+        (tagsPorEmail.get(c.email) ?? []).map((tag) => ({
+          type: "tag_added" as const,
+          contactId: c.id,
+          payload: { tag },
+        }))
+      ),
+      ...entraramNaLista.map((contactId) => ({
+        type: "list_subscribed" as const,
+        contactId,
+        payload: { listId },
+      })),
+    ]);
 
     return NextResponse.json({
       total,

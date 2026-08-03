@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm";
 
 import { contactLists, contacts, getDb, lists } from "@/lib/db";
+import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { normalizePhone } from "@/lib/phone";
 import {
   EMAIL_REGEX,
@@ -245,6 +246,12 @@ export async function POST(request: NextRequest) {
         .values(listIds.map((listId) => ({ contactId: created.id, listId })))
         .onConflictDoNothing();
     }
+
+    // Contato novo já nasce com tags e listas: tudo isso é entrada válida
+    // para uma automação.
+    await emitContactEvent("contact_created", created.id);
+    await emitTagDiff(created.id, [], tags);
+    await emitListDiff(created.id, [], listIds);
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, ne } from "drizzle-orm";
 
 import { contactLists, contacts, getDb } from "@/lib/db";
+import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { normalizePhone } from "@/lib/phone";
 import {
   EMAIL_REGEX,
@@ -154,6 +155,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     const changesLists = "listIds" in body;
 
+    // As listas atuais precisam ser lidas ANTES da troca — sem elas não dá
+    // para saber em quais o contato entrou e de quais saiu.
+    const listasAntes = changesLists
+      ? (
+          await db
+            .select({ listId: contactLists.listId })
+            .from(contactLists)
+            .where(eq(contactLists.contactId, id))
+        ).map((l) => l.listId)
+      : [];
+
     if (Object.keys(updates).length === 0 && !changesLists) {
       return NextResponse.json(
         { error: "Nenhum campo para atualizar." },
@@ -172,6 +184,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     // Substitui as associações de lista pelo conjunto informado.
+    let listasDepois = listasAntes;
     if (changesLists) {
       const listIds = normalizeIds(body.listIds);
       await db.delete(contactLists).where(eq(contactLists.contactId, id));
@@ -181,6 +194,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           .values(listIds.map((listId) => ({ contactId: id, listId })))
           .onConflictDoNothing();
       }
+      listasDepois = listIds;
+    }
+
+    // Registra o que MUDOU — é disso que os gatilhos das automações vivem.
+    if ("tags" in updates) {
+      await emitTagDiff(id, existing.tags, updates.tags);
+    }
+    if (changesLists) {
+      await emitListDiff(id, listasAntes, listasDepois);
+    }
+    if (updates.subscribed === false && existing.subscribed) {
+      await emitContactEvent("email_unsubscribed", id);
+    }
+    if (updates.whatsappSubscribed === false && existing.whatsappSubscribed) {
+      await emitContactEvent("whatsapp_unsubscribed", id);
     }
 
     return NextResponse.json(contact);

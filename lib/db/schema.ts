@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   jsonb,
   pgTable,
   primaryKey,
@@ -52,6 +53,24 @@ export type SendStatus = (typeof SEND_STATUSES)[number];
 // Tipo de devolução reportado pelo Resend/SES.
 export const BOUNCE_TYPES = ["hard", "soft"] as const;
 export type BounceType = (typeof BOUNCE_TYPES)[number];
+
+// O que acontece com um contato. É a matéria-prima dos gatilhos das
+// automações (docs/plano-automacoes.md): sem isto o sistema só conhece o
+// ESTADO das tags, nunca a MUDANÇA — e "quando a tag X for adicionada"
+// depende exatamente da mudança.
+export const CONTACT_EVENT_TYPES = [
+  "contact_created",
+  "tag_added",
+  "tag_removed",
+  "list_subscribed",
+  "list_unsubscribed",
+  "email_unsubscribed",
+  "email_opened",
+  "email_clicked",
+  "whatsapp_replied",
+  "whatsapp_unsubscribed",
+] as const;
+export type ContactEventType = (typeof CONTACT_EVENT_TYPES)[number];
 
 // Usuários do sistema (login próprio).
 export const users = pgTable("users", {
@@ -123,6 +142,34 @@ export const contactLists = pgTable(
       .references(() => lists.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.contactId, t.listId] })]
+);
+
+// Fila de eventos do contato (padrão outbox) — o que alimenta os gatilhos das
+// automações. É gravado na mesma operação que muda o contato, ANTES de ser
+// processado: assim um gatilho com defeito pode ser corrigido e os eventos
+// reprocessados, sem ter perdido nada no caminho.
+// processedAt nulo = ainda não consumido. Enquanto o motor de automações não
+// existir, todos ficam nulos — o registro já começa a acumular histórico.
+export const contactEvents = pgTable(
+  "contact_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    type: text("type").$type<ContactEventType>().notNull(),
+    /** Detalhe do evento: { tag }, { listId }, { campaignId, sendId }… */
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (t) => [
+    // O motor varre os pendentes em ordem de chegada.
+    index("contact_events_pendentes_idx").on(t.processedAt, t.createdAt),
+    index("contact_events_contato_idx").on(t.contactId, t.createdAt),
+  ]
 );
 
 export const templates = pgTable("templates", {

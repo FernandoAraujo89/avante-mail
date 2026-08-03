@@ -7,6 +7,7 @@ import {
   getDb,
   whatsappTemplates,
 } from "@/lib/db";
+import { emitContactEvent } from "@/lib/events";
 import { phoneToWaId } from "@/lib/phone";
 import { sendEmail } from "@/lib/ses";
 import { errorMessage } from "@/lib/utils";
@@ -236,7 +237,7 @@ async function handleInboundMessage(message: WebhookMessage): Promise<void> {
 
   // Marca a resposta no envio mais recente deste contato (para o relatório).
   const [lastSend] = await db
-    .select({ id: campaignSends.id })
+    .select({ id: campaignSends.id, campaignId: campaignSends.campaignId })
     .from(campaignSends)
     .where(
       and(
@@ -254,11 +255,18 @@ async function handleInboundMessage(message: WebhookMessage): Promise<void> {
       .where(eq(campaignSends.id, lastSend.id));
   }
 
+  await emitContactEvent("whatsapp_replied", contact.id, {
+    campaignId: lastSend?.campaignId ?? null,
+    sendId: lastSend?.id ?? null,
+  });
+
   if (isOptOutMessage(inboundText(message)) && contact.whatsappSubscribed) {
     await db
       .update(contacts)
       .set({ whatsappSubscribed: false, whatsappOptOutAt: new Date() })
       .where(eq(contacts.id, contact.id));
+
+    await emitContactEvent("whatsapp_unsubscribed", contact.id);
 
     // Confirmação em texto livre (grátis, dentro da janela de 24h aberta pela
     // própria mensagem do contato). Best-effort — não bloqueia o opt-out.

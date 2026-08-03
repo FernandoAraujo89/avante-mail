@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { campaignSends, contacts, getDb } from "@/lib/db";
+import { emitContactEvent } from "@/lib/events";
 import { verifyUnsubscribeToken } from "@/lib/jwt";
 import { errorMessage } from "@/lib/utils";
 
@@ -41,6 +42,14 @@ export async function POST(request: NextRequest) {
     }
 
     const db = getDb();
+    // O estado ANTES da baixa: o RETURNING do update traria o valor novo, e
+    // aí não daria para saber se o contato já estava fora — o link costuma ser
+    // aberto mais de uma vez, e isso não pode virar evento repetido.
+    const [antes] = await db
+      .select({ subscribed: contacts.subscribed })
+      .from(contacts)
+      .where(eq(contacts.id, payload.contactId));
+
     const [updated] = await db
       .update(contacts)
       .set({ subscribed: false })
@@ -52,6 +61,12 @@ export async function POST(request: NextRequest) {
         { error: "Contato não encontrado." },
         { status: 404 }
       );
+    }
+
+    if (antes?.subscribed) {
+      await emitContactEvent("email_unsubscribed", payload.contactId, {
+        sendId: payload.sendId ?? null,
+      });
     }
 
     // Atribui o descadastro à campanha que originou o clique.

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { campaignSends, getDb } from "@/lib/db";
 import { getBaseUrl } from "@/lib/email";
+import { emitContactEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,14 @@ export async function GET(request: NextRequest) {
             openedAt: send.openedAt ?? now,
           })
           .where(eq(campaignSends.id, sid));
+
+        // Só o primeiro clique vira evento — reabrir o link não é fato novo.
+        if (!send.clickedAt) {
+          await emitContactEvent("email_clicked", send.contactId, {
+            campaignId: send.campaignId,
+            sendId: send.id,
+          });
+        }
       }
     } catch (error) {
       // O redirect precisa acontecer mesmo se o tracking falhar.

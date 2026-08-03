@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
 import { campaignSends, getDb } from "@/lib/db";
+import { emitContactEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,15 @@ export async function GET(request: NextRequest) {
             openedAt: send.openedAt ?? new Date(),
           })
           .where(eq(campaignSends.id, sid));
+
+        // Só a PRIMEIRA abertura vira evento: o pixel é carregado toda vez que
+        // o e-mail é reaberto, e um gatilho não deve disparar de novo por isso.
+        if (!send.openedAt) {
+          await emitContactEvent("email_opened", send.contactId, {
+            campaignId: send.campaignId,
+            sendId: send.id,
+          });
+        }
       }
     } catch (error) {
       // O pixel precisa responder mesmo se o tracking falhar.

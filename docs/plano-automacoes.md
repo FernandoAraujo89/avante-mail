@@ -259,15 +259,29 @@ rodando, o tamanho real das outras fases fica muito mais claro.
 
 ---
 
-## 10. Decisões em aberto
+## 10. Decisões tomadas
 
-Precisam da sua resposta antes da fase 1:
+Definidas em 03/08/2026:
 
-1. **Reentrada:** um contato pode entrar duas vezes na mesma automação? Sugiro
-   `once` como padrão, com opção de permitir.
-2. **Contato descadastrado no meio do fluxo:** para tudo, ou continua os passos
-   que não enviam (tag, campo)? Sugiro parar tudo — mais simples de explicar.
-3. **Editar automação ativa:** o que acontece com quem já está no meio dela?
-   Sugiro versionar: quem entrou segue a versão antiga, novos usam a nova.
-4. **Limite de automações ativas** por vez, para conter custo enquanto a
-   equipe aprende a ferramenta.
+**1. Reentrada: não.** Um contato entra uma vez em cada automação. Simplifica
+o modelo (`automation_runs` ganha índice único por automação + contato, que
+vira a própria trava contra entrada duplicada por eventos repetidos) e é a
+proteção mais barata contra mandar a mesma sequência duas vezes para alguém.
+
+**2. Descadastro no meio do fluxo: para tudo.** O percurso vai para `stopped`
+e nenhum passo seguinte roda — nem os que não enviam. É o comportamento que
+respeita o pedido do contato sem exigir que alguém entenda a regra.
+
+**3. Automação ativa é versionada.** Editar uma automação em uso cria uma nova
+versão; quem já está dentro termina pela versão em que entrou. Sem isso, mexer
+no fluxo enquanto centenas de pessoas o percorrem produz percursos
+incoerentes — o contato receberia o passo 5 de um fluxo que já não existe.
+
+> Implicação no modelo: `automations` ganha `version` e as tabelas de passos
+> passam a apontar para a versão, não para a automação. `automation_runs`
+> guarda a versão em que o contato entrou.
+
+**4. Limite de automações ativas: sim.** Teto de **5 ativas** ao mesmo tempo,
+guardado em `app_settings` (mesma mecânica da lista do Avante News), para
+mudar sem deploy. Passar do teto exige pausar outra — trava barata contra
+custo inesperado enquanto a equipe aprende a ferramenta.
