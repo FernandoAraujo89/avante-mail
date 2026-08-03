@@ -66,3 +66,29 @@ export function getWhatsAppQueue() {
   cachedWhatsAppQueue = queue;
   return queue;
 }
+
+// ─── Fila das automações ─────────────────────────────────────────
+// Um job = um passo de um contato. A espera ("Aguarde 2 dias") é um job
+// adiado, a mesma mecânica do agendamento de campanha.
+// ATENÇÃO: o Redis aqui é só o despachante. Quem manda é automation_runs no
+// Postgres — ver reconciliarPendentes no worker.
+
+export const AUTOMATION_QUEUE_NAME = "automation-runs";
+
+export interface AutomationJobData {
+  runId: string;
+}
+
+function createAutomationQueue() {
+  return new Queue<AutomationJobData>(AUTOMATION_QUEUE_NAME, {
+    connection: createRedisConnection(),
+  });
+}
+
+let cachedAutomationQueue: ReturnType<typeof createAutomationQueue> | undefined;
+
+export function getAutomationQueue() {
+  const queue = cachedAutomationQueue ?? createAutomationQueue();
+  cachedAutomationQueue = queue;
+  return queue;
+}

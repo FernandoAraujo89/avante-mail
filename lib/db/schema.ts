@@ -1,11 +1,13 @@
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -170,6 +172,177 @@ export const contactEvents = pgTable(
     index("contact_events_pendentes_idx").on(t.processedAt, t.createdAt),
     index("contact_events_contato_idx").on(t.contactId, t.createdAt),
   ]
+);
+
+// ─── Automações ────────────────────────────────────────────────────────────
+// Fluxo que roda sozinho por contato (docs/plano-automacoes.md).
+
+export const AUTOMATION_STATUSES = ["draft", "active", "paused", "archived"] as const;
+export type AutomationStatus = (typeof AUTOMATION_STATUSES)[number];
+
+export const AUTOMATION_TRIGGER_TYPES = [
+  "tag_added",
+  "tag_removed",
+  "list_subscribed",
+  "list_unsubscribed",
+  "contact_created",
+  "email_opened",
+  "email_clicked",
+  "whatsapp_replied",
+  "manual",
+] as const;
+export type AutomationTriggerType = (typeof AUTOMATION_TRIGGER_TYPES)[number];
+
+export const AUTOMATION_STEP_TYPES = [
+  // Fase 1
+  "wait",
+  "add_tag",
+  "remove_tag",
+  "subscribe_list",
+  "unsubscribe_list",
+  "end",
+  // Fases seguintes — declarados aqui para o schema não mudar depois; o motor
+  // recusa com mensagem clara enquanto não estiverem implementados.
+  "send_email",
+  "send_whatsapp",
+  "if_else",
+  "update_field",
+  "webhook",
+] as const;
+export type AutomationStepType = (typeof AUTOMATION_STEP_TYPES)[number];
+
+export const AUTOMATION_RUN_STATUSES = [
+  "running",
+  "waiting",
+  "done",
+  "stopped",
+  "failed",
+] as const;
+export type AutomationRunStatus = (typeof AUTOMATION_RUN_STATUSES)[number];
+
+export const automations = pgTable("automations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description"),
+  status: text("status").$type<AutomationStatus>().notNull().default("draft"),
+  /** Versão que recebe novas entradas. Quem já entrou segue a sua. */
+  currentVersionId: uuid("current_version_id"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Editar uma automação em uso cria uma versão nova: quem já está no meio do
+// fluxo termina pela versão em que entrou, senão receberia o passo 5 de um
+// fluxo que não existe mais.
+export const automationVersions = pgTable(
+  "automation_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("automation_versions_idx").on(t.automationId, t.version)]
+);
+
+export const automationTriggers = pgTable(
+  "automation_triggers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    type: text("type").$type<AutomationTriggerType>().notNull(),
+    /** { tag } | { listId } — o que o evento precisa casar. */
+    config: jsonb("config").$type<Record<string, unknown>>(),
+  },
+  (t) => [index("automation_triggers_versao_idx").on(t.versionId, t.type)]
+);
+
+// Árvore do fluxo. parent + branch + position (em vez de ponteiro encadeado)
+// porque a tela insere passos ENTRE dois existentes: com posição é só
+// deslocar, com ponteiro seria reescrever vizinhos.
+export const automationSteps = pgTable(
+  "automation_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id"),
+    /** Caminho do pai: 'main', ou 'yes'/'no' quando o pai é um Se/Então. */
+    branch: text("branch").notNull().default("main"),
+    position: integer("position").notNull().default(0),
+    type: text("type").$type<AutomationStepType>().notNull(),
+    config: jsonb("config").$type<Record<string, unknown>>(),
+  },
+  (t) => [
+    index("automation_steps_ordem_idx").on(t.versionId, t.parentId, t.branch, t.position),
+  ]
+);
+
+// Um contato percorrendo o fluxo.
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => automationVersions.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    currentStepId: uuid("current_step_id"),
+    status: text("status")
+      .$type<AutomationRunStatus>()
+      .notNull()
+      .default("running"),
+    /** Espelha o agendamento do BullMQ — ver a reconciliação no worker. */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    /** Teto contra laço infinito (automação que realimenta o próprio gatilho). */
+    stepsExecuted: integer("steps_executed").notNull().default(0),
+    stoppedReason: text("stopped_reason"),
+    enteredAt: timestamp("entered_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    // Reentrada = não: um contato entra uma vez em cada automação. Este índice
+    // é a própria trava contra evento repetido criar percurso duplicado.
+    uniqueIndex("automation_runs_unico_idx").on(t.automationId, t.contactId),
+    index("automation_runs_pendentes_idx").on(t.status, t.nextRunAt),
+  ]
+);
+
+// Log por passo: auditoria e, mais tarde, as métricas por passo da tela.
+export const automationRunSteps = pgTable(
+  "automation_run_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    stepId: uuid("step_id").notNull(),
+    status: text("status").notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("automation_run_steps_idx").on(t.runId, t.at)]
 );
 
 export const templates = pgTable("templates", {
