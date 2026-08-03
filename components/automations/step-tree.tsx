@@ -3,12 +3,16 @@
 import { Fragment, useState } from "react";
 import {
   AlertTriangle,
+  CheckCheck,
   Clock,
   Flag,
   GripVertical,
   Mail,
+  MailOpen,
   MessageCircle,
+  MousePointerClick,
   Plus,
+  Send,
   Split,
   Tag,
   Trash2,
@@ -33,11 +37,17 @@ import type { AutomationStepType } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 
 import {
-  resumoDoPasso,
+  cartaoDoPasso,
   STEP_LABEL,
   STEP_MENU,
   type Catalogo,
 } from "./labels";
+
+/** "16,6%" — taxa sobre o total, no formato do resto do sistema. */
+function taxa(parte: number, total: number): string {
+  if (total <= 0) return "0%";
+  return `${((parte / total) * 100).toFixed(1).replace(".", ",")}%`;
+}
 
 // Árvore do fluxo: uma coluna vertical com "+" entre os passos, e o Se/Então
 // abrindo duas colunas (docs/plano-automacoes.md, seção 7).
@@ -169,7 +179,10 @@ function Coluna(props: ColunaProps) {
   const corte = itens.findIndex((s) => s.type === "if_else");
 
   return (
-    <div className="flex min-w-56 flex-col items-center">
+    // w-full de propósito: é o que faz o Se/Então lá dentro enxergar a largura
+    // REAL disponível. Coluna do tamanho do cartão faria a container query
+    // medir 288px e empilhar os ramos mesmo com espaço de sobra na tela.
+    <div className="flex w-full min-w-72 flex-col items-center">
       <Zona {...props} position={0} />
       {itens.map((step, i) => (
         <Fragment key={step.id}>
@@ -227,7 +240,7 @@ function Zona({
           onMove(dragId, destino);
         }}
         className={cn(
-          "my-1 h-3 w-40 rounded-full transition-colors",
+          "my-1 h-3 w-56 rounded-full transition-colors",
           !permitido
             ? "bg-transparent"
             : over
@@ -274,11 +287,13 @@ function Cartao({
     ? "Nada roda depois de um Se/Então — arraste este passo para dentro do lado Sim ou Não, ou remova-o."
     : problemasDoPasso[0];
 
+  const { chip, texto } = cartaoDoPasso(step, catalogo);
+
   return (
     <div
       onClick={() => onSelect(step.id)}
       className={cn(
-        "group relative w-56 rounded-lg border bg-card px-3 py-2.5 text-left shadow-sm transition-colors cursor-pointer",
+        "group relative w-72 overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-colors cursor-pointer",
         selecionado
           ? "border-primary ring-[3px] ring-ring/30"
           : "border-border hover:border-primary/60",
@@ -288,75 +303,100 @@ function Cartao({
         inalcancavel ? "opacity-70" : ""
       )}
     >
-      <div className="flex items-start gap-2.5">
-        <span
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("text/plain", step.id);
-            e.dataTransfer.effectAllowed = "move";
-            // Mudar o estado dentro do dragstart altera o DOM sob o elemento
-            // arrastado e faz o Chrome CANCELAR o arraste. Adiar um tick deixa
-            // o navegador capturar o drag antes das zonas aparecerem.
-            window.setTimeout(() => setDragId(step.id), 0);
-          }}
-          onDragEnd={() => setDragId(null)}
-          onClick={(e) => e.stopPropagation()}
-          title="Arrastar para reordenar"
-          className="mt-0.5 cursor-grab text-muted-foreground active:cursor-grabbing"
-        >
-          <GripVertical className="size-4" />
+      {/* Pegar e apagar aparecem no hover, fora do fluxo do conteúdo: o cartão
+          parado mostra só o que o passo faz. Mesmo padrão do Criador. */}
+      <span
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", step.id);
+          e.dataTransfer.effectAllowed = "move";
+          // Mudar o estado dentro do dragstart altera o DOM sob o elemento
+          // arrastado e faz o Chrome CANCELAR o arraste. Adiar um tick deixa
+          // o navegador capturar o drag antes das zonas aparecerem.
+          window.setTimeout(() => setDragId(step.id), 0);
+        }}
+        onDragEnd={() => setDragId(null)}
+        onClick={(e) => e.stopPropagation()}
+        title="Arrastar para reordenar"
+        className="absolute left-0.5 top-3 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+      >
+        <GripVertical className="size-4" />
+      </span>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(step.id);
+        }}
+        aria-label={`Remover passo ${STEP_LABEL[step.type]}`}
+        className="absolute right-2 top-2.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus:opacity-100 group-hover:opacity-100 cursor-pointer"
+      >
+        <Trash2 className="size-4" />
+      </button>
+
+      <div className="flex items-start gap-3 p-3.5 pl-4">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <Icone className="size-4.5" />
         </span>
 
-        <Icone className="mt-0.5 size-4 shrink-0 text-primary" />
-
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">
+        <div className="min-w-0 flex-1 pr-5">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-semibold leading-snug">
             {STEP_LABEL[step.type]}
+            {chip ? (
+              <span className="max-w-full truncate rounded-sm bg-accent px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-primary">
+                {chip}
+              </span>
+            ) : null}
           </p>
-          <p className="truncate text-xs text-muted-foreground">
-            {resumoDoPasso(step, catalogo)}
-          </p>
+          {texto ? (
+            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+              {texto}
+            </p>
+          ) : null}
         </div>
-
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove(step.id);
-          }}
-          aria-label={`Remover passo ${STEP_LABEL[step.type]}`}
-          className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-destructive cursor-pointer"
-        >
-          <Trash2 className="size-4" />
-        </button>
       </div>
 
-      {/* Números do passo: quantos estão parados AQUI e o que já saiu daqui.
-          Ficam no cartão porque é onde a pergunta aparece — "o fluxo está
+      {/* Faixa de números: quantos estão parados AQUI e o que já saiu daqui.
+          Fica no cartão porque é onde a pergunta aparece — "o fluxo está
           andando?" se responde olhando o desenho, não uma tabela à parte. */}
       {metrica && (metrica.agora > 0 || metrica.passaram > 0) ? (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2 text-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border bg-muted/30 px-3.5 py-2 text-xs font-semibold text-primary">
           {metrica.agora > 0 ? (
-            <span className="rounded-sm bg-info-light px-1.5 py-0.5 font-semibold text-info-dark">
+            <span className="flex items-center gap-1">
+              <Users className="size-3.5" />
               {metrica.agora} aqui agora
             </span>
           ) : null}
-          <span className="text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <CheckCheck className="size-3.5" />
             {metrica.passaram === 1 ? "1 passou" : `${metrica.passaram} passaram`}
           </span>
           {metrica.envios && metrica.envios.enviados > 0 ? (
-            <span className="text-muted-foreground">
-              · {metrica.envios.enviados} enviados
-              {metrica.envios.abertos > 0
-                ? ` · ${Math.round((metrica.envios.abertos / metrica.envios.enviados) * 100)}% abertura`
-                : ""}
-            </span>
+            <>
+              <span className="flex items-center gap-1">
+                <Send className="size-3.5" />
+                {metrica.envios.enviados} enviados
+              </span>
+              <span className="flex items-center gap-1">
+                <MailOpen className="size-3.5" />
+                {taxa(metrica.envios.abertos, metrica.envios.enviados)} de
+                abertura
+              </span>
+              {metrica.envios.cliques > 0 ? (
+                <span className="flex items-center gap-1">
+                  <MousePointerClick className="size-3.5" />
+                  {taxa(metrica.envios.cliques, metrica.envios.enviados)} de
+                  cliques
+                </span>
+              ) : null}
+            </>
           ) : null}
         </div>
       ) : null}
 
       {alerta ? (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive-hover">
+        <p className="flex items-start gap-1.5 border-t border-destructive/30 bg-destructive/5 px-3.5 py-2 text-xs text-destructive-hover">
           <AlertTriangle className="mt-px size-3.5 shrink-0" />
           {alerta}
         </p>
@@ -373,13 +413,13 @@ function Ramos(props: ColunaProps & { pai: StepDraft }) {
     // lado a lado. Com breakpoint de janela, o de dentro ficaria espremido.
     <div className="@container w-full">
       <div className="mx-auto h-3 w-px bg-border" />
-      <div className="flex flex-col gap-4 @lg:flex-row @lg:items-start @lg:justify-center @lg:gap-6">
+      <div className="flex flex-col gap-4 @min-[38rem]:flex-row @min-[38rem]:items-start @min-[38rem]:justify-center @min-[38rem]:gap-6">
         {(["yes", "no"] as const).map((ramo) => (
           // Empilhados (pouca largura), os dois lados viram um bloco só de
           // cartões — o fundo separa onde termina o "Sim" e começa o "Não".
           <div
             key={ramo}
-            className="flex flex-col items-center rounded-xl bg-muted/40 p-3 @lg:bg-transparent @lg:p-0"
+            className="flex flex-col items-center rounded-xl bg-muted/40 p-3 @min-[38rem]:bg-transparent @min-[38rem]:p-0"
           >
             <span
               className={cn(

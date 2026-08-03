@@ -257,7 +257,9 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* flex-wrap: com o botão do relatório, a fileira não cabe em 375px
+              e empurrava a página inteira para o lado. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <AutomationStatusBadge status={status} />
             <span className="text-xs text-muted-foreground">v{version}</span>
             <Button variant="ghost" asChild>

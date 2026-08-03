@@ -81,7 +81,8 @@ export const FIELD_LABEL: Record<string, string> = {
 export interface Catalogo {
   lists: { id: string; name: string }[];
   templates: { id: string; name: string }[];
-  waTemplates: { id: string; name: string }[];
+  /** bodyText alimenta a prévia da mensagem no cartão do passo. */
+  waTemplates: { id: string; name: string; bodyText?: string }[];
 }
 
 const VAZIO: Catalogo = { lists: [], templates: [], waTemplates: [] };
@@ -160,6 +161,80 @@ export function resumoDoPasso(
       return "encerra o percurso";
     default:
       return "";
+  }
+}
+
+/**
+ * O cartão do passo em duas partes, no formato do print de referência:
+ * um selo com o "o quê" (assunto, tag, modelo) e uma linha de prévia embaixo.
+ * O selo é o que o usuário lê primeiro para reconhecer o passo na coluna.
+ */
+export function cartaoDoPasso(
+  step: StepDraft,
+  catalogo: Catalogo = VAZIO
+): { chip: string | null; texto: string | null } {
+  const c = step.config ?? {};
+
+  switch (step.type) {
+    case "send_email": {
+      const modelo = texto(c.templateId)
+        ? `Modelo: ${nome(catalogo.templates, c.templateId)}`
+        : c.mjmlContent
+          ? "E-mail montado no Criador"
+          : "Sem conteúdo montado";
+      return {
+        chip: texto(c.subject) || null,
+        texto: texto(c.preheader) || modelo,
+      };
+    }
+
+    case "send_whatsapp": {
+      const modelo = catalogo.waTemplates.find(
+        (t) => t.id === c.whatsappTemplateId
+      );
+      return {
+        chip: modelo?.name ?? null,
+        texto: modelo?.bodyText ?? "Escolha o modelo aprovado da mensagem",
+      };
+    }
+
+    case "wait":
+      return {
+        chip: resumoDaEspera(c),
+        texto: "O contato espera antes de seguir para o próximo passo",
+      };
+
+    case "add_tag":
+    case "remove_tag":
+      return {
+        chip: texto(c.tag) || null,
+        texto:
+          step.type === "add_tag"
+            ? "Marca o contato com esta tag"
+            : "Tira esta tag do contato",
+      };
+
+    case "subscribe_list":
+    case "unsubscribe_list":
+      return {
+        chip: texto(c.listId) ? nome(catalogo.lists, c.listId) : null,
+        texto:
+          step.type === "subscribe_list"
+            ? "Inscreve o contato na lista"
+            : "Cancela a inscrição do contato na lista",
+      };
+
+    case "if_else":
+      return {
+        chip: null,
+        texto: resumoDoPasso(step, catalogo),
+      };
+
+    case "end":
+      return { chip: null, texto: "Encerra o percurso deste contato" };
+
+    default:
+      return { chip: null, texto: resumoDoPasso(step, catalogo) };
   }
 }
 
