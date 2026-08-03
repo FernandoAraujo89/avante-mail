@@ -16,7 +16,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { campaigns, campaignSends, getDb, templates } from "@/lib/db";
+import { campaigns, campaignSends, getDb, templates, users } from "@/lib/db";
+import { campaignSenderLabel } from "@/lib/campaign-author";
 import { formatBrl, formatDateTime, formatUsd } from "@/lib/format";
 import { campaignCost } from "@/lib/pricing";
 import { resolveNewsList } from "@/lib/settings";
@@ -28,9 +29,15 @@ export default async function NewsPage() {
 
   const [rows, audience] = await Promise.all([
     db
-      .select({ campaign: campaigns, templateName: templates.name })
+      .select({
+        campaign: campaigns,
+        templateName: templates.name,
+        // Nome atual de quem disparou; a cópia do envio cobre a conta removida.
+        senderName: users.name,
+      })
       .from(campaigns)
       .leftJoin(templates, eq(campaigns.templateId, templates.id))
+      .leftJoin(users, eq(campaigns.sentByUserId, users.id))
       .where(eq(campaigns.kind, "news"))
       .orderBy(desc(campaigns.createdAt)),
     resolveNewsList(),
@@ -89,12 +96,13 @@ export default async function NewsPage() {
                 <TableHead>Modelo de origem</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Custo</TableHead>
+                <TableHead>Enviada por</TableHead>
                 <TableHead>Enviada em</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(({ campaign, templateName }) => {
+              {rows.map(({ campaign, templateName, senderName }) => {
                 const editable =
                   campaign.status === "draft" || campaign.status === "scheduled";
                 const cost = campaignCost({
@@ -126,6 +134,9 @@ export default async function NewsPage() {
                           </p>
                         </>
                       )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {campaignSenderLabel(campaign, senderName) ?? "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {campaign.sentAt

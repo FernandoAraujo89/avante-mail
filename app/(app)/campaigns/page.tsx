@@ -22,9 +22,11 @@ import {
   getDb,
   lists as listsTable,
   templates,
+  users,
   whatsappTemplates,
   type Campaign,
 } from "@/lib/db";
+import { campaignSenderLabel } from "@/lib/campaign-author";
 import { formatBrl, formatDateTime, formatUsd, listsLabel } from "@/lib/format";
 import { campaignCost } from "@/lib/pricing";
 
@@ -35,9 +37,15 @@ export default async function CampaignsPage() {
 
   // Só campanhas: o Avante News tem tela própria (/news).
   const rows = await db
-    .select({ campaign: campaigns, templateName: templates.name })
+    .select({
+      campaign: campaigns,
+      templateName: templates.name,
+      // Nome atual de quem disparou; a cópia do envio cobre a conta removida.
+      senderName: users.name,
+    })
     .from(campaigns)
     .leftJoin(templates, eq(campaigns.templateId, templates.id))
+    .leftJoin(users, eq(campaigns.sentByUserId, users.id))
     .where(eq(campaigns.kind, "campaign"))
     .orderBy(desc(campaigns.createdAt));
 
@@ -130,12 +138,13 @@ export default async function CampaignsPage() {
                 <TableHead>Listas</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Custo</TableHead>
+                <TableHead>Enviada por</TableHead>
                 <TableHead>Criada em</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(({ campaign, templateName }) => {
+              {rows.map(({ campaign, templateName, senderName }) => {
                 const editable =
                   campaign.status === "draft" ||
                   campaign.status === "scheduled";
@@ -175,6 +184,9 @@ export default async function CampaignsPage() {
                           </p>
                         </>
                       )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {campaignSenderLabel(campaign, senderName) ?? "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatDateTime(campaign.createdAt)}

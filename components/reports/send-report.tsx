@@ -41,6 +41,7 @@ import {
   formatUsd,
   listsLabel,
 } from "@/lib/format";
+import { campaignSenderLabel } from "@/lib/campaign-author";
 import { campaignCost } from "@/lib/pricing";
 import { isResendableErrorCode } from "@/lib/whatsapp/errors";
 
@@ -69,20 +70,13 @@ export async function SendReport({
 
   if (!campaign || campaign.kind !== kind) notFound();
 
-  // Quem disparou: prefere o nome ATUAL do usuário (ele pode ter sido
-  // corrigido depois) e cai na cópia guardada no envio se a conta sumiu.
-  // Campanhas anteriores a este registro não têm autoria — e dizem isso.
-  let quemEnviou: string | null = campaign.sentByName?.trim() || null;
-  if (campaign.sentByUserId) {
-    const [autor] = await db
-      .select({ name: users.name })
-      .from(users)
-      .where(eq(users.id, campaign.sentByUserId));
-    if (autor?.name) quemEnviou = autor.name;
-  }
-  if (!quemEnviou && ["sent", "sending"].includes(campaign.status)) {
-    quemEnviou = "não registrado";
-  }
+  const [autor] = campaign.sentByUserId
+    ? await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, campaign.sentByUserId))
+    : [];
+  const quemEnviou = campaignSenderLabel(campaign, autor?.name);
 
   const campaignListNames =
     campaign.lists && campaign.lists.length > 0
