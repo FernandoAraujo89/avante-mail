@@ -8,14 +8,13 @@ ações sobre o contato.
 
 ## ▶ ESTADO ATUAL (03/08/2026)
 
-**Fases 0 e 1 estão EM PRODUÇÃO. A fase 2 está pronta e testada em dev** —
-falta rodar a migração no servidor. A próxima é a fase 3 (Se/Então).
+**Fases 0, 1 e 2 estão EM PRODUÇÃO.** A próxima é a fase 3 (Se/Então).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | 0 — Eventos | ✅ produção | `4bd0c62` |
 | 1 — Motor | ✅ produção | `2f9d39d` |
-| 2 — Envios | ✅ pronta (falta deploy) | |
+| 2 — Envios | ✅ produção | `fcbfa1d` |
 | 3 — Se/Então | ⬜ próxima | |
 | 4 — Tela | ⬜ | |
 | 5 — Relatórios | ⬜ | |
@@ -28,8 +27,11 @@ percursos e executa os passos `wait`, `add_tag`, `remove_tag`,
 `lib/automations/envios.ts`, a dos passos de envio. Serviço
 `automation-worker` no compose.
 
-**No deploy da fase 2:** rodar `npx tsx scripts/migrate-automation-sends.ts`
-(campaign_sends genérica). Sem isso o passo de envio falha na inserção.
+**Migração da fase 2** (`scripts/migrate-automation-sends.ts`) já aplicada em
+produção — o `deploy.sh` roda todo `scripts/migrate-*.ts` antes de subir o app.
+Atenção: o deploy sincroniza o **diretório de onde é chamado**, e roda a partir
+do Mac (ele é quem faz o ssh) — chamado do lugar errado, ele sobe uma versão
+antiga sem erro nenhum, e a migração "não roda" porque nem chegou lá.
 
 ### Como funciona o envio (fase 2)
 
