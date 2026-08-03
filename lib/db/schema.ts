@@ -231,6 +231,12 @@ export const campaigns = pgTable("campaigns", {
   // escolhido.
   recipientIds: uuid("recipient_ids").array(),
   status: text("status").$type<CampaignStatus>().notNull().default("draft"),
+  // Quem disparou. O id liga ao usuário; o nome é uma CÓPIA do momento do
+  // envio, para o registro de quem enviou sobreviver à remoção da conta.
+  sentByUserId: uuid("sent_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  sentByName: text("sent_by_name"),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })

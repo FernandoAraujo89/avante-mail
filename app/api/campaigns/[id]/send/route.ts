@@ -19,6 +19,7 @@ import {
   type Campaign,
 } from "@/lib/db";
 import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
+import { sessionUserFromRequest } from "@/lib/session";
 import { resolveNewsList, resolveTeamList } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
@@ -175,10 +176,11 @@ async function dispatchWhatsApp(
   return NextResponse.json({ queued: sends.length, scheduled: delay > 0 });
 }
 
-export async function POST(_request: NextRequest, context: RouteContext) {
+export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const db = getDb();
+    const autor = await sessionUserFromRequest(request);
 
     const [campaign] = await db
       .select()
@@ -196,6 +198,16 @@ export async function POST(_request: NextRequest, context: RouteContext) {
         { error: "Esta campanha já foi disparada." },
         { status: 409 }
       );
+    }
+
+    // Quem disparou fica registrado antes de enfileirar: se algo falhar
+    // depois, o registro de autoria já existe. O nome é copiado agora para
+    // sobreviver à remoção da conta.
+    if (autor) {
+      await db
+        .update(campaigns)
+        .set({ sentByUserId: autor.id, sentByName: autor.name })
+        .where(eq(campaigns.id, campaign.id));
     }
 
     if (campaign.channel === "whatsapp") {

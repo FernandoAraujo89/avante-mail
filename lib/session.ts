@@ -32,6 +32,17 @@ export async function signSessionToken(user: SessionUser): Promise<string> {
     .sign(getSecret());
 }
 
+/**
+ * Usuário da sessão a partir do cookie da requisição. O parâmetro é tipado
+ * estruturalmente para este módulo continuar servindo ao middleware (Edge).
+ */
+export async function sessionUserFromRequest(request: {
+  cookies: { get(name: string): { value: string } | undefined };
+}): Promise<SessionUser | null> {
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  return token ? verifySessionToken(token) : null;
+}
+
 export async function verifySessionToken(
   token: string
 ): Promise<SessionUser | null> {

@@ -30,6 +30,7 @@ import {
   contacts,
   getDb,
   lists as listsTable,
+  users,
   whatsappTemplates,
   type CampaignKind,
 } from "@/lib/db";
@@ -67,6 +68,21 @@ export async function SendReport({
     .where(eq(campaigns.id, id));
 
   if (!campaign || campaign.kind !== kind) notFound();
+
+  // Quem disparou: prefere o nome ATUAL do usuário (ele pode ter sido
+  // corrigido depois) e cai na cópia guardada no envio se a conta sumiu.
+  // Campanhas anteriores a este registro não têm autoria — e dizem isso.
+  let quemEnviou: string | null = campaign.sentByName?.trim() || null;
+  if (campaign.sentByUserId) {
+    const [autor] = await db
+      .select({ name: users.name })
+      .from(users)
+      .where(eq(users.id, campaign.sentByUserId));
+    if (autor?.name) quemEnviou = autor.name;
+  }
+  if (!quemEnviou && ["sent", "sending"].includes(campaign.status)) {
+    quemEnviou = "não registrado";
+  }
 
   const campaignListNames =
     campaign.lists && campaign.lists.length > 0
@@ -137,7 +153,7 @@ export async function SendReport({
           campaign.sentAt
             ? ` · Concluída em ${formatDateTime(campaign.sentAt)}`
             : ""
-        }`}
+        }${quemEnviou ? ` · Enviada por ${quemEnviou}` : ""}`}
       >
         <div className="flex items-center gap-2">
           {isNews ? <Badge variant="info">Avante News</Badge> : null}
