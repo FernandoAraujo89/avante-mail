@@ -73,12 +73,12 @@ export async function POST(request: NextRequest) {
       try {
         await sendEmail({
           to: user.email,
-          subject: "Redefinição de senha — Avante Mail",
+          subject: "Redefinição de senha — Campanhas Avante",
           html: `
             <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#282E3F;">
               <h2 style="color:#1D50DC;">Redefinição de senha</h2>
               <p>Olá, ${user.name}.</p>
-              <p>Recebemos um pedido para redefinir a sua senha do <strong>Avante Mail</strong>.
+              <p>Recebemos um pedido para redefinir a sua senha no <strong>Campanhas Avante</strong>.
               Clique no botão abaixo para escolher uma senha nova. O link vale por
               <strong>${TOKEN_TTL_MINUTES} minutos</strong> e só pode ser usado uma vez.</p>
               <p style="text-align:center;margin:32px 0;">

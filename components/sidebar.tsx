@@ -35,7 +35,7 @@ const NAV_ITEMS = [
 
 function Brand() {
   return (
-    <Link href="/dashboard" aria-label="Avante Mail — início">
+    <Link href="/dashboard" aria-label="Campanhas Avante — início">
       <AvanteLogo type="horizontal" variant="blue" height={24} />
     </Link>
   );

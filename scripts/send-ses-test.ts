@@ -35,7 +35,7 @@ async function main() {
 
   const { messageId } = await sendEmail({
     to,
-    subject: "Teste de envio via Amazon SES — Avante Mail",
+    subject: "Teste de envio via Amazon SES — Campanhas Avante",
     html: "<p>Se você recebeu este e-mail, o envio via <strong>Amazon SES</strong> está funcionando. ✅</p>",
   });
 

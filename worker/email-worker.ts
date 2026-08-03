@@ -242,7 +242,7 @@ worker.on("error", (error) => {
 });
 
 console.log(
-  `[WORKER] Avante Mail — ouvindo a fila "${EMAIL_QUEUE_NAME}" (concorrência: 5, limite: ${MAX_SEND_RATE} e-mails/s via SES)`
+  `[WORKER] Campanhas Avante — ouvindo a fila "${EMAIL_QUEUE_NAME}" (concorrência: 5, limite: ${MAX_SEND_RATE} e-mails/s via SES)`
 );
 
 async function shutdown() {

@@ -272,7 +272,7 @@ export function boasVindasParceiroDesign(): EmailDesign {
   };
 }
 
-// ─── Escuros (padrão Avante Mail dark) ───────────────────────────
+// ─── Escuros (padrão escuro da Avante) ──────────────────────────
 
 const DARK_SETTINGS: DesignSettings = {
   bodyBackground: "#0D0D0D",

@@ -3,11 +3,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Avante Mail",
-    template: "%s · Avante Mail",
+    default: "Campanhas Avante",
+    template: "%s · Campanhas Avante",
   },
   description:
-    "Plataforma de e-mail marketing da Avante Soluções Digitais para comunicação com parceiros.",
+    "A plataforma de campanhas de e-mail e WhatsApp da Avante Soluções Digitais.",
 };
 
 export default function RootLayout({

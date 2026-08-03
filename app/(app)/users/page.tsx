@@ -125,7 +125,7 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="Usuários"
-        description="Quem pode acessar o Avante Mail — cada pessoa com seu próprio login."
+        description="Quem pode acessar o sistema — cada pessoa com seu próprio login."
       >
         <Button onClick={() => setCreateOpen(true)}>
           <Plus />

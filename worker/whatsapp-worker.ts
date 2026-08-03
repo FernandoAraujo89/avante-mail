@@ -270,7 +270,7 @@ function startWorker() {
   });
 
   console.log(
-    `[WORKER-WA] Avante Mail — ouvindo a fila "${WHATSAPP_QUEUE_NAME}" (concorrência: 5, limite: ${MAX_SEND_RATE} msgs/s via Cloud API)`
+    `[WORKER-WA] Campanhas Avante — ouvindo a fila "${WHATSAPP_QUEUE_NAME}" (concorrência: 5, limite: ${MAX_SEND_RATE} msgs/s via Cloud API)`
   );
 
   async function shutdown() {
