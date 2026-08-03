@@ -4,7 +4,44 @@ Objetivo: o usuário monta um fluxo que roda sozinho por contato, disparado por
 tags (e outros eventos), com passos de e-mail, WhatsApp, espera, decisão e
 ações sobre o contato.
 
-Este documento é o plano de arquitetura. Não há código escrito ainda.
+---
+
+## ▶ ESTADO ATUAL (03/08/2026)
+
+**Fases 0 e 1 estão EM PRODUÇÃO.** A próxima é a fase 2 (envios).
+
+| Fase | Situação | Commit |
+|---|---|---|
+| 0 — Eventos | ✅ produção | `4bd0c62` |
+| 1 — Motor | ✅ produção | `2f9d39d` |
+| 2 — Envios | ⬜ próxima | |
+| 3 — Se/Então | ⬜ | |
+| 4 — Tela | ⬜ | |
+| 5 — Relatórios | ⬜ | |
+
+**O que já roda:** `contact_events` registra o que muda no contato (7 pontos
+instrumentados); `worker/automation-worker.ts` consome os eventos, abre
+percursos e executa os passos `wait`, `add_tag`, `remove_tag`,
+`subscribe_list`, `unsubscribe_list` e `end`. `lib/automations/engine.ts`
+concentra a lógica. Serviço `automation-worker` no compose.
+
+**Como testar:** `npx tsx scripts/seed-automation-teste.ts` cria uma automação
+ativa (gatilho: tag "vip"; fluxo: aguarda 1min → +vip-processado → −vip →
+fim). `… remover` apaga. Não há tela ainda — é assim que se exercita o motor.
+
+**Armadilhas já pagas (não repetir):**
+- O BullMQ **recusa `:` no jobId** — o identificador usa `__`.
+- Percurso recém-criado nasce com `next_run_at = agora` de propósito: se o
+  processo morrer entre criar e enfileirar, a reconciliação o encontra. Sem
+  isso ele fica parado para sempre, **sem erro nenhum**.
+- A reconciliação cobre `waiting` **e** `running`: o job pode se perder
+  durante a espera ou entre dois passos.
+
+**Primeiro passo da fase 2:** tornar `campaign_sends` genérica — `campaign_id`
+anulável mais `automation_run_id` e `automation_step_id`. É o que faz entrega,
+leitura, custo e relatório funcionarem sem tocar em nada (seção 6).
+
+---
 
 ---
 
