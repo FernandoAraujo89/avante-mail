@@ -8,26 +8,61 @@ ações sobre o contato.
 
 ## ▶ ESTADO ATUAL (03/08/2026)
 
-**Fases 0 e 1 estão EM PRODUÇÃO.** A próxima é a fase 2 (envios).
+**Fases 0 e 1 estão EM PRODUÇÃO. A fase 2 está pronta e testada em dev** —
+falta rodar a migração no servidor. A próxima é a fase 3 (Se/Então).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | 0 — Eventos | ✅ produção | `4bd0c62` |
 | 1 — Motor | ✅ produção | `2f9d39d` |
-| 2 — Envios | ⬜ próxima | |
-| 3 — Se/Então | ⬜ | |
+| 2 — Envios | ✅ pronta (falta deploy) | |
+| 3 — Se/Então | ⬜ próxima | |
 | 4 — Tela | ⬜ | |
 | 5 — Relatórios | ⬜ | |
 
 **O que já roda:** `contact_events` registra o que muda no contato (7 pontos
 instrumentados); `worker/automation-worker.ts` consome os eventos, abre
 percursos e executa os passos `wait`, `add_tag`, `remove_tag`,
-`subscribe_list`, `unsubscribe_list` e `end`. `lib/automations/engine.ts`
-concentra a lógica. Serviço `automation-worker` no compose.
+`subscribe_list`, `unsubscribe_list`, `send_email`, `send_whatsapp` e `end`.
+`lib/automations/engine.ts` concentra a lógica do fluxo e
+`lib/automations/envios.ts`, a dos passos de envio. Serviço
+`automation-worker` no compose.
 
-**Como testar:** `npx tsx scripts/seed-automation-teste.ts` cria uma automação
-ativa (gatilho: tag "vip"; fluxo: aguarda 1min → +vip-processado → −vip →
-fim). `… remover` apaga. Não há tela ainda — é assim que se exercita o motor.
+**No deploy da fase 2:** rodar `npx tsx scripts/migrate-automation-sends.ts`
+(campaign_sends genérica). Sem isso o passo de envio falha na inserção.
+
+### Como funciona o envio (fase 2)
+
+O passo grava em **`campaign_sends`** (a mesma tabela das campanhas) e
+enfileira nas filas de sempre — `email-sends` e `whatsapp-sends`. Os workers
+ganharam um segundo caminho: quando `campaign_id` é nulo, o conteúdo vem do
+config do passo. Com isso entrega, abertura, leitura, descadastro e custo já
+valem para a automação, sem código novo.
+
+O percurso **não espera a entrega**: enfileirou, segue para o próximo passo.
+Quem controla intervalo é o "Aguarde".
+
+Config dos passos:
+
+```jsonc
+// send_email — mjmlContent é a fonte da verdade; templateId é a alternativa,
+// resolvida no momento do envio.
+{ "subject": "Bem-vindo", "preheader": "…", "mjmlContent": "<mjml>…</mjml>" }
+{ "subject": "Bem-vindo", "templateId": "<uuid de templates>" }
+
+// send_whatsapp — modelo aprovado + mapa de variáveis, igual ao da campanha.
+{ "whatsappTemplateId": "<uuid>", "variables": { "1": { "source": "name" } } }
+```
+
+Colunas novas em `campaign_sends`: `automation_run_id`, `automation_step_id`,
+`channel` e `campaign_id` **anulável** (com `CHECK` exigindo uma das duas
+origens).
+
+**Como testar:** `npx tsx scripts/seed-automation-envio.ts` cria uma automação
+ativa (gatilho: tag "boas-vindas"; fluxo: e-mail → WhatsApp, se houver modelo
+aprovado → aguarda 2min → +boas-vindas-enviado → fim). `… remover` apaga.
+⚠️ Com o worker no ar, marcar um contato com essa tag **envia de verdade**.
+(`seed-automation-teste.ts` continua sendo o teste do motor sem envio.)
 
 **Armadilhas já pagas (não repetir):**
 - O BullMQ **recusa `:` no jobId** — o identificador usa `__`.
@@ -36,10 +71,25 @@ fim). `… remover` apaga. Não há tela ainda — é assim que se exercita o mo
   isso ele fica parado para sempre, **sem erro nenhum**.
 - A reconciliação cobre `waiting` **e** `running`: o job pode se perder
   durante a espera ou entre dois passos.
+- **Um passo de envio manda uma vez por percurso** — garantido pelo índice
+  único parcial `campaign_sends_automacao_passo_idx`, não por checagem em
+  memória. O retry do BullMQ depois de gravar o envio e antes de avançar o
+  percurso mandaria a mesma mensagem duas vezes (dinheiro real).
+- Ao reencontrar o envio já gravado, o motor **reenfileira se ainda estiver
+  `pending`** em vez de ignorar. Ignorar deixaria o envio parado para sempre
+  no caso em que o processo morre entre gravar e enfileirar.
+- O **canal fica na linha do envio** (`campaign_sends.channel`), não deduzido
+  por join. Custo do mês não pode depender de uma campanha/passo que talvez
+  já tenha sido apagado.
+- WhatsApp sem consentimento/telefone **pula o passo** (log `skipped`) em vez
+  de derrubar o percurso — um fluxo com e-mail e WhatsApp continua valendo
+  pelo e-mail. Já modelo inexistente ou não aprovado **falha**, porque é erro
+  de configuração, não característica do contato.
 
-**Primeiro passo da fase 2:** tornar `campaign_sends` genérica — `campaign_id`
-anulável mais `automation_run_id` e `automation_step_id`. É o que faz entrega,
-leitura, custo e relatório funcionarem sem tocar em nada (seção 6).
+**O que a fase 2 ainda não mostra:** as telas de histórico do contato e os
+relatórios por campanha continuam lendo só envios com campanha (`innerJoin`),
+então o envio de automação aparece no **custo consolidado**, mas não nelas.
+É exatamente o escopo da fase 5.
 
 ---
 
@@ -215,7 +265,8 @@ eventos, mas são menos usados como *entrada*.
 
 Os envios da automação devem gravar em **`campaign_sends`**, e não numa tabela
 nova. Basta tornar `campaign_id` anulável e acrescentar `automation_run_id` e
-`automation_step_id`.
+`automation_step_id` (na prática entrou também `channel`, para o custo do mês
+não depender de um join com a campanha/passo que pode ter sido apagado).
 
 O motivo é concreto: o webhook do WhatsApp casa a confirmação pelo
 `provider_message_id` **nessa tabela**, e o custo consolidado do Dashboard, o

@@ -168,7 +168,9 @@ export async function GET(request: NextRequest) {
       );
 
     const sendRows: SendRow[] = rows.map((r) => ({
-      campaignId: r.campaignId,
+      // O innerJoin com campaigns garante a campanha: este painel é o das
+      // campanhas de e-mail, e envio de automação (campaign_id nulo) não entra.
+      campaignId: r.campaignId as string,
       campaignName: r.campaignName,
       sentAt: r.sentAt as Date,
       openedAt: r.openedAt,

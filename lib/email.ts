@@ -10,15 +10,27 @@ export function getBaseUrl(): string {
   );
 }
 
+/** Cabeçalho e textos do e-mail, venha ele de uma campanha ou de um passo. */
+export interface SendContent {
+  titulo: string;
+  subtitulo?: string | null;
+  corpo?: string | null;
+  ctaTexto?: string | null;
+  ctaUrl?: string | null;
+}
+
 /** Monta as variáveis Handlebars de um envio real.
  *
- * O conteúdo do e-mail vive no design da campanha (WYSIWYG), então só as
- * variáveis POR-DESTINATÁRIO são substituídas aqui. titulo/subtitulo abastecem
- * o <mj-title>/<mj-preview> do cabeçalho. corpo/cta_* são mantidos por
+ * O conteúdo do e-mail vive no design (WYSIWYG), então só as variáveis
+ * POR-DESTINATÁRIO são substituídas aqui. titulo/subtitulo abastecem o
+ * <mj-title>/<mj-preview> do cabeçalho. corpo/cta_* são mantidos por
  * compatibilidade com e-mails/templates legados que ainda usem esses tokens.
+ *
+ * O descadastro é assinado com (contato, envio) — vale igual para campanha e
+ * para automação, porque o token não sabe de qual das duas o envio veio.
  */
-export async function buildCampaignVariables(
-  campaign: Campaign,
+export async function buildSendVariables(
+  content: SendContent,
   contact: Contact,
   sendId: string
 ): Promise<TemplateVariables> {
@@ -27,17 +39,35 @@ export async function buildCampaignVariables(
 
   return {
     nome_parceiro: contact.name,
-    titulo: campaign.name,
-    subtitulo: campaign.preheader ?? "",
-    corpo: textToHtml(campaign.body ?? ""),
-    cta_texto: campaign.ctaText ?? "",
-    cta_url: campaign.ctaUrl ?? baseUrl,
+    titulo: content.titulo,
+    subtitulo: content.subtitulo ?? "",
+    corpo: textToHtml(content.corpo ?? ""),
+    cta_texto: content.ctaTexto ?? "",
+    cta_url: content.ctaUrl ?? baseUrl,
     // Link visível no rodapé: página com confirmação (protege contra scanners).
     unsubscribe_url: `${baseUrl}/unsubscribe?token=${unsubscribeToken}`,
     // Endpoint de descadastro em UM clique (RFC 8058) usado no header
     // List-Unsubscribe: o provedor (Gmail/Yahoo) faz POST direto aqui.
     list_unsubscribe_url: `${baseUrl}/api/unsubscribe?token=${unsubscribeToken}`,
   };
+}
+
+export async function buildCampaignVariables(
+  campaign: Campaign,
+  contact: Contact,
+  sendId: string
+): Promise<TemplateVariables> {
+  return buildSendVariables(
+    {
+      titulo: campaign.name,
+      subtitulo: campaign.preheader,
+      corpo: campaign.body,
+      ctaTexto: campaign.ctaText,
+      ctaUrl: campaign.ctaUrl,
+    },
+    contact,
+    sendId
+  );
 }
 
 /**

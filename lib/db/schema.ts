@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -464,11 +465,33 @@ export const campaigns = pgTable("campaigns", {
     .defaultNow(),
 });
 
+// Um envio a um contato. É a tabela genérica de entrega do sistema: serve às
+// campanhas E aos passos de envio das automações (fase 2 do plano). O motivo de
+// não ter criado uma tabela nova para a automação é concreto — o webhook do
+// WhatsApp casa a confirmação pelo provider_message_id AQUI, e o rastreio de
+// abertura, o descadastro e o custo consolidado leem DAQUI. Reaproveitando,
+// os quatro passam a valer para a automação sem alteração nenhuma.
 export const campaignSends = pgTable("campaign_sends", {
   id: uuid("id").primaryKey().defaultRandom(),
-  campaignId: uuid("campaign_id")
-    .notNull()
-    .references(() => campaigns.id, { onDelete: "cascade" }),
+  // Origem do envio: uma campanha OU um passo de automação — nunca os dois,
+  // nunca nenhum (restrição campaign_sends_origem_check, na migração).
+  campaignId: uuid("campaign_id").references(() => campaigns.id, {
+    onDelete: "cascade",
+  }),
+  // "set null" de propósito: apagar a automação não pode apagar o histórico de
+  // envio, que é a base do custo já pago à AWS/Meta.
+  automationRunId: uuid("automation_run_id").references(
+    () => automationRuns.id,
+    { onDelete: "set null" }
+  ),
+  // Sem FK, como automation_run_steps.step_id: o passo pertence a uma versão e
+  // some se a automação for apagada; o envio precisa sobreviver a isso.
+  automationStepId: uuid("automation_step_id"),
+  // Canal do envio, copiado na criação. Poderia ser deduzido por join (canal da
+  // campanha, tipo do passo), mas o custo do mês não pode depender de uma linha
+  // que talvez não exista mais — e é a base de cobrança: e-mail conta sentAt,
+  // WhatsApp conta deliveredAt.
+  channel: text("channel").$type<CampaignChannel>().notNull().default("email"),
   contactId: uuid("contact_id")
     .notNull()
     .references(() => contacts.id, { onDelete: "cascade" }),
@@ -498,7 +521,15 @@ export const campaignSends = pgTable("campaign_sends", {
   // histórico de respostas por contato; a captura (marcação manual ou
   // inbound automático via Resend) ainda não está ativada.
   repliedAt: timestamp("replied_at", { withTimezone: true }),
-});
+}, (t) => [
+  index("campaign_sends_automacao_idx").on(t.automationRunId),
+  // Um passo de envio manda UMA vez por percurso. Esta é a trava contra o job
+  // repetido (retry do BullMQ depois de gravar o envio, antes de avançar o
+  // percurso) virar mensagem duplicada — que custa dinheiro e irrita o contato.
+  uniqueIndex("campaign_sends_automacao_passo_idx")
+    .on(t.automationRunId, t.automationStepId)
+    .where(sql`${t.automationRunId} is not null`),
+]);
 
 // Configurações do sistema (chave/valor). Hoje guarda qual lista recebe o
 // Avante News; serve para qualquer preferência global futura.

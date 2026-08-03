@@ -1,6 +1,12 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 
-import { campaigns, campaignSends, getDb, whatsappTemplates } from "@/lib/db";
+import {
+  automationSteps,
+  campaigns,
+  campaignSends,
+  getDb,
+  whatsappTemplates,
+} from "@/lib/db";
 import {
   sesPricePerEmailUsd,
   usdToBrlRate,
@@ -11,6 +17,10 @@ import {
 // registrados. Base de cobrança: e-mail = envios aceitos pelo SES (sentAt);
 // WhatsApp = mensagens entregues (deliveredAt), na tarifa da categoria do
 // modelo. O mês é o da cobrança (envio/entrega), no fuso do Brasil.
+//
+// Conta campanhas E automações: desde a fase 2 do plano de automações, o passo
+// de envio grava na mesma campaign_sends. Dinheiro gasto por automação aparece
+// aqui junto do resto — custo que não aparece é custo que ninguém controla.
 
 export interface MonthlyConsumption {
   month: string; // "YYYY-MM"
@@ -48,7 +58,12 @@ export async function monthlyConsumption(
   const emailMonth = sql<string>`to_char(${campaignSends.sentAt} at time zone 'America/Sao_Paulo', 'YYYY-MM')`;
   const whatsappMonth = sql<string>`to_char(${campaignSends.deliveredAt} at time zone 'America/Sao_Paulo', 'YYYY-MM')`;
 
+  // Os joins com campaigns são à ESQUERDA de propósito: envio de automação não
+  // tem campanha (campaign_sends.campaign_id nulo) e mesmo assim foi cobrado.
+  // O canal vem da própria linha do envio, não da campanha.
+
   // E-mail: e-mails aceitos pelo SES, por mês e por tipo (campanha × News).
+  // Envio de automação não tem kind — conta como campanha.
   const emailRows = await db
     .select({
       month: emailMonth,
@@ -56,13 +71,14 @@ export async function monthlyConsumption(
       count: sql<number>`count(*)`,
     })
     .from(campaignSends)
-    .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+    .leftJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
     .where(
-      and(eq(campaigns.channel, "email"), isNotNull(campaignSends.sentAt))
+      and(eq(campaignSends.channel, "email"), isNotNull(campaignSends.sentAt))
     )
     .groupBy(emailMonth, campaigns.kind);
 
-  // WhatsApp: mensagens entregues, por mês e categoria do modelo.
+  // WhatsApp: mensagens entregues, por mês e categoria do modelo. O modelo do
+  // envio de automação está no config do passo.
   const whatsappRows = await db
     .select({
       month: whatsappMonth,
@@ -70,14 +86,21 @@ export async function monthlyConsumption(
       count: sql<number>`count(*)`,
     })
     .from(campaignSends)
-    .innerJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+    .leftJoin(campaigns, eq(campaignSends.campaignId, campaigns.id))
+    .leftJoin(
+      automationSteps,
+      eq(campaignSends.automationStepId, automationSteps.id)
+    )
     .leftJoin(
       whatsappTemplates,
-      eq(campaigns.whatsappTemplateId, whatsappTemplates.id)
+      sql`${whatsappTemplates.id} = coalesce(
+        ${campaigns.whatsappTemplateId},
+        (${automationSteps.config} ->> 'whatsappTemplateId')::uuid
+      )`
     )
     .where(
       and(
-        eq(campaigns.channel, "whatsapp"),
+        eq(campaignSends.channel, "whatsapp"),
         isNotNull(campaignSends.deliveredAt)
       )
     )

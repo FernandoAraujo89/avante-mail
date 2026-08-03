@@ -16,11 +16,15 @@ import {
 } from "@/lib/db";
 import { emitListDiff, emitTagDiff } from "@/lib/events";
 
-// Motor das automações (docs/plano-automacoes.md, fase 1).
+import { enviarEmailDoPasso, enviarWhatsAppDoPasso } from "./envios";
+
+// Motor das automações (docs/plano-automacoes.md, fases 1 e 2).
 //
 // Duas responsabilidades, propositalmente separadas:
 //  - consumirEventos(): lê contact_events pendentes e cria percursos;
 //  - avancarPercurso(): executa UM passo de UM contato.
+//
+// Os passos de envio moram em ./envios.ts — aqui fica só o fluxo.
 //
 // A fila só despacha; o Postgres é a fonte da verdade. Um "aguarde 2 dias" é
 // um job adiado no Redis — se o Redis for perdido, o job some sem erro e a
@@ -224,6 +228,11 @@ async function registrar(
     .values({ runId, stepId, status, result: result ?? null });
 }
 
+/** Passo que não fez efeito (ex.: contato sem WhatsApp) fica visível no log. */
+function statusDoResultado(resultado: Record<string, unknown>): string {
+  return resultado.pulado ? "skipped" : "done";
+}
+
 export interface ResultadoDoAvanco {
   /** O que fazer em seguida com este percurso. */
   proximo: "nada" | "imediato" | "adiado";
@@ -314,8 +323,8 @@ export async function avancarPercurso(
 
   // Demais passos: executa e segue.
   try {
-    const resultado = await executarPasso(passo, run.contactId);
-    await registrar(runId, passo.id, "done", resultado);
+    const resultado = await executarPasso(passo, run.id, run.contactId);
+    await registrar(runId, passo.id, statusDoResultado(resultado), resultado);
   } catch (error) {
     const mensagem = error instanceof Error ? error.message : String(error);
     await registrar(runId, passo.id, "failed", { erro: mensagem });
@@ -369,6 +378,7 @@ async function seguirPara(
 /** Efeito de cada tipo de passo. Lança para o percurso falhar com motivo. */
 async function executarPasso(
   passo: Passo,
+  runId: string,
   contactId: string
 ): Promise<Record<string, unknown>> {
   const db = getDb();
@@ -377,6 +387,25 @@ async function executarPasso(
   switch (passo.type as AutomationStepType) {
     case "end":
       return {};
+
+    // Envio: grava em campaign_sends e enfileira. O percurso NÃO espera a
+    // entrega — o intervalo entre passos é papel do "Aguarde". A elegibilidade
+    // do e-mail (subscribed) já foi revalidada no início deste avanço.
+    case "send_email":
+      return enviarEmailDoPasso({
+        runId,
+        stepId: passo.id,
+        config: passo.config,
+        contactId,
+      });
+
+    case "send_whatsapp":
+      return enviarWhatsAppDoPasso({
+        runId,
+        stepId: passo.id,
+        config: passo.config,
+        contactId,
+      });
 
     case "add_tag":
     case "remove_tag": {
@@ -436,7 +465,7 @@ async function executarPasso(
     }
 
     default:
-      // send_email, send_whatsapp, if_else, update_field, webhook.
+      // if_else (fase 3), update_field e webhook.
       throw new Error(
         `passo "${passo.type}" ainda não implementado (ver docs/plano-automacoes.md)`
       );

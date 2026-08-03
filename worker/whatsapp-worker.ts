@@ -3,12 +3,14 @@ import "./env";
 import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
+import { modeloDoPassoDeWhatsApp } from "../lib/automations/envios";
 import {
   campaigns,
   campaignSends,
   contacts,
   getDb,
   whatsappTemplates,
+  type WhatsAppTemplate,
 } from "../lib/db";
 import { phoneToWaId } from "../lib/phone";
 import {
@@ -20,6 +22,7 @@ import {
   isPermanentSendError,
   sendTemplateMessage,
 } from "../lib/whatsapp/client";
+import type { WhatsAppVariableMap } from "../lib/whatsapp/types";
 import { buildBodyComponents } from "../lib/whatsapp/variables";
 import { errorMessage } from "../lib/utils";
 
@@ -50,7 +53,7 @@ const MAX_SEND_RATE = Math.max(
 );
 
 async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
-  const { sendId, campaignId, contactId } = job.data;
+  const { sendId, contactId } = job.data;
   const db = getDb();
 
   const [send] = await db
@@ -69,17 +72,13 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     return;
   }
 
-  const [campaign] = await db
-    .select()
-    .from(campaigns)
-    .where(eq(campaigns.id, campaignId));
   const [contact] = await db
     .select()
     .from(contacts)
     .where(eq(contacts.id, contactId));
 
-  if (!campaign || !contact) {
-    throw new Error("Campanha ou contato não encontrado no banco.");
+  if (!contact) {
+    throw new Error("Contato não encontrado no banco.");
   }
 
   // Falha definitiva sem retry: grava o motivo e completa o job.
@@ -103,16 +102,62 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     return;
   }
 
-  if (!campaign.whatsappTemplateId) {
-    await failPermanently(null, "Campanha sem modelo de WhatsApp definido.");
-    return;
+  // Modelo e variáveis: da campanha ou do passo da automação. O envio em si é
+  // idêntico nos dois casos.
+  let template: WhatsAppTemplate | undefined;
+  let variables: WhatsAppVariableMap | null = null;
+
+  if (send.campaignId) {
+    const [campaign] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, send.campaignId));
+    if (!campaign) {
+      throw new Error("Campanha não encontrada no banco.");
+    }
+    if (!campaign.whatsappTemplateId) {
+      await failPermanently(null, "Campanha sem modelo de WhatsApp definido.");
+      return;
+    }
+    [template] = await db
+      .select()
+      .from(whatsappTemplates)
+      .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
+    variables = campaign.whatsappVariables;
+
+    // Primeiro job de uma campanha agendada: marca como "sending".
+    if (campaign.status === "scheduled") {
+      await db
+        .update(campaigns)
+        .set({ status: "sending" })
+        .where(
+          and(
+            eq(campaigns.id, campaign.id),
+            eq(campaigns.status, "scheduled")
+          )
+        );
+    }
+  } else {
+    if (!send.automationStepId) {
+      await failPermanently(
+        null,
+        "Envio sem campanha e sem passo de automação de origem."
+      );
+      return;
+    }
+    try {
+      const passo = await modeloDoPassoDeWhatsApp(send.automationStepId);
+      template = passo.template;
+      variables = passo.variables;
+    } catch (error) {
+      // Passo apagado ou config inválida: retry não resolve.
+      await failPermanently(null, errorMessage(error));
+      return;
+    }
   }
-  const [template] = await db
-    .select()
-    .from(whatsappTemplates)
-    .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
+
   if (!template) {
-    await failPermanently(null, "Modelo da campanha não existe mais.");
+    await failPermanently(null, "O modelo deste envio não existe mais.");
     return;
   }
   if (template.status !== "approved") {
@@ -124,20 +169,10 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     return;
   }
 
-  // Primeiro job de uma campanha agendada: marca como "sending".
-  if (campaign.status === "scheduled") {
-    await db
-      .update(campaigns)
-      .set({ status: "sending" })
-      .where(
-        and(eq(campaigns.id, campaignId), eq(campaigns.status, "scheduled"))
-      );
-  }
-
   try {
     const components = buildBodyComponents({
       bodyText: template.bodyText,
-      variables: campaign.whatsappVariables,
+      variables,
       examples: template.variableExamples,
       contact,
     });
@@ -215,6 +250,8 @@ function startWorker() {
   });
 
   worker.on("completed", async (job) => {
+    // Envio de automação não fecha campanha nenhuma — cada passo é um envio só.
+    if (!job.data.campaignId) return;
     try {
       await finalizeCampaignIfDone(job.data.campaignId);
     } catch (error) {
@@ -248,7 +285,9 @@ function startWorker() {
               eq(campaignSends.status, "pending")
             )
           );
-        await finalizeCampaignIfDone(job.data.campaignId);
+        if (job.data.campaignId) {
+          await finalizeCampaignIfDone(job.data.campaignId);
+        }
       } catch (updateError) {
         console.error(
           "[WORKER-WA] Erro ao registrar falha:",

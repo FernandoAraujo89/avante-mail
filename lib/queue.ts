@@ -5,7 +5,8 @@ export const EMAIL_QUEUE_NAME = "email-sends";
 
 export interface EmailJobData {
   sendId: string;
-  campaignId: string;
+  /** Nulo quando o envio vem de um passo de automação, não de uma campanha. */
+  campaignId: string | null;
   contactId: string;
 }
 
@@ -49,7 +50,8 @@ export const WHATSAPP_QUEUE_NAME = "whatsapp-sends";
 
 export interface WhatsAppJobData {
   sendId: string;
-  campaignId: string;
+  /** Nulo quando o envio vem de um passo de automação, não de uma campanha. */
+  campaignId: string | null;
   contactId: string;
 }
 

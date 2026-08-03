@@ -3,19 +3,26 @@ import "./env";
 import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
+import { conteudoDoPassoDeEmail } from "../lib/automations/envios";
 import {
   campaigns,
   campaignSends,
   contacts,
   getDb,
   templates,
+  type Contact,
 } from "../lib/db";
-import { buildCampaignVariables, buildEmailHtml } from "../lib/email";
+import {
+  buildCampaignVariables,
+  buildEmailHtml,
+  buildSendVariables,
+} from "../lib/email";
 import {
   createRedisConnection,
   EMAIL_QUEUE_NAME,
   type EmailJobData,
 } from "../lib/queue";
+import type { TemplateVariables } from "../lib/render";
 import { sendEmail } from "../lib/ses";
 import { errorMessage } from "../lib/utils";
 
@@ -41,49 +48,26 @@ if (missing.length > 0) {
 // sandbox é 1/s; ajuste SES_MAX_SEND_RATE conforme a cota da conta.
 const MAX_SEND_RATE = Math.max(1, Number(process.env.SES_MAX_SEND_RATE) || 10);
 
-async function processJob(job: Job<EmailJobData>): Promise<void> {
-  const { sendId, campaignId, contactId } = job.data;
+/** O que o envio precisa, venha de campanha ou de automação. */
+interface ConteudoDoEnvio {
+  subject: string;
+  mjmlContent: string;
+  variables: TemplateVariables;
+}
+
+async function conteudoDaCampanha(
+  campaignId: string,
+  contact: Contact,
+  sendId: string
+): Promise<ConteudoDoEnvio> {
   const db = getDb();
-
-  const [send] = await db
-    .select()
-    .from(campaignSends)
-    .where(eq(campaignSends.id, sendId));
-
-  if (!send) {
-    throw new Error(`Registro de envio ${sendId} não encontrado.`);
-  }
-  if (send.status !== "pending") {
-    // Job reprocessado após sucesso (ex.: retry por falha de rede no update).
-    console.log(
-      `[WORKER] Envio ${sendId} já está como "${send.status}", ignorando.`
-    );
-    return;
-  }
-
   const [campaign] = await db
     .select()
     .from(campaigns)
     .where(eq(campaigns.id, campaignId));
-  const [contact] = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.id, contactId));
 
-  if (!campaign || !contact) {
-    throw new Error("Campanha ou contato não encontrado no banco.");
-  }
-
-  if (!contact.subscribed) {
-    // Descadastrou depois de entrar na fila: não envia.
-    console.log(
-      `[WORKER] ${contact.email} está descadastrado, envio cancelado.`
-    );
-    await db
-      .update(campaignSends)
-      .set({ status: "failed" })
-      .where(eq(campaignSends.id, sendId));
-    return;
+  if (!campaign) {
+    throw new Error("Campanha não encontrada no banco.");
   }
 
   // E-mail da campanha: usa o mjmlContent próprio (design editado). Campanhas
@@ -114,11 +98,83 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
       );
   }
 
+  return {
+    subject: campaign.subject,
+    mjmlContent,
+    variables: await buildCampaignVariables(campaign, contact, sendId),
+  };
+}
+
+/** Envio de um passo "enviar e-mail" — o conteúdo vem do config do passo. */
+async function conteudoDaAutomacao(
+  stepId: string | null,
+  contact: Contact,
+  sendId: string
+): Promise<ConteudoDoEnvio> {
+  if (!stepId) {
+    throw new Error(
+      `Envio ${sendId} não tem campanha nem passo de automação de origem.`
+    );
+  }
+  const passo = await conteudoDoPassoDeEmail(stepId);
+  return {
+    subject: passo.subject,
+    mjmlContent: passo.mjmlContent,
+    variables: await buildSendVariables(passo.content, contact, sendId),
+  };
+}
+
+async function processJob(job: Job<EmailJobData>): Promise<void> {
+  const { sendId, contactId } = job.data;
+  const db = getDb();
+
+  const [send] = await db
+    .select()
+    .from(campaignSends)
+    .where(eq(campaignSends.id, sendId));
+
+  if (!send) {
+    throw new Error(`Registro de envio ${sendId} não encontrado.`);
+  }
+  if (send.status !== "pending") {
+    // Job reprocessado após sucesso (ex.: retry por falha de rede no update).
+    console.log(
+      `[WORKER] Envio ${sendId} já está como "${send.status}", ignorando.`
+    );
+    return;
+  }
+
+  const [contact] = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.id, contactId));
+
+  if (!contact) {
+    throw new Error("Contato não encontrado no banco.");
+  }
+
+  if (!contact.subscribed) {
+    // Descadastrou depois de entrar na fila: não envia.
+    console.log(
+      `[WORKER] ${contact.email} está descadastrado, envio cancelado.`
+    );
+    await db
+      .update(campaignSends)
+      .set({ status: "failed" })
+      .where(eq(campaignSends.id, sendId));
+    return;
+  }
+
+  // De onde vem o conteúdo: da campanha ou do passo da automação. O resto do
+  // envio (compilação, rastreio, descadastro, gravação) é idêntico nos dois.
+  const conteudo = send.campaignId
+    ? await conteudoDaCampanha(send.campaignId, contact, sendId)
+    : await conteudoDaAutomacao(send.automationStepId, contact, sendId);
+
   try {
-    const variables = await buildCampaignVariables(campaign, contact, sendId);
     const { html, errors } = await buildEmailHtml(
-      mjmlContent,
-      variables,
+      conteudo.mjmlContent,
+      conteudo.variables,
       sendId
     );
 
@@ -128,13 +184,13 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
 
     const { messageId } = await sendEmail({
       to: contact.email,
-      subject: campaign.subject,
+      subject: conteudo.subject,
       html,
       headers: {
         // Descadastro em um clique (RFC 8058): o provedor faz POST direto
         // no endpoint, sem o destinatário precisar clicar. Exigido pelas
         // regras de remetente em massa (Gmail/Yahoo) e cobrado pela AWS SES.
-        "List-Unsubscribe": `<${variables.list_unsubscribe_url}>`,
+        "List-Unsubscribe": `<${conteudo.variables.list_unsubscribe_url}>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
       },
     });
@@ -196,6 +252,8 @@ const worker = new Worker<EmailJobData>(EMAIL_QUEUE_NAME, processJob, {
 });
 
 worker.on("completed", async (job) => {
+  // Envio de automação não fecha campanha nenhuma — cada passo é um envio só.
+  if (!job.data.campaignId) return;
   try {
     await finalizeCampaignIfDone(job.data.campaignId);
   } catch (error) {
@@ -223,7 +281,9 @@ worker.on("failed", async (job, error) => {
             eq(campaignSends.status, "pending")
           )
         );
-      await finalizeCampaignIfDone(job.data.campaignId);
+      if (job.data.campaignId) {
+        await finalizeCampaignIfDone(job.data.campaignId);
+      }
     } catch (updateError) {
       console.error(
         "[WORKER] Erro ao registrar falha:",

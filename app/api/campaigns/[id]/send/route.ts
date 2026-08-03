@@ -140,6 +140,7 @@ async function dispatchWhatsApp(
     .values(
       eligible.map((contact) => ({
         campaignId: campaign.id,
+        channel: "whatsapp" as const,
         contactId: contact.id,
       }))
     )
@@ -324,6 +325,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .values(
         eligible.map((contact) => ({
           campaignId: campaign.id,
+          channel: "email" as const,
           contactId: contact.id,
         }))
       )
