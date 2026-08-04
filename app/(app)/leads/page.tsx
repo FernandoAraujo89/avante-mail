@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Magnet, Search, Webhook } from "lucide-react";
+import { Gauge, Magnet, Search, Webhook } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -24,13 +24,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ESTAGIOS, estagioLabel, type LeadDto } from "@/components/leads/estagios";
+import {
+  ESTAGIOS,
+  estagioLabel,
+  FAIXAS,
+  faixaInfo,
+  type LeadDto,
+} from "@/components/leads/estagios";
 import { formatDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 
 interface Resposta {
   leads: LeadDto[];
   funil: Record<string, number>;
+  faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
 }
 
@@ -40,6 +47,7 @@ export default function LeadsPage() {
   const [busca, setBusca] = useState("");
   const [estagio, setEstagio] = useState("todos");
   const [canal, setCanal] = useState("todos");
+  const [faixa, setFaixa] = useState("todas");
 
   const carregar = useCallback(async () => {
     try {
@@ -48,16 +56,17 @@ export default function LeadsPage() {
       if (busca.trim()) params.set("busca", busca.trim());
       if (estagio !== "todos") params.set("estagio", estagio);
       if (canal !== "todos") params.set("canal", canal);
+      if (faixa !== "todas") params.set("faixa", faixa);
 
       const res = await fetch(`/api/leads?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar os leads.");
       setDados(json);
     } catch (err) {
-      setDados({ leads: [], funil: {}, canais: [] });
+      setDados({ leads: [], funil: {}, faixas: {}, canais: [] });
       setErro(err instanceof Error ? err.message : String(err));
     }
-  }, [busca, estagio, canal]);
+  }, [busca, estagio, canal, faixa]);
 
   useEffect(() => {
     const timer = setTimeout(carregar, 300);
@@ -77,6 +86,12 @@ export default function LeadsPage() {
         title="Gestão de leads"
         description="Quem chegou por formulário, anúncio ou integração. Lead não recebe campanha de parceiro — é nutrido por automação até ser convertido."
       >
+        <Button variant="outline" asChild>
+          <Link href="/leads/pontuacao">
+            <Gauge />
+            Pontuação
+          </Link>
+        </Button>
         <Button variant="outline" asChild>
           <Link href="/leads/origens">
             <Webhook />
@@ -129,8 +144,21 @@ export default function LeadsPage() {
             className="pl-9"
           />
         </div>
+        <Select value={faixa} onValueChange={setFaixa}>
+          <SelectTrigger className="w-52">
+            <SelectValue placeholder="Pontuação" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas as pontuações</SelectItem>
+            {FAIXAS.map((f) => (
+              <SelectItem key={f.valor} value={f.valor}>
+                {f.rotulo} ({dados?.faixas?.[f.valor] ?? 0})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={canal} onValueChange={setCanal}>
-          <SelectTrigger className="w-56">
+          <SelectTrigger className="w-52">
             <SelectValue placeholder="Canal de origem" />
           </SelectTrigger>
           <SelectContent>
@@ -177,6 +205,7 @@ export default function LeadsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Lead</TableHead>
+                <TableHead>Pontuação</TableHead>
                 <TableHead>Estágio</TableHead>
                 <TableHead>Origem</TableHead>
                 <TableHead>Entrou em</TableHead>
@@ -202,6 +231,25 @@ export default function LeadsPage() {
                         Sem aceite de e-mail
                       </p>
                     ) : null}
+                  </TableCell>
+                  <TableCell>
+                    {/* Nota nula = o worker ainda não passou por este lead
+                        (ele entrou há segundos). Mostrar "—" em vez de 0 evita
+                        dizer que ele é frio sem ter contado nada. */}
+                    {lead.leadScore === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <span className="text-lg font-bold tabular-nums">
+                          {lead.leadScore}
+                        </span>
+                        {faixaInfo(lead.leadScoreBand) ? (
+                          <Badge variant={faixaInfo(lead.leadScoreBand)!.variante}>
+                            {faixaInfo(lead.leadScoreBand)!.rotulo}
+                          </Badge>
+                        ) : null}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="warning">{estagioLabel(lead.stage)}</Badge>

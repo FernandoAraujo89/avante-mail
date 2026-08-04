@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   FileCode2,
+  Gauge,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -52,6 +53,7 @@ const NAV_GROUPS: {
     label: "Leads",
     items: [
       { href: "/leads", label: "Gestão de leads", icon: Magnet },
+      { href: "/leads/pontuacao", label: "Pontuação", icon: Gauge },
       { href: "/leads/origens", label: "Origens (webhook)", icon: Webhook },
     ],
   },

@@ -7,6 +7,7 @@ import {
   consumirEventos,
   percursosVencidos,
 } from "../lib/automations/engine";
+import { passagemDiaria, recalcularPendentes } from "../lib/leads/score";
 import {
   AUTOMATION_QUEUE_NAME,
   createRedisConnection,
@@ -122,9 +123,33 @@ async function ciclo(): Promise<void> {
     }
   } catch (error) {
     console.error(`[WORKER-AUTO] ciclo falhou: ${errorMessage(error)}`);
-  } finally {
-    rodando = false;
   }
+
+  // O Lead Score tem try PRÓPRIO: ele só LÊ eventos e grava em contacts, não
+  // abre nem avança percurso. Uma falha na pontuação não pode derrubar o ciclo
+  // das automações, que é o que move campanha — nem o contrário.
+  try {
+    const recalculados = await recalcularPendentes();
+    if (recalculados > 0) {
+      console.log(`[WORKER-AUTO] ${recalculados} lead(s) repontuado(s)`);
+    }
+
+    // A passagem completa aplica o DECAIMENTO em quem não teve evento novo —
+    // sem ela, lead parado congela no número do último cálculo. Ela mesma
+    // decide se já passou o intervalo.
+    const passagem = await passagemDiaria();
+    if (passagem.rodou) {
+      console.log(
+        `[WORKER-AUTO] passagem diária do score: ${passagem.recalculados} lead(s)`
+      );
+    }
+  } catch (error) {
+    console.error(`[WORKER-AUTO] Lead Score falhou: ${errorMessage(error)}`);
+  }
+
+  // Só aqui: a trava cobre o ciclo INTEIRO. Liberá-la antes da pontuação
+  // deixaria a passagem diária rodar sobre si mesma num banco grande.
+  rodando = false;
 }
 
 setInterval(() => void ciclo(), CICLO_MS);

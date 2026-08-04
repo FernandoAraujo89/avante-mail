@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 
-import { contacts, getDb, LEAD_STAGES, type LeadStage } from "@/lib/db";
+import {
+  contacts,
+  getDb,
+  LEAD_SCORE_BANDS,
+  LEAD_STAGES,
+  type LeadScoreBand,
+  type LeadStage,
+} from "@/lib/db";
 import { ehLead } from "@/lib/leads";
 import { errorMessage } from "@/lib/utils";
 
@@ -23,6 +30,7 @@ export async function GET(request: NextRequest) {
     const busca = params.get("busca")?.trim();
     const estagio = params.get("estagio")?.trim();
     const canal = params.get("canal")?.trim();
+    const faixa = params.get("faixa")?.trim();
 
     // Ser lead é a condição de base — nunca opcional nesta rota.
     const condicoes: SQL[] = [ehLead()];
@@ -41,6 +49,9 @@ export async function GET(request: NextRequest) {
       condicoes.push(eq(contacts.stage, estagio as LeadStage));
     }
     if (canal) condicoes.push(eq(contacts.sourceChannel, canal));
+    if (faixa && LEAD_SCORE_BANDS.includes(faixa as LeadScoreBand)) {
+      condicoes.push(eq(contacts.leadScoreBand, faixa as LeadScoreBand));
+    }
 
     const leads = await db
       .select({
@@ -61,10 +72,19 @@ export async function GET(request: NextRequest) {
         sourceDetail: contacts.sourceDetail,
         acquiredAt: contacts.acquiredAt,
         createdAt: contacts.createdAt,
+        leadScore: contacts.leadScore,
+        leadScoreBand: contacts.leadScoreBand,
       })
       .from(contacts)
       .where(and(...condicoes))
-      .orderBy(desc(contacts.acquiredAt), desc(contacts.createdAt));
+      // Mais quente primeiro: a lista existe para dizer com quem falar AGORA.
+      // NULLS LAST porque lead recém-criado ainda não passou pelo worker, e ele
+      // não pode encabeçar a lista só por não ter nota.
+      .orderBy(
+        sql`${contacts.leadScore} DESC NULLS LAST`,
+        desc(contacts.acquiredAt),
+        desc(contacts.createdAt)
+      );
 
     // Contagem por estágio do funil INTEIRO, não do filtro: é o painel de "onde
     // estão meus leads", e ele encolher junto com a busca não responderia isso.
@@ -82,9 +102,19 @@ export async function GET(request: NextRequest) {
       .groupBy(contacts.sourceChannel)
       .orderBy(desc(count()));
 
+    // Distribuição por faixa — o "quantos estão quentes" do painel.
+    const porFaixa = await db
+      .select({ faixa: contacts.leadScoreBand, total: count() })
+      .from(contacts)
+      .where(ehLead())
+      .groupBy(contacts.leadScoreBand);
+
     return NextResponse.json({
       leads,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
+      faixas: Object.fromEntries(
+        porFaixa.filter((r) => r.faixa).map((r) => [r.faixa as string, r.total])
+      ),
       canais: canais
         .filter((c) => c.canal)
         .map((c) => ({ canal: c.canal as string, total: c.total })),

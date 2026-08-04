@@ -93,8 +93,17 @@ export const CONTACT_EVENT_TYPES = [
   // de automações ignora o que nenhum gatilho declara, então adicionar o tipo
   // não mexe em nenhum fluxo em produção.
   "lead_stage_changed",
+  // Mudança de FAIXA do Lead Score (frio→morno→quente). Só a virada de faixa
+  // vira evento — o número muda o tempo todo pelo decaimento, e registrar cada
+  // variação encheria a linha do tempo de ruído sem informar nada.
+  "lead_score_changed",
 ] as const;
 export type ContactEventType = (typeof CONTACT_EVENT_TYPES)[number];
+
+// Faixas do Lead Score. Os limites são configuráveis (app_settings); os nomes,
+// não — eles são a linguagem que a equipe usa.
+export const LEAD_SCORE_BANDS = ["frio", "morno", "quente"] as const;
+export type LeadScoreBand = (typeof LEAD_SCORE_BANDS)[number];
 
 // Usuários do sistema (login próprio).
 export const users = pgTable("users", {
@@ -168,6 +177,14 @@ export const contacts = pgTable("contacts", {
   /** Nome do cenário/formulário que enviou. */
   sourceDetail: text("source_detail"),
   acquiredAt: timestamp("acquired_at", { withTimezone: true }),
+
+  // Lead Score. É DERIVADO de contact_events — nunca incrementado às cegas —,
+  // então mudar uma regra vale para o histórico inteiro e não só dali para a
+  // frente. `leadScoreAt` marca quando a conta foi feita: é o que diz ao
+  // worker quem precisa ser recalculado.
+  leadScore: integer("lead_score"),
+  leadScoreBand: text("lead_score_band").$type<LeadScoreBand>(),
+  leadScoreAt: timestamp("lead_score_at", { withTimezone: true }),
 
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -653,6 +670,27 @@ export const campaignSends = pgTable("campaign_sends", {
 
 // Configurações do sistema (chave/valor). Hoje guarda qual lista recebe o
 // Avante News; serve para qualquer preferência global futura.
+/**
+ * O modelo de pontuação, em TABELA e não em código: o time vai querer mexer
+ * nos pontos depois de ver o score rodando com dados reais — é esperado, e
+ * trocar um número não pode exigir deploy.
+ *
+ * Uma regra por tipo de evento. O `condition` do plano (para distinguir "viu a
+ * página de preços" de "visitou o site") fica de fora até a fase E existir e
+ * criar eventos de site com página — coluna sem uso só confunde quem lê.
+ */
+export const leadScoreRules = pgTable("lead_score_rules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventType: text("event_type").$type<ContactEventType>().notNull().unique(),
+  /** Pontos no dia do evento, antes do decaimento. Aceita negativo. */
+  points: integer("points").notNull(),
+  active: boolean("active").notNull().default(true),
+  description: text("description"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value"),
@@ -683,3 +721,5 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type NewAppSetting = typeof appSettings.$inferInsert;
+export type LeadScoreRule = typeof leadScoreRules.$inferSelect;
+export type NewLeadScoreRule = typeof leadScoreRules.$inferInsert;

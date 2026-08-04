@@ -4,6 +4,7 @@ import { ArrowLeft, Pencil } from "lucide-react";
 import { asc, desc, eq, isNull, ne, or } from "drizzle-orm";
 
 import { LeadAcoes } from "@/components/leads/lead-acoes";
+import { LeadScoreCard } from "@/components/leads/lead-score-card";
 import { estagioLabel } from "@/components/leads/estagios";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,7 @@ const EVENTO_LABEL: Record<string, string> = {
   whatsapp_replied: "Respondeu no WhatsApp",
   whatsapp_unsubscribed: "Pediu para sair do WhatsApp",
   lead_stage_changed: "Mudou de estágio",
+  lead_score_changed: "Mudou de faixa de pontuação",
 };
 
 function detalheDoEvento(
@@ -48,6 +50,9 @@ function detalheDoEvento(
     const de = estagioLabel((payload.de as string) ?? null);
     const para = payload.para ? estagioLabel(payload.para as string) : "parceiro";
     return `${de} → ${para}`;
+  }
+  if (tipo === "lead_score_changed") {
+    return `${payload.de ?? "—"} → ${payload.para} (${payload.score} pontos)`;
   }
   if (typeof payload.tag === "string") return payload.tag;
   if (typeof payload.origem === "string") return `origem: ${payload.origem}`;
@@ -196,6 +201,8 @@ export default async function LeadPage({
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="grid gap-6">
+          <LeadScoreCard leadId={lead.id} />
+
           <LeadAcoes
             leadId={lead.id}
             estagio={lead.stage}

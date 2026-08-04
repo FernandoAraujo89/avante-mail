@@ -8,21 +8,54 @@ pontos de contato com os canais da Avante.
 
 ## ▶ ESTADO ATUAL (04/08/2026)
 
-**Fases A, B e D prontas.** A próxima é a **fase C** (Lead Score).
+**Fases A, B, C e D prontas.** Sobram a **E** (rastreio do site) e a **F**
+(webhook de saída).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | A — Entrada por webhook + UTMs | ✅ produção | `1984395` |
 | — Correção do consentimento | ✅ produção | `5060116` |
 | B — Campos de lead + travas | ✅ produção | `71ba61e` |
-| D — Área de Leads + cadastro de origens | ✅ feita | |
-| C — Lead Score | ⬜ **próxima** | |
-| E — Rastreio do site | ⬜ | |
+| D — Área de Leads + cadastro de origens | ✅ produção | `06aa4f5` |
+| C — Lead Score | ✅ feita | |
+| E — Rastreio do site | ⬜ **próxima** | |
 | F — Webhook de saída | ⬜ | |
 
 **A ordem mudou:** a fase D veio antes da C porque o usuário pediu a separação
-da gestão de leads e o cadastro de origens pela tela. O score entra depois, e a
-área já está montada para recebê-lo (filtro por faixa e a conta aberta na ficha).
+da gestão de leads e o cadastro de origens pela tela.
+
+### O Lead Score (fase C)
+
+Migração: `scripts/migrate-lead-score.ts`. O motor vive em `lib/leads/score.ts`
+e roda no ciclo do worker de automações — em `try` próprio, para uma falha na
+pontuação não derrubar o que move campanha.
+
+| Peça | Onde |
+|---|---|
+| Cálculo, decaimento e faixas | `lib/leads/score.ts` |
+| Recálculo a cada 10s (quem teve evento novo) | `worker/automation-worker.ts` |
+| Passagem diária (aplica o decaimento em quem parou) | idem, guardada por `app_settings` |
+| Modelo editável | `/leads/pontuacao` |
+| Conta aberta | `/leads/[id]` (card Pontuação) |
+
+**Derivado, nunca incrementado:** cada cálculo relê `contact_events` do zero, e
+é isso que faz mudar um peso valer para o histórico inteiro. Salvar na tela de
+Pontuação recalcula todo mundo na hora — sem isso, a regra nova conviveria com
+números velhos até a madrugada e ninguém confiaria no valor.
+
+**Decaimento por meia-vida de 30 dias.** Verificado com três leads de eventos
+idênticos e idades diferentes: 32 → 16 → 4 pontos (hoje, 30 dias, 90 dias).
+
+**Só a virada de FAIXA vira evento** (`lead_score_changed`). O número muda a
+cada passagem por causa do decaimento; registrar toda variação encheria a linha
+do tempo sem informar nada. Os tipos sem regra ativa ficam fora da detecção de
+"quem precisa recalcular" — inclusive o próprio `lead_score_changed`, que senão
+pediria um recálculo a cada recálculo.
+
+**Ainda não é gatilho de automação.** `lead_score_changed` é gravado e aparece
+na ficha, mas não está em `AUTOMATION_TRIGGER_TYPES`: o editor de gatilhos
+precisaria de uma configuração de "qual faixa", e isso é trabalho próprio.
+É o passo natural depois da fase E.
 
 ### A regra que passou a valer (04/08/2026)
 
@@ -474,6 +507,7 @@ não enviar evento nenhum.
 | **A** | Endpoint + `webhook_sources` + `webhook_deliveries` + mapeamento + UTMs. Origem cadastrada por script | média ✅ |
 | **B** | Campos de lead, lista própria e as três travas da seção 5 | pequena ✅ |
 | **D** | Área de Leads + cadastro de origens pela tela (feita ANTES da C, a pedido) | a maior ✅ |
+| **C** | Lead Score sobre o que já é capturado + regras + decaimento + faixas | média ✅ |
 | **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
 | **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa |
