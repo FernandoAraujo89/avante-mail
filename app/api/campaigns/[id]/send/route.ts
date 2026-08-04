@@ -92,11 +92,11 @@ async function dispatchWhatsApp(
     eq(contacts.whatsappSubscribed, true),
     isNotNull(contacts.phone),
   ];
-  // TRAVA 2 (docs/plano-webhooks-leads.md, seção 5): lead fora, a menos que a
-  // campanha diga o contrário. É aqui — e não no seletor — que a trava vale:
-  // a escolha manual de destinatários e a campanha duplicada passam por este
-  // mesmo caminho.
-  if (!campaign.includeLeads) conditions.push(naoEhLead());
+  // TRAVA 2 (docs/plano-webhooks-leads.md, seção 5): campanha é de parceiro,
+  // cliente e colaborador — lead NUNCA entra, sem exceção nem opção. É aqui, e
+  // não no seletor, que a regra vale: a escolha manual de destinatários e a
+  // campanha duplicada passam por este mesmo caminho.
+  conditions.push(naoEhLead());
   if (campaign.lists && campaign.lists.length > 0) {
     conditions.push(
       inArray(
@@ -134,9 +134,8 @@ async function dispatchWhatsApp(
   if (eligible.length === 0) {
     return NextResponse.json(
       {
-        error: campaign.includeLeads
-          ? "Nenhum destinatário elegível — só contatos com telefone e consentimento de WhatsApp recebem."
-          : "Nenhum destinatário elegível — só contatos com telefone e consentimento de WhatsApp recebem, e os leads estão fora deste envio (marque “Incluir leads” no passo Destinatários para incluí-los).",
+        error:
+          "Nenhum destinatário elegível — só contatos com telefone e consentimento de WhatsApp recebem. Leads não entram em campanha: eles são trabalhados em Leads e por automação.",
       },
       { status: 400 }
     );
@@ -285,9 +284,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     // 1. Contatos elegíveis: inscritos + listas + tags.
     const conditions: SQL[] = [eq(contacts.subscribed, true)];
-    // TRAVA 2: lead não recebe campanha de parceiro sem alguém ter dito que
-    // sim. Vale também para o Avante News, que nunca teve lead como público.
-    if (!campaign.includeLeads) conditions.push(naoEhLead());
+    // TRAVA 2: lead não recebe campanha. Vale igual para o Avante News, que
+    // nunca teve lead como público.
+    conditions.push(naoEhLead());
     if (targetLists && targetLists.length > 0) {
       conditions.push(
         inArray(
@@ -325,9 +324,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (eligible.length === 0) {
       return NextResponse.json(
         {
-          error: campaign.includeLeads
-            ? "Nenhum destinatário elegível para os filtros da campanha."
-            : "Nenhum destinatário elegível para os filtros da campanha — os leads estão fora deste envio (marque “Incluir leads” no passo Destinatários para incluí-los).",
+          error:
+            "Nenhum destinatário elegível para os filtros da campanha. Leads não entram em campanha: eles são trabalhados em Leads e por automação.",
         },
         { status: 400 }
       );

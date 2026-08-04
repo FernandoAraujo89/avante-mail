@@ -34,11 +34,6 @@ interface RecipientPickerProps {
   /** Nomes das listas escolhidas, só para exibição. */
   listNames: string[];
   tags: string[];
-  /**
-   * Trava 2: false (o padrão da campanha) tira os leads do público. A conta é
-   * a mesma que o envio faz — o que aparece aqui é o que sai.
-   */
-  includeLeads: boolean;
   /** null = todos os elegíveis; array = escolha manual (vazio = ninguém). */
   value: string[] | null;
   onChange: (value: string[] | null) => void;
@@ -52,7 +47,6 @@ export function RecipientPicker({
   lists,
   listNames,
   tags,
-  includeLeads,
   value,
   onChange,
   onEligibleCountChange,
@@ -94,9 +88,9 @@ export function RecipientPicker({
         else params.set("subscribed", "true");
         if (listsKey) params.set("lists", listsKey);
         if (tagsKey) params.set("tags", tagsKey);
-        // Mesma trava do envio: sem "Incluir leads", lead não aparece nem para
-        // ser marcado à mão.
-        if (!includeLeads) params.set("leads", "exclude");
+        // Mesma regra do envio: lead não é público de campanha, então não
+        // aparece aqui nem para ser marcado à mão.
+        params.set("leads", "exclude");
 
         const res = await fetch(`/api/contacts?${params.toString()}`);
         const json = await res.json();
@@ -137,12 +131,12 @@ export function RecipientPicker({
     return () => {
       cancelled = true;
     };
-  }, [channel, listsKey, tagsKey, includeLeads]);
+  }, [channel, listsKey, tagsKey]);
 
   // Buscar ou trocar o público/página joga de volta para a primeira página.
   useEffect(() => {
     setPage(1);
-  }, [search, pageSize, channel, listsKey, tagsKey, includeLeads]);
+  }, [search, pageSize, channel, listsKey, tagsKey]);
 
   const visible = useMemo(() => {
     if (!contacts) return [];
@@ -193,7 +187,6 @@ export function RecipientPicker({
       <p className="text-xs text-muted-foreground">
         {origem}
         {tags.length > 0 ? ` · tags: ${tags.join(", ")}` : ""}
-        {includeLeads ? " · leads incluídos" : " · sem leads"}
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -286,7 +279,6 @@ export function RecipientPicker({
           {channel === "whatsapp"
             ? "Nenhum contato elegível — só quem tem telefone e consentimento de WhatsApp aparece aqui."
             : "Nenhum contato inscrito nas listas escolhidas."}
-          {includeLeads ? "" : " Os leads estão fora — marque “Incluir leads” acima para vê-los."}
         </p>
       ) : (
         // Altura limitada: com 100 por página a lista rolaria a tela inteira.

@@ -88,6 +88,11 @@ export const CONTACT_EVENT_TYPES = [
   "email_clicked",
   "whatsapp_replied",
   "whatsapp_unsubscribed",
+  // Movimentação do lead no funil, feita na área de Leads. Fica registrado
+  // aqui para a linha do tempo da ficha e para o Lead Score (fase C) — o motor
+  // de automações ignora o que nenhum gatilho declara, então adicionar o tipo
+  // não mexe em nenhum fluxo em produção.
+  "lead_stage_changed",
 ] as const;
 export type ContactEventType = (typeof CONTACT_EVENT_TYPES)[number];
 
@@ -551,13 +556,14 @@ export const campaigns = pgTable("campaigns", {
   ),
   // Fonte de cada variável do modelo ({"1": {"source": "name"}}).
   whatsappVariables: jsonb("whatsapp_variables").$type<WhatsAppVariableMap>(),
-  // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas.
+  // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas de
+  // RELACIONAMENTO: a lista de leads nunca entra (ver a trava no /send).
   lists: uuid("lists").array(),
-  // Trava contra disparo acidental: lead (contacts.stage preenchido) NÃO recebe
-  // campanha a menos que alguém marque isto no passo Destinatários. "Nenhuma
-  // lista selecionada = todas as listas" tornava um clique a menos suficiente
-  // para mandar campanha de parceiro para a base inteira de leads.
-  includeLeads: boolean("include_leads").notNull().default(false),
+  // A coluna `include_leads` existe no banco (migração da fase B) e não é mais
+  // usada: campanha é de parceiro, cliente e colaborador, sem exceção. Fica
+  // fora daqui de propósito — o código não deve oferecer uma opção que a regra
+  // não permite. Não foi derrubada porque apagar coluna em produção não se
+  // desfaz, e uma coluna inerte não custa nada.
   tagsFilter: text("tags_filter").array(),
   // Destinatários escolhidos à mão no passo "Destinatários". Nulo = todos os
   // contatos elegíveis das listas/tags (padrão, e o das campanhas antigas);

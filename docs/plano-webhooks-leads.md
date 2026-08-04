@@ -8,17 +8,62 @@ pontos de contato com os canais da Avante.
 
 ## ▶ ESTADO ATUAL (04/08/2026)
 
-**Fases A e B prontas.** A próxima é a **fase C** (Lead Score).
+**Fases A, B e D prontas.** A próxima é a **fase C** (Lead Score).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | A — Entrada por webhook + UTMs | ✅ produção | `1984395` |
 | — Correção do consentimento | ✅ produção | `5060116` |
-| B — Campos de lead + travas | ✅ feita | |
+| B — Campos de lead + travas | ✅ produção | `71ba61e` |
+| D — Área de Leads + cadastro de origens | ✅ feita | |
 | C — Lead Score | ⬜ **próxima** | |
-| D — Tela `/leads` | ⬜ | |
 | E — Rastreio do site | ⬜ | |
 | F — Webhook de saída | ⬜ | |
+
+**A ordem mudou:** a fase D veio antes da C porque o usuário pediu a separação
+da gestão de leads e o cadastro de origens pela tela. O score entra depois, e a
+área já está montada para recebê-lo (filtro por faixa e a conta aberta na ficha).
+
+### A regra que passou a valer (04/08/2026)
+
+**Campanha é de parceiro, cliente e colaborador. Lead NUNCA entra — sem
+exceção e sem opção.** A trava 2 deixou de ter a caixa "Incluir leads": a
+opção explícita do plano original foi removida a pedido do usuário. Quem fala
+com lead é a **automação de nutrição**, não a campanha.
+
+Consequências no código:
+- o `/send` sempre aplica `naoEhLead()` — não há mais condição;
+- a lista de leads não aparece no seletor de listas do wizard;
+- `campaigns.include_leads` continua no banco (migração da fase B) mas saiu do
+  schema do Drizzle e não é lida por ninguém. Não foi derrubada porque apagar
+  coluna em produção não se desfaz, e uma coluna inerte não custa nada.
+
+### A área de Leads (fase D)
+
+Menu próprio na sidebar, agrupado por ÁREA — "Relacionamento" (campanhas,
+automações, contatos, listas) e "Leads" (gestão + origens). Ver os dois grupos
+separados é o que impede tratar lead como parceiro.
+
+| Tela | O que faz |
+|---|---|
+| `/leads` | funil por estágio, busca, filtro por canal |
+| `/leads/[id]` | ficha: origem completa, linha do tempo, automações; muda estágio e converte em parceiro |
+| `/leads/origens` | cadastro das origens de webhook, sem script |
+
+**Cadastro de origem pela tela:** nome (o endereço sai do nome, sem acento),
+mapeamento campo a campo, tags e estágio de entrada, chave de consentimento,
+liga/desliga, token com giro, e as últimas 50 entregas cruas.
+
+Duas coisas que a tela ganhou e o script não tinha:
+- **ensaio do mapeamento** (`POST /api/leads/origens/testar`): cola-se o corpo
+  real e o sistema mostra o que sairia dele, sem gravar nada. Configurar
+  mapeamento às cegas é o jeito garantido de descobrir o erro quando o lead
+  some;
+- **histórico de entregas na própria janela**, que é onde se lê *por que* um
+  payload foi recusado.
+
+`listId` saiu do cadastro: desde a trava 1 o destino é sempre a lista de leads,
+então oferecer a escolha seria oferecer uma opção que o sistema ignora.
 
 **O que já roda:** `POST /api/webhooks/entrada/{slug}` autenticado por token,
 com mapeamento por origem, idempotência (identidade + janela de 5min) e
@@ -253,8 +298,9 @@ Leads e parceiros na mesma tabela criam um perigo concreto: montar uma campanha,
 deixar "todas as listas" e **disparar para os leads sem querer**. Obrigatórias:
 
 1. Lead entra **só** na lista "Leads", nunca nas listas de parceiros.
-2. O seletor de destinatários **exclui a lista de leads por padrão**, com opção
-   explícita para incluí-la.
+2. ~~O seletor de destinatários exclui a lista de leads por padrão, com opção
+   explícita para incluí-la.~~ **Revisto em 04/08/2026: não há opção.** Campanha
+   nunca alcança lead (ver ESTADO ATUAL).
 3. A tela de Contatos ganha filtro visível de estágio.
 
 Ver o resumo da implementação no ESTADO ATUAL, no topo. Duas decisões que só
@@ -262,8 +308,9 @@ apareceram ao construir:
 
 - a trava 2 vale por **contato** (`stage`), não por lista — então ela também
   pega o lead escolhido a dedo no passo Destinatários, que era o furo óbvio;
-- escolher a lista de leads **não** libera o envio sozinho; a tela avisa em vez
-  de deixar o público sair vazio sem explicação.
+- o `stage` é a definição de "quem é lead" justamente porque um PARCEIRO que
+  preenche um formulário entra na lista de leads mas mantém `stage` nulo: pela
+  lista, ele sumiria calado das campanhas de parceiro.
 
 ---
 
@@ -426,6 +473,7 @@ não enviar evento nenhum.
 |---|---|---|
 | **A** | Endpoint + `webhook_sources` + `webhook_deliveries` + mapeamento + UTMs. Origem cadastrada por script | média ✅ |
 | **B** | Campos de lead, lista própria e as três travas da seção 5 | pequena ✅ |
+| **D** | Área de Leads + cadastro de origens pela tela (feita ANTES da C, a pedido) | a maior ✅ |
 | **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
 | **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa |

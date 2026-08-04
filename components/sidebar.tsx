@@ -9,12 +9,14 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Magnet,
   Menu,
   MessageCircle,
   Newspaper,
   Send,
   UserCog,
   Users,
+  Webhook,
   Workflow,
   X,
 } from "lucide-react";
@@ -22,17 +24,45 @@ import {
 import { AvanteLogo } from "@/components/avante-logo";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/campaigns", label: "Campanhas", icon: Send },
-  { href: "/automations", label: "Automações", icon: Workflow },
-  { href: "/news", label: "Avante News", icon: Newspaper },
-  { href: "/reports", label: "Relatórios", icon: BarChart3 },
-  { href: "/contacts", label: "Contatos", icon: Users },
-  { href: "/lists", label: "Listas", icon: ListChecks },
-  { href: "/templates", label: "Templates", icon: FileCode2 },
-  { href: "/whatsapp-templates", label: "WhatsApp", icon: MessageCircle },
-  { href: "/users", label: "Usuários", icon: UserCog },
+// O menu é agrupado por ÁREA, e não uma lista corrida, porque as áreas têm
+// públicos diferentes: "Relacionamento" fala com parceiro, cliente e
+// colaborador; "Leads" é a captação, que não recebe campanha (as travas da
+// fase B — docs/plano-webhooks-leads.md). Ver os dois grupos separados no menu
+// é o que impede alguém tratar lead como se fosse parceiro.
+const NAV_GROUPS: {
+  label: string | null;
+  items: { href: string; label: string; icon: typeof LayoutDashboard }[];
+}[] = [
+  {
+    label: null,
+    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+  },
+  {
+    label: "Relacionamento",
+    items: [
+      { href: "/campaigns", label: "Campanhas", icon: Send },
+      { href: "/automations", label: "Automações", icon: Workflow },
+      { href: "/news", label: "Avante News", icon: Newspaper },
+      { href: "/reports", label: "Relatórios", icon: BarChart3 },
+      { href: "/contacts", label: "Contatos", icon: Users },
+      { href: "/lists", label: "Listas", icon: ListChecks },
+    ],
+  },
+  {
+    label: "Leads",
+    items: [
+      { href: "/leads", label: "Gestão de leads", icon: Magnet },
+      { href: "/leads/origens", label: "Origens (webhook)", icon: Webhook },
+    ],
+  },
+  {
+    label: "Configuração",
+    items: [
+      { href: "/templates", label: "Templates", icon: FileCode2 },
+      { href: "/whatsapp-templates", label: "WhatsApp", icon: MessageCircle },
+      { href: "/users", label: "Usuários", icon: UserCog },
+    ],
+  },
 ];
 
 function Brand() {
@@ -122,26 +152,49 @@ export function Sidebar() {
           </button>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 p-3">
-          {NAV_ITEMS.map((item) => {
-            const active =
-              pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-accent text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <item.icon className="size-4" />
-                {item.label}
-              </Link>
-            );
-          })}
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+          {NAV_GROUPS.map((group, indice) => (
+            <div key={group.label ?? "inicio"} className="grid gap-1">
+              {group.label ? (
+                <p
+                  className={cn(
+                    "px-3 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/70",
+                    indice > 0 ? "mt-3" : ""
+                  )}
+                >
+                  {group.label}
+                </p>
+              ) : null}
+              {group.items.map((item) => {
+                // Igualdade exata para /leads: sem isso "Gestão de leads"
+                // ficaria aceso junto com "Origens", que é filha na URL.
+                const active =
+                  pathname === item.href ||
+                  (pathname.startsWith(`${item.href}/`) &&
+                    !group.items.some(
+                      (outro) =>
+                        outro.href !== item.href &&
+                        outro.href.startsWith(`${item.href}/`) &&
+                        pathname.startsWith(outro.href)
+                    ));
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-accent text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <item.icon className="size-4" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="border-t border-border p-4">

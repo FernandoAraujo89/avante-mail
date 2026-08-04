@@ -106,35 +106,25 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // `leads=exclude` vem do seletor de destinatários e do envio: é a mesma
-    // conta dos dois lados, para a contagem da tela não prometer um público
-    // diferente do que sai.
-    const semLeads = leads === "exclude";
-    const where = (extra?: SQL) => {
-      const todas = extra ? [...conditions, extra] : conditions;
-      return todas.length > 0 ? and(...todas) : undefined;
-    };
+    // `leads=exclude` vem do seletor de destinatários: é a MESMA conta que o
+    // envio faz, para a contagem da tela não prometer um público diferente do
+    // que sai.
+    if (leads === "exclude") conditions.push(naoEhLead());
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
     if (countOnly) {
       const [row] = await db
         .select({ count: count() })
         .from(contacts)
-        .where(where(semLeads ? naoEhLead() : undefined));
-      if (!semLeads) return NextResponse.json({ count: row.count });
-
-      // Quantos leads ficaram DE FORA: sem esse número, a exclusão é silenciosa
-      // e o usuário só descobre que existiam leads quando alguém reclama.
-      const [fora] = await db
-        .select({ count: count() })
-        .from(contacts)
-        .where(where(ehLead()));
-      return NextResponse.json({ count: row.count, leadsExcluidos: fora.count });
+        .where(where);
+      return NextResponse.json({ count: row.count });
     }
 
     const data = await db
       .select()
       .from(contacts)
-      .where(where(semLeads ? naoEhLead() : undefined))
+      .where(where)
       .orderBy(desc(contacts.createdAt));
 
     // Anexa as listas de cada contato (para exibir como badges).

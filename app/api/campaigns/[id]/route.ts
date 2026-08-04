@@ -121,10 +121,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if ("tagsFilter" in body && existing.kind !== "news") {
       updates.tagsFilter = normalizeTags(body.tagsFilter);
     }
-    // Trava 2: o Avante News vai para a lista de parceiros e nunca inclui lead.
-    if ("includeLeads" in body && existing.kind !== "news") {
-      updates.includeLeads = body.includeLeads === true;
-    }
     // Só o Avante News tem a opção de incluir os colaboradores.
     if ("newsIncludeTeam" in body && existing.kind === "news") {
       updates.newsIncludeTeam = body.newsIncludeTeam === true;

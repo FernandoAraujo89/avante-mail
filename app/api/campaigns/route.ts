@@ -137,8 +137,6 @@ export async function POST(request: NextRequest) {
           return ids.length > 0 ? ids : null;
         })(),
         tagsFilter: normalizeTags(body.tagsFilter),
-        // Trava 2: só um "true" explícito coloca lead no público.
-        includeLeads: body.includeLeads === true,
         // Ausente = todos os elegíveis; array (mesmo vazio) = escolha manual.
         recipientIds: Array.isArray(body.recipientIds)
           ? normalizeIds(body.recipientIds)
