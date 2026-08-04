@@ -52,7 +52,9 @@ export async function POST(request: NextRequest) {
 
     const [updated] = await db
       .update(contacts)
-      .set({ subscribed: false })
+      // Supressão de verdade: a pessoa pediu para sair. É o que faz a
+      // automação em curso parar (ver lib/automations/engine.ts).
+      .set({ subscribed: false, emailOptOutAt: new Date() })
       .where(eq(contacts.id, payload.contactId))
       .returning({ email: contacts.email });
 

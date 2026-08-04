@@ -235,9 +235,10 @@ export async function processarEntrada(args: {
   const tags = [...new Set([...normalizeTags(padroes.tags), ...campos.tags])];
   const listId = typeof padroes.listId === "string" ? padroes.listId : null;
   const stage = (typeof padroes.stage === "string" ? padroes.stage : "novo") as LeadStage;
-  // Consentimento NÃO é presumido: formulário preenchido não é aceite de
-  // marketing. Só entra inscrito se a origem declarar que capta opt-in.
-  const consentimento = padroes.consentimento === true;
+  // O padrão do sistema é LIBERAR: o lead entra apto a receber, e a origem
+  // bloqueia quando for o caso (`"consentimento": false` nos defaults) — por
+  // exemplo uma lista comprada ou um formulário sem aviso de comunicação.
+  const consentimento = padroes.consentimento !== false;
 
   let contactId: string;
   let acao: AcaoDaEntrega;

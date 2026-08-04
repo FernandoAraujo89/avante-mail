@@ -131,9 +131,11 @@ export async function POST(request: NextRequest) {
         // Bounce definitivo: suprime o contato para preservar a reputação de
         // envio. Bounce transitório (soft) não suprime — pode ser passageiro.
         if (bounceType === "hard") {
+          // Endereço morto: suprime. Automação em curso também para — seguir
+          // mandando para um endereço que devolve queima a reputação.
           await db
             .update(contacts)
-            .set({ subscribed: false })
+            .set({ subscribed: false, emailOptOutAt: new Date() })
             .where(eq(contacts.id, send.contactId));
         }
         break;
@@ -148,7 +150,7 @@ export async function POST(request: NextRequest) {
         // Reclamação de spam: suprime imediatamente, sem exceção.
         await db
           .update(contacts)
-          .set({ subscribed: false })
+          .set({ subscribed: false, emailOptOutAt: new Date() })
           .where(eq(contacts.id, send.contactId));
         break;
 

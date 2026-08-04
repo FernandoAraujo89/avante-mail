@@ -96,6 +96,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     if (typeof body.subscribed === "boolean") {
       updates.subscribed = body.subscribed;
+      // Desmarcar na tela é supressão explícita; remarcar limpa a marca e
+      // devolve o contato às automações.
+      if (body.subscribed !== existing.subscribed) {
+        updates.emailOptOutAt = body.subscribed ? null : new Date();
+      }
     }
 
     if ("phone" in body) {

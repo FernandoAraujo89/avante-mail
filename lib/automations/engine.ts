@@ -297,7 +297,12 @@ export async function avancarPercurso(
     await encerrar(runId, "stopped", "contato removido");
     return { proximo: "nada", passosExecutados: run.stepsExecuted, detalhe: "contato removido" };
   }
-  if (!contato.subscribed) {
+  // Para só quando o e-mail foi SUPRIMIDO — pedido de saída, devolução
+  // definitiva ou reclamação de spam. `subscribed = false` sozinho não basta:
+  // significa também "nunca deu aceite", que é o estado de todo lead novo, e
+  // parar aí impediria qualquer nutrição de acontecer. Quem não consentiu
+  // segue o fluxo; é o passo de ENVIO que recusa.
+  if (contato.emailOptOutAt) {
     await encerrar(runId, "stopped", "contato descadastrou");
     return { proximo: "nada", passosExecutados: run.stepsExecuted, detalhe: "contato descadastrou" };
   }

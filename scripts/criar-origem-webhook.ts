@@ -85,9 +85,9 @@ async function main() {
     tags: ["lead"],
     stage: "novo",
     listId,
-    // Consentimento NÃO presumido: formulário preenchido não é aceite de
-    // marketing. Vire true só para origem que capte opt-in de verdade.
-    consentimento: false,
+    // Padrão do sistema: liberado. Vire false para bloquear uma origem
+    // específica (lista comprada, formulário sem aviso de comunicação).
+    consentimento: true,
   };
 
   await client.query(`DELETE FROM webhook_sources WHERE slug = $1`, [slug]);

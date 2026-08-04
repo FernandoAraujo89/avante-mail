@@ -243,6 +243,27 @@ export async function enviarEmailDoPasso(args: {
   // registro de envio órfão para trás.
   const cfg = lerConfigDeEmail(args.config);
 
+  // Consentimento na hora do disparo, espelhando o que o WhatsApp já fazia.
+  // Antes, quem barrava era a regra de parada do motor; agora que ela só age
+  // na supressão, a checagem precisa estar AQUI — senão um lead que nunca deu
+  // aceite receberia e-mail. Pulado, não falha: um fluxo com e-mail e
+  // WhatsApp continua valendo pelo outro canal.
+  const [contato] = await getDb()
+    .select({
+      subscribed: contacts.subscribed,
+      emailOptOutAt: contacts.emailOptOutAt,
+    })
+    .from(contacts)
+    .where(eq(contacts.id, args.contactId));
+
+  if (!contato?.subscribed) {
+    return {
+      pulado: contato?.emailOptOutAt
+        ? "contato descadastrou do e-mail"
+        : "contato ainda não deu aceite para e-mail",
+    };
+  }
+
   const envio = await registrarEnvio({
     runId: args.runId,
     stepId: args.stepId,

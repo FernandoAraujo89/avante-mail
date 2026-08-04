@@ -118,6 +118,14 @@ export const contacts = pgTable("contacts", {
   company: text("company"),
   tags: text("tags").array(),
   subscribed: boolean("subscribed").notNull().default(true),
+  // Quando o e-mail foi SUPRIMIDO: a pessoa pediu para sair, a devolução foi
+  // definitiva, ou houve reclamação de spam. Existe para separar dois estados
+  // que `subscribed = false` confundia:
+  //   preenchido → não pode mais receber; automação em curso PARA;
+  //   nulo       → apenas nunca deu aceite (lead novo). A automação segue, e
+  //                é o passo de envio que recusa.
+  // Sem essa distinção, nenhum lead poderia ser nutrido.
+  emailOptOutAt: timestamp("email_opt_out_at", { withTimezone: true }),
   // Canal WhatsApp: telefone em E.164 (+5548…) e consentimento próprio, separado
   // do de e-mail (subscribed) — exigência da política da Meta e da LGPD.
   // O padrão do PRODUTO é "sim": cadastro e importação já marcam o opt-in de
