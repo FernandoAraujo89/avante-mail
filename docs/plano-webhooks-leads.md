@@ -348,21 +348,29 @@ pontuação seria travar meses de valor numa dependência de outra equipe.
 Sugiro fechar **A + B** e ligar um cenário do Make de verdade antes de seguir:
 com lead entrando, o formato dos dados deixa de ser suposição.
 
-> ⚠️ As fases 3, 4 e 5 das automações estão commitadas e **não deployadas**
-> (ver `docs/plano-automacoes.md`). Subir antes de abrir esta frente.
+> As automações (fases 0 a 5) estão **todas em produção** — nada bloqueando
+> esta frente.
 
 ---
 
-## 11. Decisões que preciso de você
+## 11. Decisões tomadas (03/08/2026)
 
-1. **Estágios do funil**: `novo → contatado → qualificado → convertido/perdido`
-   serve, ou o time usa outros nomes?
-2. **Consentimento na entrada**: lead do Make já pode receber nutrição, ou entra
-   sem opt-in até alguém confirmar? (recomendo sem, e liberar por ação)
-3. **Pontos das regras**: a tabela da seção 6.2 é chute meu. Quais ações o time
-   considera sinal forte de interesse?
-4. **Meia-vida do decaimento**: 30 dias serve para o ciclo de venda de vocês, ou
-   ele é mais longo?
-5. **Responsável**: leads são atribuídos a um usuário, ou ficam num balcão comum?
-6. **Acesso ao site**: você consegue colocar um script em `avantejuntos.com.br`?
-   Isso define se a fase E é viável ou se o score fica só nos canais próprios.
+**1. Consentimento na entrada: o lead NÃO recebe campanha até alguém liberar.**
+Formulário preenchido não é aceite de marketing. O lead entra, é pontuado e
+aparece na gestão, mas fica `subscribed = false` até uma ação explícita —
+converter, ou marcar o opt-in na ficha. É o padrão seguro para LGPD e protege
+a reputação de envio.
+
+**2. Script no site: viável.** Há acesso a `avantejuntos.com.br`, então a fase
+E entra no plano de verdade e o score vai poder incluir visita e eventos do
+site, não só os canais próprios.
+
+**3. Demais parâmetros seguem a recomendação deste documento** — todos são
+dados, editáveis na tela depois, sem deploy:
+- estágios: `novo → contatado → qualificado → convertido/perdido`;
+- pontuação: a tabela da seção 6.2;
+- meia-vida do decaimento: 30 dias;
+- responsável: campo existe, atribuição opcional (balcão comum por padrão).
+
+O time vai querer mexer nos pontos depois de ver o score rodando com dados
+reais — é esperado, e é por isso que as regras vivem em tabela.

@@ -8,18 +8,20 @@ ações sobre o contato.
 
 ## ▶ ESTADO ATUAL (03/08/2026)
 
-**Fases 0, 1 e 2 estão EM PRODUÇÃO; 3, 4 e 5 estão prontas, aguardando
-deploy.** O plano está completo — o que sobra é `update_field` e `webhook`,
-que nunca tiveram fase marcada.
+**Todas as fases (0 a 5) estão EM PRODUÇÃO** — verificado em 03/08/2026: a
+migração `migrate-campaign-sends-origem.ts` está aplicada, `/automations`
+responde e há automação cadastrada. O plano está completo; o que sobra é
+`update_field` e `webhook`, que nunca tiveram fase marcada. O passo `webhook`
+de saída está planejado em `docs/plano-webhooks-leads.md` (fase F).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | 0 — Eventos | ✅ produção | `4bd0c62` |
 | 1 — Motor | ✅ produção | `2f9d39d` |
 | 2 — Envios | ✅ produção | `fcbfa1d` |
-| 3 — Se/Então | ✅ pronta (falta deploy) | `531360b` |
-| 4 — Tela | ✅ pronta (falta deploy) | `d3d7108` |
-| 5 — Relatórios | ✅ pronta (falta deploy) | |
+| 3 — Se/Então | ✅ produção | `531360b` |
+| 4 — Tela | ✅ produção | `d3d7108` |
+| 5 — Relatórios | ✅ produção | `bb2e42a` |
 
 **O que já roda:** `contact_events` registra o que muda no contato (7 pontos
 instrumentados); `worker/automation-worker.ts` consome os eventos, abre
