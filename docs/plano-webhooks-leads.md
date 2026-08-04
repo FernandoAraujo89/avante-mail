@@ -4,7 +4,62 @@ Objetivo: capturar leads de fora (Make, formulários, anúncios) com a **origem
 completa** (UTMs), mantê-los numa **lista própria**, e pontuá-los conforme os
 pontos de contato com os canais da Avante.
 
-Documento de arquitetura. Nada foi alterado no código.
+---
+
+## ▶ ESTADO ATUAL (03/08/2026)
+
+**Fase A EM PRODUÇÃO.** A próxima é a **fase B** (as três travas da seção 5).
+
+| Fase | Situação | Commit |
+|---|---|---|
+| A — Entrada por webhook + UTMs | ✅ produção | `1984395` |
+| — Correção do consentimento | ✅ produção | `5060116` |
+| B — Campos de lead + travas | ⬜ **próxima** | |
+| C — Lead Score | ⬜ | |
+| D — Tela `/leads` | ⬜ | |
+| E — Rastreio do site | ⬜ | |
+| F — Webhook de saída | ⬜ | |
+
+**O que já roda:** `POST /api/webhooks/entrada/{slug}` autenticado por token,
+com mapeamento por origem, idempotência (identidade + janela de 5min) e
+registro de tudo em `webhook_deliveries`. O lead entra na lista "Leads", com
+UTMs, `stage = novo`, e emite os eventos que alimentam automação e score.
+Colunas de origem/estágio já existem em `contacts`.
+
+**Como ligar uma origem:**
+`npx tsx scripts/criar-origem-webhook.ts make-leads "Make — Leads do site"`
+— mostra URL e token UMA vez (o banco guarda só o hash). Um `GET` na mesma URL
+com o token confere a configuração sem criar lead. O `mapping` da origem muda
+o formato aceito **sem deploy**.
+
+### A correção que a fase A obrigou (importante)
+
+`subscribed = false` significava duas coisas — "pediu para sair" e "nunca deu
+aceite" — e o motor das automações parava o percurso nas duas. Resultado:
+nenhum lead novo podia ser nutrido, que é o motivo de receber lead.
+
+Agora `contacts.email_opt_out_at` marca a supressão de verdade (descadastro,
+devolução definitiva, reclamação de spam):
+
+| Estado | Automação | E-mail |
+|---|---|---|
+| liberado | roda | envia |
+| sem aceite | **roda** | **não envia** |
+| suprimido (`email_opt_out_at`) | **para** | não envia |
+
+A guarda de consentimento passou a viver no **passo de envio de e-mail**
+(`lib/automations/envios.ts`) — antes quem barrava era a regra de parada do
+motor, então afrouxá-la sem isso mandaria e-mail para quem nunca consentiu.
+
+**Decisão revista:** o padrão do sistema é **liberar**; a origem bloqueia com
+`"consentimento": false` nos defaults.
+
+**Fora de propósito:** corpo com JSON quebrado responde 400 mas não é
+registrado em `webhook_deliveries` — não dá para guardar como jsonb o que não
+é JSON. Se quiser rastreabilidade total, guardar o texto cru num campo à parte.
+
+---
+
 
 ---
 
