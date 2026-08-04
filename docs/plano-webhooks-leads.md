@@ -1,299 +1,368 @@
-# Plano — Recebimento de leads por webhook (Make e outras plataformas)
+# Plano — Gestão de leads, entrada por webhook e Lead Score
 
-Objetivo: o sistema passa a **receber dados de fora** por webhook (leads do
-Make, de formulários, de anúncios) e a **avisar o mundo lá fora** quando algo
-acontece aqui. Com uma área para acompanhar esses leads.
+Objetivo: capturar leads de fora (Make, formulários, anúncios) com a **origem
+completa** (UTMs), mantê-los numa **lista própria**, e pontuá-los conforme os
+pontos de contato com os canais da Avante.
 
 Documento de arquitetura. Nada foi alterado no código.
 
 ---
 
-## 1. Antes de tudo: a documentação linkada é de outra API
+## 1. As definições do usuário (03/08/2026)
 
-O link enviado — `developers.make.com/api-documentation` — é a **API de gestão
-do Make**: serve para criar, listar e executar cenários programaticamente,
-autenticando com um token de usuário.
+1. Leads ficam numa **lista separada**; só essa lista aparece na área de gestão.
+2. Contatos de lead ganham **campos novos**, principalmente de **origem** —
+   UTMs, para saber se veio do Instagram, Facebook, Google Search, Google Ads.
+3. A área de gestão é onde vive o **Lead Score**, que analisa todos os pontos
+   de contato possíveis: abertura de e-mail, acesso ao site, eventos no site,
+   Instagram etc.
 
-**Para receber leads do Make, não precisamos dela.** O caminho é o contrário:
-o cenário do Make usa o módulo **HTTP** para fazer um POST na nossa URL. Quem
-publica o endpoint somos nós; o Make só chama.
-
-Isso é uma boa notícia: sem token do Make para guardar, sem integração para
-manter, sem quebrar quando eles mudarem a API. E o mesmo endpoint serve para
-**qualquer** plataforma que saiba fazer um POST — RD Station, Typeform, um
-formulário do site, n8n, Zapier.
-
-A API de gestão só faria sentido num cenário bem diferente (nosso sistema
-criando cenários no Make sozinho), que não é o que foi pedido.
-
-### O que o Make faz e o que não faz
-
-| | Comportamento | Consequência para nós |
-|---|---|---|
-| Cabeçalhos | O módulo HTTP envia cabeçalhos personalizados | Autenticação por token no cabeçalho resolve — simples e suficiente |
-| Repetição | **Não repete sozinho**; a repetição é configurada no cenário | Um cenário mal configurado (ou rodado de novo à mão) manda o mesmo lead duas vezes — **a idempotência é problema nosso** |
-| Tempo limite | 1–300s, padrão 40s | Dá para responder de forma síncrona e devolver um resultado de verdade |
+Isso resolve a dúvida do plano anterior: **lead é contato**, e a separação é
+feita pela **lista** — que já existe, já filtra campanha e já é entendida pela
+equipe. Sem tabela paralela, sem identidade duplicada.
 
 ---
 
-## 2. O que já existe e será reaproveitado
+## 2. O Make: o que a integração realmente exige
 
-Boa parte do trabalho pesado está pronta:
+O link enviado (`developers.make.com/api-documentation`) é a **API de gestão do
+Make** — cria e roda cenários. **Não precisamos dela.** O caminho é o inverso:
+o cenário usa o módulo **HTTP** para fazer POST na nossa URL.
 
-| Peça | Onde | Uso aqui |
+Sem token do Make para guardar, sem integração para manter — e o mesmo endpoint
+serve para Typeform, RD Station, formulário do site, n8n ou Zapier.
+
+| | Comportamento | Consequência |
 |---|---|---|
-| Rota pública de webhook | `middleware.ts` já libera `/api/webhooks/` | o endpoint novo entra sem mexer em autenticação |
-| Verificação de assinatura | `lib/whatsapp/webhook.ts` (HMAC, `timingSafeEqual`) | padrão de segurança já existente para reaproveitar |
-| Contato com deduplicação | `contacts` — e-mail e telefone são únicos | lead repetido não vira contato duplicado |
-| Normalização de telefone | `lib/phone.ts` (E.164, casamento por sufixo) | telefone vindo de qualquer formato |
-| Eventos e automações | `contact_events` + motor das automações | **um lead que entra já pode disparar uma automação, sem nada novo** |
-
-Esse último item é o mais valioso: assim que o lead vira contato com uma tag,
-o motor que já está em produção cuida da nutrição. Não há motor novo a
-construir.
-
-> ⚠️ **Pendência que afeta o cronograma:** as fases 3, 4 e 5 das automações
-> estão commitadas e **ainda não deployadas** (ver `docs/plano-automacoes.md`).
-> Vale subir antes de começar isto, para não empilhar duas frentes não
-> publicadas.
+| Cabeçalhos | o módulo HTTP envia os personalizados | token no cabeçalho basta |
+| Repetição | **não repete sozinho**; é configurada no cenário | cenário rodado de novo manda o lead duas vezes — **idempotência é problema nosso** |
+| Tempo limite | 1–300s (padrão 40s) | dá para responder de forma síncrona, com resultado real |
 
 ---
 
-## 3. A decisão central: lead é um contato ou uma entidade nova?
+## 3. Modelo de dados
 
-**Recomendação: lead é um contato**, com campos novos — não uma tabela à parte.
-
-O motivo é que tudo que um lead precisa já existe em cima de `contacts`:
-deduplicação por e-mail/telefone, tags, consentimento, descadastro, envio de
-e-mail e WhatsApp, e os gatilhos de automação. Numa tabela separada, cada uma
-dessas coisas teria de ser reconstruída — e um lead que vira parceiro viraria
-**duas identidades** da mesma pessoa, com históricos separados.
-
-Campos novos em `contacts`:
+### Campos novos em `contacts`
 
 ```
-stage        'novo' | 'contatado' | 'qualificado' | 'convertido' | 'perdido'
-             NULL = não é lead (é parceiro/contato comum)
-source       'make' | 'formulario' | 'importacao' | … (de onde veio)
-sourceDetail texto livre (nome do cenário, campanha, formulário)
-ownerUserId  responsável pelo acompanhamento
+-- Estágio: NULL = não é lead (parceiro/contato comum)
+stage            'novo' | 'contatado' | 'qualificado' | 'convertido' | 'perdido'
+ownerUserId      responsável pelo acompanhamento
+
+-- Origem do PRIMEIRO contato (aquisição) — não muda depois
+sourceChannel    'instagram' | 'facebook' | 'google_ads' | 'google_search' | …
+utmSource, utmMedium, utmCampaign, utmContent, utmTerm
+landingPage      URL onde converteu
+referrer
+sourceDetail     nome do cenário/formulário que enviou
+acquiredAt
+
+-- Pontuação
+leadScore        integer, calculado (ver seção 6)
+leadScoreBand    'frio' | 'morno' | 'quente'
+leadScoreAt
 ```
 
-### O risco desta escolha, e como tratá-lo
+### Primeiro toque, e não último
 
-Misturar leads com os 1.458 parceiros na mesma tabela cria um perigo real:
-alguém monta uma campanha, deixa "todas as listas" e **dispara para os leads
-sem querer**. Isso custa dinheiro e queima a base.
+A origem é gravada **uma vez**, na entrada, e não é sobrescrita. Um lead que
+chega pelo Instagram e volta seis meses depois por uma busca no Google continua
+sendo "veio do Instagram" — é isso que responde "qual canal traz lead".
 
-Três travas, todas obrigatórias:
+As visitas seguintes ficam registradas como **pontos de contato** (seção 6), que
+é onde o histórico multicanal aparece sem apagar a aquisição.
 
-1. Lead entra numa **lista própria** ("Leads"), nunca nas listas de parceiros.
-2. O seletor de destinatários **exclui leads por padrão**, com uma opção
-   explícita para incluí-los.
-3. A tela de Contatos ganha um filtro visível de estágio, para nunca haver
-   dúvida sobre quem está olhando.
+> Se o time quiser também o último toque, é um segundo conjunto de campos
+> (`lastUtm*`). Não recomendo começar por aí: dobra o custo de manutenção antes
+> de existir pergunta que precise disso.
 
-Se preferir a separação total (tabela própria), é possível — mas então leads
-não recebem automação, não são deduplicados contra parceiros e precisam de
-consentimento próprio. É bem mais caro pelo que entrega.
+### Tabelas novas
+
+```
+webhook_sources        origens que podem nos chamar
+  id, name, slug, tokenHash, secret (HMAC, opcional),
+  mapping jsonb, defaults jsonb, active, createdAt, lastSeenAt
+
+webhook_deliveries     tudo que chegou (auditoria e reprocessamento)
+  id, sourceId, payload jsonb, status, resultado jsonb, erro,
+  createdAt                       -- expurgo automático em 90 dias
+
+lead_score_rules       o modelo de pontuação, editável na tela
+  id, eventType, condition jsonb, points, active, description
+```
 
 ---
 
-## 4. Recebimento (Make → nós)
-
-### O endpoint
+## 4. Entrada por webhook
 
 ```
 POST /api/webhooks/entrada/{slug}
+Authorization: Bearer <token da origem>
 ```
 
-Um `slug` por origem, para dar para revogar uma sem derrubar as outras e para
-saber de onde cada lead veio sem adivinhação.
+Um `slug` por origem: dá para revogar uma sem derrubar as outras e para saber
+de onde cada lead veio sem adivinhar.
 
-### Autenticação
+### Mapeamento por origem (sem deploy para cada nova)
 
-Duas camadas, e a segunda é opcional:
-
-1. **Token no cabeçalho** — `Authorization: Bearer <token>`. Guardamos só o
-   hash, como já é feito com os tokens de redefinição de senha. É o que o Make
-   configura em dois cliques.
-2. **Assinatura HMAC** — para origens que suportem, reaproveitando
-   `verifySignature`. Fica desligada por padrão: exigir do Make complica sem
-   ganho real, já que o token viaja por HTTPS.
-
-### Cadastro de origens (sem código para cada nova)
-
-Tabela `webhook_sources`:
-
-```
-id, name, slug, tokenHash, secret (HMAC, opcional),
-mapping jsonb, defaults jsonb, active, createdAt, lastSeenAt
-```
-
-`mapping` diz de onde tirar cada campo do payload — o mesmo conceito da
-importação de CSV, que a equipe já conhece:
+Mesmo conceito da importação de CSV, que a equipe já usa:
 
 ```jsonc
+// mapping — de onde tirar cada campo (aceita caminho com ponto)
 {
-  "name":  "data.nome",           // aceita caminho com ponto
+  "name":  "data.nome",
   "email": "data.email",
   "phone": "data.telefone",
-  "company": "data.empresa"
+  "utmSource":   "data.utm_source",
+  "utmMedium":   "data.utm_medium",
+  "utmCampaign": "data.utm_campaign",
+  "landingPage": "data.pagina"
 }
+
+// defaults — o que aplicar quando não vier no payload
+{ "tags": ["lead"], "stage": "novo", "listId": "<uuid da lista Leads>",
+  "consentimento": false }
 ```
-
-`defaults` aplica o que não vem no payload:
-
-```jsonc
-{ "tags": ["lead", "make"], "stage": "novo", "listId": "<uuid da lista Leads>" }
-```
-
-Assim, ligar uma origem nova (Typeform, RD, outro cenário) é **cadastro na
-tela**, não deploy.
 
 ### O que acontece a cada chamada
 
 ```
-1. valida o token da origem            → 401 se não bater
-2. valida o tamanho do corpo            → 413 acima do teto
-3. grava a entrega crua (auditoria)     → webhook_deliveries
-4. aplica o mapeamento                  → nome, e-mail, telefone…
-5. valida e normaliza (e-mail, E.164)   → 422 com o motivo, se inválido
-6. procura contato por e-mail/telefone  → cria ou atualiza
-7. aplica tags, lista e estágio padrão
-8. emite os eventos (contact_created / tag_added)
-9. responde 200 com o que foi feito
+1. valida o token da origem              → 401
+2. valida o tamanho do corpo             → 413
+3. grava a entrega crua                  → webhook_deliveries
+4. aplica o mapeamento
+5. valida e normaliza (e-mail, telefone E.164)  → 422 com o motivo
+6. procura contato por e-mail/telefone   → cria ou atualiza
+7. aplica lista, tags, estágio e ORIGEM (só se for contato novo)
+8. emite os eventos                      → contact_created / tag_added
+9. responde 200 dizendo o que fez
 ```
 
-O passo 8 é o que faz o lead **cair direto na automação de nutrição** — sem
-nenhuma peça nova.
+O passo 8 é o que faz o lead **cair direto numa automação de nutrição** — o
+motor já está em produção, nada novo a construir.
 
 Resposta útil para quem depura no Make:
 
 ```jsonc
-{ "ok": true, "acao": "criado", "contactId": "…", "tags": ["lead","make"] }
-{ "ok": true, "acao": "atualizado", "contactId": "…" }
+{ "ok": true,  "acao": "criado",     "contactId": "…", "leadScore": 10 }
+{ "ok": true,  "acao": "atualizado", "contactId": "…" }
+{ "ok": true,  "acao": "ignorado",   "motivo": "entrega repetida" }
 { "ok": false, "erro": "e-mail inválido", "campo": "data.email" }
 ```
 
-### Idempotência — a parte que mais dá problema
+### Idempotência
 
-Como o Make não repete sozinho **mas o cenário pode ser rodado de novo**, o
-mesmo lead chega duas vezes com frequência. Três defesas:
+O Make não repete sozinho, **mas o cenário pode ser rodado de novo** — e isso
+acontece muito. Três defesas:
 
-1. **Deduplicação por identidade**: e-mail (ou telefone) já existente vira
-   atualização, nunca contato novo. Isso sozinho resolve a maioria.
-2. **Chave externa opcional**: se a origem mandar um `externalId`, guardamos e
-   ignoramos a repetição explicitamente.
-3. **Janela curta**: entrega idêntica (mesmo hash de corpo) na mesma origem
-   dentro de alguns minutos é respondida com `200 { "acao": "ignorado" }` —
-   evita a tempestade de um cenário em laço.
-
-### Registro das entregas
-
-Tabela `webhook_deliveries` (id, sourceId, payload cru, status, resultado,
-erro, createdAt). É o que permite responder "esse lead chegou?" sem depender
-do histórico do Make, e reprocessar quando um mapeamento estiver errado.
-
-Com expurgo automático (90 dias), senão a tabela cresce sem fim.
+1. **Identidade**: e-mail (ou telefone) já existente vira atualização, nunca
+   contato novo. Resolve a maioria dos casos sozinho.
+2. **Chave externa**: se a origem mandar `externalId`, a repetição é ignorada
+   explicitamente.
+3. **Janela curta**: corpo idêntico da mesma origem em poucos minutos responde
+   `ignorado` — contém cenário em laço.
 
 ---
 
-## 5. Envio (nós → Make): o passo que já está esperando
+## 5. As três travas contra disparo acidental
 
-O passo `webhook` **já está declarado** em `AUTOMATION_STEP_TYPES` e o motor o
-recusa com "ainda não implementado". Implementá-lo fecha o ciclo:
+Leads e parceiros na mesma tabela criam um perigo concreto: montar uma campanha,
+deixar "todas as listas" e **disparar para os leads sem querer**. Obrigatórias:
 
-```
-Lead entra pelo Make → automação nutre → lead responde/clica
-                                          → passo "webhook" avisa o Make
-                                          → Make joga no CRM / avisa o vendedor
-```
-
-Config do passo:
-
-```jsonc
-{
-  "url": "https://hook.us2.make.com/xxxxxxxx",
-  "method": "POST",
-  "headers": { "X-Origem": "campanhas-avante" },
-  "incluir": ["name", "email", "phone", "tags", "stage"]
-}
-```
-
-Cuidados obrigatórios (é uma chamada externa dentro de um fluxo automático):
-
-- **tempo limite curto** (10s) — sem isso um endpoint lento trava o percurso;
-- **repetição com espera crescente**, reaproveitando o retry do BullMQ;
-- **lista de destinos permitidos**, ou ao menos bloqueio de IPs internos:
-  um passo de webhook apontando para `localhost` ou para a rede interna do VPS
-  é um pedido de SSRF vindo de dentro de casa;
-- **nunca mandar dado sensível por padrão** — daí o `incluir` explícito, em vez
-  de despejar o contato inteiro.
+1. Lead entra **só** na lista "Leads", nunca nas listas de parceiros.
+2. O seletor de destinatários **exclui a lista de leads por padrão**, com opção
+   explícita para incluí-la.
+3. A tela de Contatos ganha filtro visível de estágio.
 
 ---
 
-## 6. A área de gestão de leads
+## 6. Lead Score
 
-Tela `/leads`, sobre os mesmos contatos, filtrada por `stage`:
+### 6.1 O que dá para medir de verdade
 
-- **Lista** com busca, filtro por estágio, origem e responsável, e a mesma
-  paginação/ordenação já usada no relatório de campanha (componente pronto).
-- **Ficha do lead**: dados, origem, histórico de campanhas (já existe na ficha
-  do contato) e as automações em que ele está.
-- **Ações**: mudar estágio, atribuir responsável, adicionar tag (o que dispara
-  automação), converter em parceiro (limpa o estágio e move de lista).
-- **Painel simples**: entradas por dia, por origem, e conversão por estágio.
+Esta é a parte que precisa de honestidade antes de virar expectativa:
 
-A mudança de estágio deve virar **evento** (`lead_stage_changed`), para poder
-ser gatilho de automação — "quando virar qualificado, avise o vendedor".
+| Ponto de contato | Dá? | Como |
+|---|---|---|
+| Abertura de e-mail | ✅ **já capturado** | `contact_events.email_opened` |
+| Clique em e-mail | ✅ **já capturado** | `email_clicked` |
+| Resposta no WhatsApp | ✅ **já capturado** | `whatsapp_replied` |
+| Entrada como lead | ✅ **já capturado** | `contact_created` |
+| Descadastro | ✅ **já capturado** | serve como pontuação NEGATIVA |
+| Origem do anúncio | ✅ na entrada | UTMs (seção 3) |
+| Visita ao site | ⚠️ **exige trabalho** | script no site + identificação (6.4) |
+| Evento no site (preço, demo, formulário) | ⚠️ mesmo mecanismo | evento nomeado pelo script |
+| **Visita ao Instagram** | ❌ **impossível por pessoa** | ver abaixo |
+
+**Sobre o Instagram:** nenhuma plataforma entrega "o lead Fulano visitou nosso
+perfil" — o Instagram não expõe isso, para ninguém. O que existe de real é:
+
+- **clique em link nosso** (link da bio passando pelo nosso redirecionador) → vira ponto de contato identificado;
+- **origem por UTM** (`utm_source=instagram`) → aquisição, já contemplada;
+- **DM ou comentário**, se um cenário do Make empurrar esses eventos para o nosso webhook.
+
+Vale dizer isso ao time antes de prometerem "rastreamento de Instagram" a
+alguém. O mesmo vale para Facebook.
+
+### 6.2 O modelo de pontuação
+
+Regras editáveis na tela, não no código:
+
+| Evento | Pontos sugeridos |
+|---|---|
+| Entrou como lead | +10 |
+| Abriu e-mail | +2 |
+| Clicou em e-mail | +5 |
+| Respondeu no WhatsApp | +15 |
+| Visitou o site | +3 |
+| Viu a página de preços | +10 |
+| Pediu demonstração | +25 |
+| Descadastrou | −30 |
+
+### 6.3 Decaimento — sem isso o modelo apodrece
+
+Sem decaimento, todo lead antigo vira "quente" e a pontuação perde sentido: quem
+abriu dez e-mails há um ano fica na frente de quem pediu demonstração ontem.
+
+Cada evento vale menos com o tempo, por **meia-vida** (sugestão: 30 dias):
+
+```
+pontos_hoje = pontos_da_regra × 0,5 ^ (idade_em_dias / 30)
+```
+
+Um clique de hoje vale 5; o mesmo clique de 30 dias atrás vale 2,5; de 60 dias,
+1,25. A pontuação passa a refletir **interesse atual**, que é a pergunta real.
+
+### 6.4 Como recalcular
+
+A pontuação é **derivada**, nunca incrementada às cegas — assim mudar uma regra
+vale para o histórico inteiro, e não só dali para a frente.
+
+- **Por contato**, quando chegam eventos novos (o motor de automações já varre
+  `contact_events` a cada 10s — é o lugar natural).
+- **Passagem noturna** em toda a lista de leads, para aplicar o decaimento
+  mesmo em quem não teve evento novo.
+
+Com ~1.458 contatos e dezenas de eventos cada, o custo é irrelevante.
+
+### 6.5 Faixas e o que elas disparam
+
+`frio < 20 · morno 20–49 · quente ≥ 50` (configurável).
+
+Mudança de faixa vira **evento** (`lead_score_changed`), que é gatilho de
+automação. É aqui que o modelo deixa de ser um número bonito e vira operação:
+*"quando o lead virar quente, avise o vendedor por WhatsApp e mude o estágio
+para qualificado"* — tudo com o motor que já existe.
 
 ---
 
-## 7. Segurança
+## 7. Rastreio do site (a parte difícil)
 
-Endpoint público recebendo dados de fora exige mais cuidado que o resto do
-sistema:
+O problema não é registrar a visita; é **saber de quem ela é**. O site
+(`avantejuntos.com.br`) e o sistema (`campanhas.avantetools.com.br`) são
+domínios diferentes, e cookie de terceiro não existe mais.
+
+### O mecanismo
+
+```
+1. O lead clica num link do nosso e-mail
+2. /api/track/click já monta a URL de destino — passa a acrescentar ?av=<token>
+3. O script no site lê o `av`, guarda no armazenamento LOCAL do site
+   (primeira parte, sem cookie de terceiro)
+4. A cada página/evento, o script chama POST /api/track/site com o token
+5. O endpoint valida o token → identifica o contato → emite o evento
+```
+
+O token é assinado e opaco, no mesmo esquema do link de descadastro
+(`lib/jwt.ts`), então não expõe e-mail nem id na URL.
+
+### Os limites, ditos com clareza
+
+- Só é identificado quem **chegou por um link nosso** ou **preencheu um
+  formulário**. Quem digita o endereço direto é anônimo até se identificar —
+  isso vale para qualquer ferramenta do mercado, inclusive as pagas.
+- Limpar o navegador apaga a identificação.
+- Exige **colocar um script no site** — é dependência de outra equipe/acesso, e
+  por isso está numa fase separada, depois de o score já entregar valor.
+
+---
+
+## 8. A área de gestão de leads
+
+Tela `/leads`, restrita à lista de leads:
+
+- **Lista** com busca e filtros por estágio, **origem/UTM**, faixa de pontuação
+  e responsável. Ordenação e paginação reaproveitam o componente do relatório
+  de campanha, que já está pronto.
+- **Ficha do lead**: dados, origem completa, **linha do tempo dos pontos de
+  contato** (de `contact_events`), pontuação com a conta aberta — *por que* ele
+  tem 47 pontos — e as automações em que está.
+- **Ações**: mudar estágio, atribuir responsável, adicionar tag (dispara
+  automação), converter em parceiro (limpa o estágio, move de lista).
+- **Painel**: entradas por dia, **por canal de origem** (a pergunta que motivou
+  as UTMs), conversão por estágio e distribuição das faixas.
+
+A mudança de estágio também vira evento (`lead_stage_changed`), utilizável como
+gatilho.
+
+---
+
+## 9. Segurança e LGPD
 
 | Risco | Tratamento |
 |---|---|
-| Token vazado | um por origem, revogável; guardado como hash |
+| Token vazado | um por origem, revogável, guardado como hash |
 | Enxurrada de chamadas | limite por origem (`lib/rate-limit.ts` já existe) |
-| Corpo gigante | teto de tamanho, rejeitando com 413 |
-| Injeção pelo payload | tudo passa por validação e normalização; nada é gravado cru fora do registro de auditoria |
-| SSRF no passo de webhook | lista de destinos permitidos + bloqueio de rede interna |
-| LGPD | a origem precisa declarar o consentimento; sem isso o lead entra **sem** opt-in de marketing |
+| Corpo gigante | teto de tamanho → 413 |
+| Injeção pelo payload | tudo validado e normalizado; cru só no registro de auditoria |
+| Token de rastreio reaproveitado | assinado, ligado ao contato, revogável no descadastro |
+| SSRF no webhook de saída | lista de destinos permitidos + bloqueio de rede interna |
 
-Esse último merece atenção: um lead que chega de um formulário **não** é
-automaticamente alguém que aceitou receber marketing. O `defaults` da origem
-deve dizer explicitamente se aquele canal capta consentimento, e o padrão
-seguro é não presumir.
+**Consentimento.** Um formulário preenchido **não** é, juridicamente, alguém que
+aceitou receber marketing. O `defaults` de cada origem declara explicitamente se
+aquele canal capta consentimento, e o padrão é **não presumir**: o lead entra,
+é pontuado e aparece na gestão, mas **não recebe campanha** até haver opt-in.
+
+**Rastreio do site.** Acompanhar pessoa identificada exige aviso no site e base
+legal. O script deve respeitar o banner de consentimento — e, sem consentimento,
+não enviar evento nenhum.
 
 ---
 
-## 8. Fases sugeridas
+## 10. Fases
 
 | Fase | Entrega | Tamanho |
 |---|---|---|
-| **A** | Endpoint + `webhook_sources` + `webhook_deliveries` + mapeamento. Origem cadastrada por script | média |
-| **B** | Campos de lead em `contacts` + as três travas contra disparo acidental | pequena |
-| **C** | Tela `/leads` + tela de cadastro de origens | **a maior** |
-| **D** | Passo `webhook` de saída (fecha o ciclo com o Make) | pequena |
+| **A** | Endpoint + `webhook_sources` + `webhook_deliveries` + mapeamento + UTMs. Origem cadastrada por script | média |
+| **B** | Campos de lead, lista própria e as três travas da seção 5 | pequena |
+| **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
+| **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
+| **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa |
+| **F** | Passo `webhook` de saída (avisa o Make/CRM) | pequena |
 
-Sugiro **A + B primeiro**: com elas já dá para ligar um cenário do Make de
-verdade e ver o lead entrando e caindo numa automação. A tela vem depois,
-quando o formato dos dados já estiver provado por uso real — a mesma ordem que
-funcionou nas automações.
+**A ordem importa.** A fase C vem **antes** do rastreio do site de propósito: o
+score já nasce útil com abertura, clique, resposta e origem — sinais que o
+sistema **já captura hoje**. Esperar o script do site para só então ter
+pontuação seria travar meses de valor numa dependência de outra equipe.
+
+Sugiro fechar **A + B** e ligar um cenário do Make de verdade antes de seguir:
+com lead entrando, o formato dos dados deixa de ser suposição.
+
+> ⚠️ As fases 3, 4 e 5 das automações estão commitadas e **não deployadas**
+> (ver `docs/plano-automacoes.md`). Subir antes de abrir esta frente.
 
 ---
 
-## 9. Decisões que preciso de você
+## 11. Decisões que preciso de você
 
-1. **Lead é contato com estágio** (recomendado) ou tabela separada?
-2. **Estágios do funil**: `novo → contatado → qualificado → convertido/perdido`
+1. **Estágios do funil**: `novo → contatado → qualificado → convertido/perdido`
    serve, ou o time usa outros nomes?
-3. **Consentimento na entrada**: lead que chega pelo Make já pode receber
-   e-mail de nutrição, ou entra sem opt-in até alguém confirmar?
-4. **Responsável**: leads são atribuídos a um usuário do sistema, ou ficam num
-   balcão comum?
-5. **Origens previstas** além do Make — para eu dimensionar o mapeamento.
+2. **Consentimento na entrada**: lead do Make já pode receber nutrição, ou entra
+   sem opt-in até alguém confirmar? (recomendo sem, e liberar por ação)
+3. **Pontos das regras**: a tabela da seção 6.2 é chute meu. Quais ações o time
+   considera sinal forte de interesse?
+4. **Meia-vida do decaimento**: 30 dias serve para o ciclo de venda de vocês, ou
+   ele é mais longo?
+5. **Responsável**: leads são atribuídos a um usuário, ou ficam num balcão comum?
+6. **Acesso ao site**: você consegue colocar um script em `avantejuntos.com.br`?
+   Isso define se a fase E é viável ou se o score fica só nos canais próprios.
