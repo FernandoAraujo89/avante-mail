@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ListChecks, Pencil, Plus, Trash2, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -31,6 +32,8 @@ type ListDto = {
   id: string;
   name: string;
   description: string | null;
+  /** "leads" = lista de leads (fora das campanhas por padrão); null = comum. */
+  kind: string | null;
   contactCount: number;
   createdAt: string;
 };
@@ -172,12 +175,19 @@ export default function ListsPage() {
               {lists.map((list) => (
                 <TableRow key={list.id}>
                   <TableCell>
-                    <Link
-                      href={`/lists/${list.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {list.name}
-                    </Link>
+                    <span className="flex items-center gap-2">
+                      <Link
+                        href={`/lists/${list.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {list.name}
+                      </Link>
+                      {/* A lista de leads é a única que as campanhas pulam por
+                          padrão — quem olha a tela precisa saber qual é. */}
+                      {list.kind === "leads" ? (
+                        <Badge variant="warning">Leads</Badge>
+                      ) : null}
+                    </span>
                     {list.description ? (
                       <p className="mt-0.5 max-w-md truncate text-xs text-muted-foreground">
                         {list.description}

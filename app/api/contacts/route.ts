@@ -13,8 +13,16 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import { contactLists, contacts, getDb, lists } from "@/lib/db";
+import {
+  contactLists,
+  contacts,
+  getDb,
+  lists,
+  LEAD_STAGES,
+  type LeadStage,
+} from "@/lib/db";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
+import { ehLead, naoEhLead } from "@/lib/leads";
 import { normalizePhone } from "@/lib/phone";
 import {
   EMAIL_REGEX,
@@ -39,6 +47,13 @@ export async function GET(request: NextRequest) {
       .filter(Boolean);
     const subscribed = params.get("subscribed");
     const countOnly = params.get("count") === "true";
+    // Estágio do funil: um dos LEAD_STAGES, "lead" (qualquer estágio) ou
+    // "contato" (sem estágio — parceiro/contato comum).
+    const stage = params.get("stage")?.trim();
+    // Recorte de lead para o SELETOR de destinatários (trava 2). O padrão
+    // continua "todos" para não mudar o comportamento de quem já chama esta
+    // rota — quem exclui é quem vai disparar.
+    const leads = params.get("leads");
 
     // Filtro por lista: listId (uma) e/ou lists (várias, separadas por vírgula).
     const listFilterIds = [
@@ -74,6 +89,11 @@ export async function GET(request: NextRequest) {
         isNotNull(contacts.phone)
       );
     }
+    if (stage === "lead") conditions.push(ehLead());
+    else if (stage === "contato") conditions.push(naoEhLead());
+    else if (stage && LEAD_STAGES.includes(stage as LeadStage)) {
+      conditions.push(eq(contacts.stage, stage as LeadStage));
+    }
     if (listFilterIds.length > 0) {
       conditions.push(
         inArray(
@@ -86,20 +106,35 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    // `leads=exclude` vem do seletor de destinatários e do envio: é a mesma
+    // conta dos dois lados, para a contagem da tela não prometer um público
+    // diferente do que sai.
+    const semLeads = leads === "exclude";
+    const where = (extra?: SQL) => {
+      const todas = extra ? [...conditions, extra] : conditions;
+      return todas.length > 0 ? and(...todas) : undefined;
+    };
 
     if (countOnly) {
       const [row] = await db
         .select({ count: count() })
         .from(contacts)
-        .where(where);
-      return NextResponse.json({ count: row.count });
+        .where(where(semLeads ? naoEhLead() : undefined));
+      if (!semLeads) return NextResponse.json({ count: row.count });
+
+      // Quantos leads ficaram DE FORA: sem esse número, a exclusão é silenciosa
+      // e o usuário só descobre que existiam leads quando alguém reclama.
+      const [fora] = await db
+        .select({ count: count() })
+        .from(contacts)
+        .where(where(ehLead()));
+      return NextResponse.json({ count: row.count, leadsExcluidos: fora.count });
     }
 
     const data = await db
       .select()
       .from(contacts)
-      .where(where)
+      .where(where(semLeads ? naoEhLead() : undefined))
       .orderBy(desc(contacts.createdAt));
 
     // Anexa as listas de cada contato (para exibir como badges).

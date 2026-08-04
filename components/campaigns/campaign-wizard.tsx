@@ -58,7 +58,7 @@ import {
 } from "@/lib/whatsapp/types";
 import { resolveVariables } from "@/lib/whatsapp/variables";
 
-type ListRef = { id: string; name: string };
+type ListRef = { id: string; name: string; kind?: string | null };
 
 type TemplateDto = {
   id: string;
@@ -88,6 +88,8 @@ type WizardData = {
   editorType: EditorType;
   lists: string[];
   tagsFilter: string;
+  /** Trava 2: lead só entra no público com esta opção marcada à mão. */
+  includeLeads: boolean;
   channel: CampaignChannel;
   whatsappTemplateId: string;
   whatsappVariables: WhatsAppVariableMap;
@@ -105,6 +107,7 @@ const EMPTY_DATA: WizardData = {
   editorType: "builder",
   lists: [],
   tagsFilter: "",
+  includeLeads: false,
   channel: "email",
   whatsappTemplateId: "",
   whatsappVariables: {},
@@ -165,6 +168,8 @@ export function CampaignWizard({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
+  // Quantos leads a trava deixou de fora do público atual (0 = não havia).
+  const [leadsExcluded, setLeadsExcluded] = useState(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [dispatching, setDispatching] = useState(false);
@@ -260,6 +265,10 @@ export function CampaignWizard({
           tagsFilter: Array.isArray(json.tagsFilter)
             ? json.tagsFilter.join(", ")
             : "",
+          // A cópia NÃO herda: incluir lead é decisão de um envio, e duplicar
+          // uma campanha antiga não pode arrastar essa decisão em silêncio —
+          // mesma regra do agendamento, logo acima.
+          includeLeads: duplicateId ? false : json.includeLeads === true,
           channel: json.channel === "whatsapp" ? "whatsapp" : "email",
           whatsappTemplateId: json.whatsappTemplateId ?? "",
           whatsappVariables:
@@ -375,10 +384,14 @@ export function CampaignWizard({
         }
         const tags = parseTags(data.tagsFilter);
         if (tags.length > 0) params.set("tags", tags.join(","));
+        if (!data.includeLeads) params.set("leads", "exclude");
 
         const res = await fetch(`/api/contacts?${params.toString()}`);
         const json = await res.json();
-        if (!cancelled && res.ok) setRecipientCount(json.count);
+        if (!cancelled && res.ok) {
+          setRecipientCount(json.count);
+          setLeadsExcluded(json.leadsExcluidos ?? 0);
+        }
       } catch {
         // Silencioso: a contagem é informativa.
       }
@@ -387,7 +400,18 @@ export function CampaignWizard({
     return () => {
       cancelled = true;
     };
-  }, [step, data.lists, data.tagsFilter, data.channel]);
+  }, [step, data.lists, data.tagsFilter, data.channel, data.includeLeads]);
+
+  // Listas de leads escolhidas no passo: escolher a lista NÃO libera o envio
+  // (a trava é por contato, não por lista), então o aviso avisa em vez de o
+  // público sair vazio sem explicação.
+  const leadsSelecionados = useMemo(
+    () =>
+      availableLists.filter(
+        (l) => l.kind === "leads" && data.lists.includes(l.id)
+      ),
+    [availableLists, data.lists]
+  );
 
   // Público efetivo: a escolha manual manda; sem ela, vale a contagem por
   // listas/tags. Alimenta a contagem, o custo estimado e o aviso de limite.
@@ -485,6 +509,7 @@ export function CampaignWizard({
       editorType: data.editorType,
       lists: data.lists,
       tagsFilter: data.tagsFilter,
+      includeLeads: data.includeLeads,
       scheduledAt: data.scheduledAt
         ? new Date(data.scheduledAt).toISOString()
         : null,
@@ -1064,8 +1089,53 @@ export function CampaignWizard({
                 )}
                 <p className="text-xs text-muted-foreground">
                   Selecione uma ou mais listas. Nenhuma selecionada = todas as
-                  listas.
+                  listas — <span className="font-medium">menos os leads</span>,
+                  que só entram pela opção abaixo.
                 </p>
+              </div>
+
+              {/* Trava 2 (docs/plano-webhooks-leads.md, seção 5). Lead e
+                  parceiro moram na mesma base: sem esta opção, "nenhuma lista
+                  selecionada" mandaria a campanha de parceiro para a base
+                  inteira de leads sem ninguém ter pedido. */}
+              <div className="grid gap-2">
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-4 py-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={data.includeLeads}
+                    onChange={(e) =>
+                      update({ includeLeads: e.target.checked })
+                    }
+                    className="mt-0.5 size-4 accent-[#1D50DC]"
+                  />
+                  <span>
+                    Incluir leads neste envio
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Leads são contatos captados por formulário ou anúncio, e
+                      ficam fora das campanhas por padrão. Confira o
+                      consentimento antes de marcar.
+                    </span>
+                  </span>
+                </label>
+
+                {leadsSelecionados.length > 0 && !data.includeLeads ? (
+                  <p className="rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2 text-xs text-warning-dark">
+                    Você escolheu a lista{" "}
+                    <span className="font-medium">
+                      {leadsSelecionados.map((l) => l.name).join(", ")}
+                    </span>
+                    , mas os leads continuam fora do envio. Marque{" "}
+                    <span className="font-medium">Incluir leads</span> acima
+                    para que eles recebam.
+                  </p>
+                ) : null}
+
+                {!data.includeLeads && leadsExcluded > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {leadsExcluded} lead{leadsExcluded === 1 ? "" : "s"} fora
+                    deste envio pelos filtros atuais.
+                  </p>
+                ) : null}
               </div>
 
               <div className="grid gap-2.5">
@@ -1110,6 +1180,7 @@ export function CampaignWizard({
                     availableLists.find((l) => l.id === id)?.name ?? id
                 )}
                 tags={parseTags(data.tagsFilter)}
+                includeLeads={data.includeLeads}
                 value={data.recipientIds}
                 onChange={(recipientIds) => update({ recipientIds })}
               />
@@ -1187,6 +1258,14 @@ export function CampaignWizard({
                     {
                       label: "Tags",
                       value: parseTags(data.tagsFilter).join(", ") || "Sem filtro",
+                    },
+                    {
+                      label: "Leads",
+                      value: data.includeLeads
+                        ? "Incluídos neste envio"
+                        : leadsExcluded > 0
+                          ? `Fora (${leadsExcluded})`
+                          : "Fora",
                     },
                     {
                       label: "Disparo",

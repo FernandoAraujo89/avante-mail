@@ -6,16 +6,16 @@ pontos de contato com os canais da Avante.
 
 ---
 
-## ▶ ESTADO ATUAL (03/08/2026)
+## ▶ ESTADO ATUAL (04/08/2026)
 
-**Fase A EM PRODUÇÃO.** A próxima é a **fase B** (as três travas da seção 5).
+**Fases A e B prontas.** A próxima é a **fase C** (Lead Score).
 
 | Fase | Situação | Commit |
 |---|---|---|
 | A — Entrada por webhook + UTMs | ✅ produção | `1984395` |
 | — Correção do consentimento | ✅ produção | `5060116` |
-| B — Campos de lead + travas | ⬜ **próxima** | |
-| C — Lead Score | ⬜ | |
+| B — Campos de lead + travas | ✅ feita | |
+| C — Lead Score | ⬜ **próxima** | |
 | D — Tela `/leads` | ⬜ | |
 | E — Rastreio do site | ⬜ | |
 | F — Webhook de saída | ⬜ | |
@@ -25,6 +25,34 @@ com mapeamento por origem, idempotência (identidade + janela de 5min) e
 registro de tudo em `webhook_deliveries`. O lead entra na lista "Leads", com
 UTMs, `stage = novo`, e emite os eventos que alimentam automação e score.
 Colunas de origem/estágio já existem em `contacts`.
+
+### As três travas (fase B)
+
+Migração: `scripts/migrate-leads-travas.ts` (roda sozinha no deploy).
+
+| # | Trava | Onde |
+|---|---|---|
+| 1 | Lead só entra em lista marcada como de leads | `lib/webhooks/entrada.ts` |
+| 2 | Campanha exclui lead, salvo opção explícita | `app/api/campaigns/[id]/send` |
+| 3 | Filtro e selo de estágio em Contatos | `app/(app)/contacts/page.tsx` |
+
+**Quem é lead: `contacts.stage` preenchido** — e não "está na lista Leads".
+A diferença importa: um PARCEIRO que preenche um formulário do site entra na
+lista de leads pelo webhook, mas continua com `stage` nulo (a entrada não
+sobrescreve contato existente). Pela lista, ele sumiria calado das campanhas de
+parceiro; pelo estágio, ele segue parceiro — que é o que ele é. `lib/leads.ts`
+é o ponto único dessa definição.
+
+`lists.kind = 'leads'` marca a lista; o nome pode ser trocado na tela sem
+desfazer a trava. A trava 1 **recusa** a lista pedida pela origem quando não é
+de leads (registra `listaRecusada` na entrega) e usa a de leads no lugar —
+obedecer poria o lead na lista de parceiros, e no dia seguinte ele seria
+público de campanha.
+
+`campaigns.include_leads` (padrão false, inclusive nas campanhas antigas e no
+Avante News) é a opção explícita da trava 2. Ela vale no **envio**, não no
+seletor: escolher os leads a dedo no passo Destinatários **não** fura a trava.
+A cópia de uma campanha não herda a opção — incluir lead é decisão de um envio.
 
 **Como ligar uma origem:**
 `npx tsx scripts/criar-origem-webhook.ts make-leads "Make — Leads do site"`
@@ -219,7 +247,7 @@ acontece muito. Três defesas:
 
 ---
 
-## 5. As três travas contra disparo acidental
+## 5. As três travas contra disparo acidental ✅ FEITAS
 
 Leads e parceiros na mesma tabela criam um perigo concreto: montar uma campanha,
 deixar "todas as listas" e **disparar para os leads sem querer**. Obrigatórias:
@@ -228,6 +256,14 @@ deixar "todas as listas" e **disparar para os leads sem querer**. Obrigatórias:
 2. O seletor de destinatários **exclui a lista de leads por padrão**, com opção
    explícita para incluí-la.
 3. A tela de Contatos ganha filtro visível de estágio.
+
+Ver o resumo da implementação no ESTADO ATUAL, no topo. Duas decisões que só
+apareceram ao construir:
+
+- a trava 2 vale por **contato** (`stage`), não por lista — então ela também
+  pega o lead escolhido a dedo no passo Destinatários, que era o furo óbvio;
+- escolher a lista de leads **não** libera o envio sozinho; a tela avisa em vez
+  de deixar o público sair vazio sem explicação.
 
 ---
 
@@ -388,8 +424,8 @@ não enviar evento nenhum.
 
 | Fase | Entrega | Tamanho |
 |---|---|---|
-| **A** | Endpoint + `webhook_sources` + `webhook_deliveries` + mapeamento + UTMs. Origem cadastrada por script | média |
-| **B** | Campos de lead, lista própria e as três travas da seção 5 | pequena |
+| **A** | Endpoint + `webhook_sources` + `webhook_deliveries` + mapeamento + UTMs. Origem cadastrada por script | média ✅ |
+| **B** | Campos de lead, lista própria e as três travas da seção 5 | pequena ✅ |
 | **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
 | **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa |

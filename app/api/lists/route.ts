@@ -14,6 +14,9 @@ export async function GET() {
         id: lists.id,
         name: lists.name,
         description: lists.description,
+        // "leads" = lista de leads; o seletor de destinatários usa isto para
+        // avisar quando a escolha esbarra na trava contra disparo acidental.
+        kind: lists.kind,
         createdAt: lists.createdAt,
         contactCount: sql<number>`count(${contactLists.contactId})`.mapWith(
           Number

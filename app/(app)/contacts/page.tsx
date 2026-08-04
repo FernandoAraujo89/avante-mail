@@ -47,14 +47,39 @@ type ContactDto = {
   lists: ListRef[];
   subscribed: boolean;
   whatsappSubscribed: boolean;
+  /** Estágio do funil; nulo = não é lead (parceiro/contato comum). */
+  stage: string | null;
+  sourceChannel: string | null;
   createdAt: string;
 };
+
+// Trava 3 (docs/plano-webhooks-leads.md, seção 5): lead e parceiro moram na
+// mesma tabela, então quem olha a tela precisa CONSEGUIR ver a diferença — sem
+// isso, a separação existe só no banco.
+const STAGE_LABELS: Record<string, string> = {
+  novo: "Novo",
+  contatado: "Contatado",
+  qualificado: "Qualificado",
+  convertido: "Convertido",
+  perdido: "Perdido",
+};
+
+const STAGE_FILTERS = [
+  { value: "all", label: "Leads e contatos" },
+  { value: "lead", label: "Somente leads" },
+  { value: "contato", label: "Somente contatos" },
+  ...Object.entries(STAGE_LABELS).map(([value, label]) => ({
+    value,
+    label: `Lead: ${label.toLowerCase()}`,
+  })),
+];
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<ContactDto[] | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [listFilter, setListFilter] = useState("all");
+  const [stageFilter, setStageFilter] = useState("all");
   const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [tag, setTag] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ContactDto | null>(null);
@@ -70,6 +95,7 @@ export default function ContactsPage() {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
       if (listFilter !== "all") params.set("listId", listFilter);
+      if (stageFilter !== "all") params.set("stage", stageFilter);
       if (tag.trim()) params.set("tag", tag.trim().toLowerCase());
 
       const res = await fetch(`/api/contacts?${params.toString()}`);
@@ -80,7 +106,7 @@ export default function ContactsPage() {
       setContacts([]);
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [search, listFilter, tag]);
+  }, [search, listFilter, stageFilter, tag]);
 
   useEffect(() => {
     const timer = setTimeout(load, 300);
@@ -161,7 +187,7 @@ export default function ContactsPage() {
     <>
       <PageHeader
         title="Contatos"
-        description="Base de parceiros que recebem as campanhas."
+        description="Parceiros e leads. Lead só recebe campanha quando alguém marca “Incluir leads” no envio."
       >
         <Button variant="outline" asChild>
           <Link href="/contacts/import">
@@ -196,6 +222,18 @@ export default function ContactsPage() {
             {availableLists.map((list) => (
               <SelectItem key={list.id} value={list.id}>
                 {list.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={stageFilter} onValueChange={setStageFilter}>
+          <SelectTrigger className="w-52">
+            <SelectValue placeholder="Estágio" />
+          </SelectTrigger>
+          <SelectContent>
+            {STAGE_FILTERS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -283,16 +321,29 @@ export default function ContactsPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Link
-                      href={`/contacts/${contact.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {contact.name}
-                    </Link>
+                    {/* O estágio fica colado no nome, e não numa coluna
+                        própria: a tabela já ocupa a largura toda em 1280px, e
+                        uma coluna a mais empurraria as Ações para fora. */}
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/contacts/${contact.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {contact.name}
+                      </Link>
+                      {contact.stage ? (
+                        <Badge variant="warning">
+                          {STAGE_LABELS[contact.stage] ?? contact.stage}
+                        </Badge>
+                      ) : null}
+                    </span>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {contact.email}
                       {contact.phone ? ` · ${formatPhone(contact.phone)}` : ""}
                       {contact.company ? ` · ${contact.company}` : ""}
+                      {contact.stage && contact.sourceChannel
+                        ? ` · via ${contact.sourceChannel}`
+                        : ""}
                     </p>
                   </TableCell>
                   <TableCell>

@@ -67,6 +67,12 @@ export const LEAD_STAGES = [
 ] as const;
 export type LeadStage = (typeof LEAD_STAGES)[number];
 
+// Natureza da lista. Nulo = lista comum (parceiros). "leads" marca a lista de
+// leads, e é o que as travas contra disparo acidental consultam — o nome
+// "Leads" pode ser renomeado, a marca não.
+export const LIST_KINDS = ["leads"] as const;
+export type ListKind = (typeof LIST_KINDS)[number];
+
 // O que acontece com um contato. É a matéria-prima dos gatilhos das
 // automações (docs/plano-automacoes.md): sem isto o sistema só conhece o
 // ESTADO das tags, nunca a MUDANÇA — e "quando a tag X for adicionada"
@@ -168,6 +174,9 @@ export const lists = pgTable("lists", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
+  // Nulo = lista de parceiros. "leads" = destino da entrada por webhook, e a
+  // única lista onde um lead pode cair (docs/plano-webhooks-leads.md, seção 5).
+  kind: text("kind").$type<ListKind>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -544,6 +553,11 @@ export const campaigns = pgTable("campaigns", {
   whatsappVariables: jsonb("whatsapp_variables").$type<WhatsAppVariableMap>(),
   // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas.
   lists: uuid("lists").array(),
+  // Trava contra disparo acidental: lead (contacts.stage preenchido) NÃO recebe
+  // campanha a menos que alguém marque isto no passo Destinatários. "Nenhuma
+  // lista selecionada = todas as listas" tornava um clique a menos suficiente
+  // para mandar campanha de parceiro para a base inteira de leads.
+  includeLeads: boolean("include_leads").notNull().default(false),
   tagsFilter: text("tags_filter").array(),
   // Destinatários escolhidos à mão no passo "Destinatários". Nulo = todos os
   // contatos elegíveis das listas/tags (padrão, e o das campanhas antigas);

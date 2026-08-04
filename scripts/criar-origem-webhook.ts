@@ -62,15 +62,26 @@ async function main() {
     process.exit(0);
   }
 
-  // A lista "Leads" é o que separa lead de parceiro. Criada se não existir.
+  // A lista de leads é o que separa lead de parceiro. Procurada pela MARCA
+  // (kind), não pelo nome: renomear a lista na tela não pode desfazer a trava.
+  // Cai no nome só para adotar a lista de antes da marca existir.
   const { rows: listas } = await client.query(
-    `SELECT id FROM lists WHERE name ILIKE 'leads' LIMIT 1`
+    `SELECT id FROM lists WHERE kind = 'leads' ORDER BY created_at LIMIT 1`
   );
   let listId = listas[0]?.id;
   if (!listId) {
+    const { rows: porNome } = await client.query(
+      `UPDATE lists SET kind = 'leads'
+        WHERE id = (SELECT id FROM lists WHERE name ILIKE 'leads' LIMIT 1)
+        RETURNING id`
+    );
+    listId = porNome[0]?.id;
+    if (listId) console.log("[ORIGEM] Lista 'Leads' existente marcada.");
+  }
+  if (!listId) {
     const { rows } = await client.query(
-      `INSERT INTO lists (name, description)
-       VALUES ('Leads', 'Leads recebidos por webhook — não usar em campanha sem conferir consentimento')
+      `INSERT INTO lists (name, description, kind)
+       VALUES ('Leads', 'Leads recebidos por webhook — não recebem campanha sem marcar "Incluir leads"', 'leads')
        RETURNING id`
     );
     listId = rows[0].id;

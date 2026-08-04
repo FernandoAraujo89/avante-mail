@@ -5,12 +5,14 @@ import {
   contactLists,
   contacts,
   getDb,
+  lists,
   webhookDeliveries,
   webhookSources,
   type LeadStage,
   type NewContact,
 } from "@/lib/db";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
+import { resolveListaDeLeads } from "@/lib/leads";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, normalizeTags } from "@/lib/utils";
 
@@ -297,13 +299,20 @@ export async function processarEntrada(args: {
     await emitTagDiff(contactId, [], tags);
   }
 
-  if (listId) {
+  // TRAVA 1: lead entra SÓ na lista de leads. O `listId` vem do defaults da
+  // origem, que é dado editável — um id trocado à mão despejaria leads na lista
+  // de parceiros, e daí em diante toda campanha de parceiro os alcançaria.
+  const destino = await destinoDoLead(listId);
+
+  if (destino.listId) {
     const inserido = await db
       .insert(contactLists)
-      .values({ contactId, listId })
+      .values({ contactId, listId: destino.listId })
       .onConflictDoNothing()
       .returning({ contactId: contactLists.contactId });
-    if (inserido.length > 0) await emitListDiff(contactId, [], [listId]);
+    if (inserido.length > 0) {
+      await emitListDiff(contactId, [], [destino.listId]);
+    }
   }
 
   await db
@@ -311,7 +320,16 @@ export async function processarEntrada(args: {
     .set({ lastSeenAt: new Date() })
     .where(eq(webhookSources.id, origem.id));
 
-  const resultado = { acao, tags, stage, consentimento };
+  const resultado = {
+    acao,
+    tags,
+    stage,
+    consentimento,
+    listId: destino.listId,
+    // Fica registrado o que a origem PEDIU e não foi feito: sem isto, uma
+    // origem mal configurada só apareceria como leads sumidos da lista.
+    ...(destino.recusada ? { listaRecusada: destino.recusada } : {}),
+  };
   await registrar(origem.id, args, acao, resultado, contactId);
 
   return {
@@ -319,6 +337,39 @@ export async function processarEntrada(args: {
     corpo: { ok: true, acao, contactId, tags },
     acao,
     contactId,
+  };
+}
+
+/**
+ * TRAVA 1 (docs/plano-webhooks-leads.md, seção 5): o único destino possível de
+ * um lead é uma lista marcada como de leads.
+ *
+ * A lista pedida pela origem só vale se for de leads; qualquer outra é
+ * RECUSADA e o lead cai na lista de leads do sistema. Recusar em vez de
+ * obedecer é a escolha certa aqui: a lista errada não some, ela vira público de
+ * campanha de parceiro no dia seguinte.
+ *
+ * Sem nenhuma lista de leads cadastrada, o lead entra sem lista — perder o
+ * lead seria pior, e o estágio (`stage`) já o identifica na gestão.
+ */
+async function destinoDoLead(
+  pedida: string | null
+): Promise<{ listId: string | null; recusada: string | null }> {
+  const db = getDb();
+
+  if (pedida) {
+    const [lista] = await db
+      .select({ id: lists.id, kind: lists.kind })
+      .from(lists)
+      .where(eq(lists.id, pedida))
+      .limit(1);
+    if (lista?.kind === "leads") return { listId: lista.id, recusada: null };
+  }
+
+  const padrao = await resolveListaDeLeads();
+  return {
+    listId: padrao?.id ?? null,
+    recusada: pedida && pedida !== padrao?.id ? pedida : null,
   };
 }
 
