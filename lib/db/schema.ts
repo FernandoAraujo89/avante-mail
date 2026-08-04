@@ -57,6 +57,16 @@ export type SendStatus = (typeof SEND_STATUSES)[number];
 export const BOUNCE_TYPES = ["hard", "soft"] as const;
 export type BounceType = (typeof BOUNCE_TYPES)[number];
 
+// Estágio do lead no funil. Nulo = o contato não é lead.
+export const LEAD_STAGES = [
+  "novo",
+  "contatado",
+  "qualificado",
+  "convertido",
+  "perdido",
+] as const;
+export type LeadStage = (typeof LEAD_STAGES)[number];
+
 // O que acontece com um contato. É a matéria-prima dos gatilhos das
 // automações (docs/plano-automacoes.md): sem isto o sistema só conhece o
 // ESTADO das tags, nunca a MUDANÇA — e "quando a tag X for adicionada"
@@ -118,6 +128,28 @@ export const contacts = pgTable("contacts", {
   whatsappSubscribed: boolean("whatsapp_subscribed").notNull().default(false),
   whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),
   whatsappOptOutAt: timestamp("whatsapp_opt_out_at", { withTimezone: true }),
+
+  // ── Lead (docs/plano-webhooks-leads.md) ──────────────────────────────
+  // Nulo = não é lead; é parceiro/contato comum. A separação operacional é
+  // feita pela LISTA "Leads"; este campo é o estágio dentro do funil.
+  stage: text("stage").$type<LeadStage>(),
+
+  // Origem do PRIMEIRO contato. Gravada uma vez e NÃO sobrescrita: quem chegou
+  // pelo Instagram e voltou meses depois pelo Google continua sendo do
+  // Instagram — é isso que responde "qual canal traz lead". As visitas
+  // seguintes viram pontos de contato em contact_events.
+  sourceChannel: text("source_channel"),
+  utmSource: text("utm_source"),
+  utmMedium: text("utm_medium"),
+  utmCampaign: text("utm_campaign"),
+  utmContent: text("utm_content"),
+  utmTerm: text("utm_term"),
+  landingPage: text("landing_page"),
+  referrer: text("referrer"),
+  /** Nome do cenário/formulário que enviou. */
+  sourceDetail: text("source_detail"),
+  acquiredAt: timestamp("acquired_at", { withTimezone: true }),
+
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -345,6 +377,65 @@ export const automationRunSteps = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("automation_run_steps_idx").on(t.runId, t.at)]
+);
+
+// ─── Entrada por webhook (leads) ───────────────────────────────────────────
+// docs/plano-webhooks-leads.md, fase A.
+
+/** Origem que pode nos chamar: um cenário do Make, um formulário, o site. */
+export const webhookSources = pgTable(
+  "webhook_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** Compõe a URL: /api/webhooks/entrada/{slug}. */
+    slug: text("slug").notNull().unique(),
+    /** SHA-256 do token — o token cru só existe no momento em que é criado. */
+    tokenHash: text("token_hash").notNull(),
+    /** De onde tirar cada campo no payload: { "email": "data.email" }. */
+    mapping: jsonb("mapping").$type<Record<string, string>>(),
+    /** O que aplicar quando não vier no payload: tags, lista, estágio. */
+    defaults: jsonb("defaults").$type<Record<string, unknown>>(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  },
+  (t) => [index("webhook_sources_slug_idx").on(t.slug)]
+);
+
+/**
+ * Tudo que chegou, cru. É o que responde "esse lead entrou?" sem depender do
+ * histórico do Make, e o que permite reprocessar quando um mapeamento estava
+ * errado. Expurgo em 90 dias (scripts/purge-webhook-deliveries.ts).
+ */
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => webhookSources.id, { onDelete: "cascade" }),
+    /** SHA-256 do corpo — base da janela anti-repetição. */
+    payloadHash: text("payload_hash").notNull(),
+    payload: jsonb("payload"),
+    /** "criado" | "atualizado" | "ignorado" | "rejeitado" | "erro" */
+    status: text("status").notNull(),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    resultado: jsonb("resultado").$type<Record<string, unknown>>(),
+    erro: text("erro"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("webhook_deliveries_origem_idx").on(t.sourceId, t.createdAt),
+    // A janela anti-repetição procura por (origem, hash) recente.
+    index("webhook_deliveries_repeticao_idx").on(t.sourceId, t.payloadHash, t.createdAt),
+  ]
 );
 
 export const templates = pgTable("templates", {
