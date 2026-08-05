@@ -6,10 +6,9 @@ pontos de contato com os canais da Avante.
 
 ---
 
-## ▶ ESTADO ATUAL (04/08/2026)
+## ▶ ESTADO ATUAL (05/08/2026)
 
-**Fases A, B, C e D prontas.** Sobram a **E** (rastreio do site) e a **F**
-(webhook de saída).
+**As seis fases estão prontas.**
 
 | Fase | Situação | Commit |
 |---|---|---|
@@ -18,8 +17,12 @@ pontos de contato com os canais da Avante.
 | B — Campos de lead + travas | ✅ produção | `71ba61e` |
 | D — Área de Leads + cadastro de origens | ✅ produção | `06aa4f5` |
 | C — Lead Score | ✅ produção | `7b3ad17` |
-| E — Rastreio do site | ✅ feita | |
-| F — Webhook de saída | ⬜ **última** | |
+| E — Rastreio do site | ✅ produção | `b54eb69` |
+| F — Webhook de saída | ✅ feita | |
+
+**O plano está completo.** As seis fases existem; o que falta é operação, não
+construção: ligar uma origem de webhook (fase A), colar a tag no site e decidir
+o consentimento (fase E), e autorizar destinos de saída (fase F).
 
 **A ordem mudou:** a fase D veio antes da C porque o usuário pediu a separação
 da gestão de leads e o cadastro de origens pela tela.
@@ -591,7 +594,7 @@ gatilho.
 | Corpo gigante | teto de tamanho → 413 |
 | Injeção pelo payload | tudo validado e normalizado; cru só no registro de auditoria |
 | Token de rastreio reaproveitado | assinado, ligado ao contato, revogável no descadastro |
-| SSRF no webhook de saída | lista de destinos permitidos + bloqueio de rede interna |
+| SSRF no webhook de saída | ✅ allowlist + bloqueio por IP + sem redirecionamento (ver 10.1) |
 
 **Consentimento.** Um formulário preenchido **não** é, juridicamente, alguém que
 aceitou receber marketing. O `defaults` de cada origem declara explicitamente se
@@ -604,6 +607,58 @@ não enviar evento nenhum.
 
 ---
 
+## 9.1 O webhook de SAÍDA (fase F)
+
+Passo "Webhook" nas automações: avisa Make/CRM sobre um lead. A direção do
+perigo aqui é o inverso da entrada — o risco não é o que chega, é o SERVIDOR
+fazer a requisição. Uma URL digitada numa tela que o servidor obedece cegamente
+é um SSRF, e a rede interna do Docker (Postgres, Redis) e o serviço de
+metadados da nuvem estão a um nome de host de distância.
+
+**Configuração:** `WEBHOOK_SAIDA_HOSTS` no `.env.local` do VPS. Vazia = nenhum
+webhook sai. Opcional: `WEBHOOK_SAIDA_SECRET` (sem ela, a chave da assinatura é
+derivada do `JWT_SECRET`, como no rastreio).
+
+Três camadas, nenhuma suficiente sozinha (`lib/automations/webhook-saida.ts`):
+
+1. **Allowlist de host.** Igualdade ou subdomínio — `endsWith` puro deixaria
+   `make.com.evil.com` passar por `make.com`.
+2. **Bloqueio por IP após resolver o DNS.** Cobre o host permitido que um dia
+   passe a apontar para dentro, e o domínio próprio apontado para 127.0.0.1.
+   Inclui `169.254.169.254`, que é de onde se leem credenciais da máquina.
+3. **Sem seguir redirecionamento.** É o furo clássico: a primeira requisição vai
+   para o destino permitido, e a segunda para onde ele mandar. Conferido: um 302
+   para o endereço de metadados é recusado e o destino do desvio não é chamado.
+
+Só `https`, sem usuário/senha na URL, 5s de timeout, 2 tentativas (4xx não
+repete — erro de configuração não melhora com retentativa), e a resposta é lida
+com teto e descartada.
+
+**O destino é validado a cada execução**, não só ao salvar o passo: o DNS e a
+allowlist do servidor podem ter mudado desde então.
+
+**A chamada é síncrona**, diferente dos passos de envio. O valor de um aviso
+está em chegar agora, e o resultado precisa aparecer no relatório da automação
+— webhook que falha calado é pior que webhook nenhum, porque cria a impressão
+de que o CRM foi avisado. Falha derruba o percurso, com o motivo no log do
+passo. No log vai o HOST, nunca a URL inteira: caminhos de webhook do Make
+carregam a chave da integração.
+
+**O corpo é contrato**, não detalhe de implementação — quem monta o cenário casa
+os campos uma vez. Vai o evento (nome dado ao passo), os dados do contato
+(estágio, tags, pontuação, faixa, origem) e **o consentimento de e-mail e
+WhatsApp**: mandar o contato sem isso é convidar o outro sistema a falar com
+quem não pode. Assinado em `X-Avante-Assinatura`, para o destino confirmar a
+origem.
+
+**Risco que sobra:** DNS rebinding. Validamos o endereço ao resolver, e a
+conexão resolve de novo — uma janela estreita entre as duas. Fechá-la exigiria
+fixar o IP validado na conexão, o que quebra SNI e validação de certificado em
+https. Como a allowlist é o controle principal e só quem tem acesso ao sistema
+configura a URL, é desproporcional; fica registrado.
+
+`npx tsx scripts/testar-webhook-saida.ts` confere as três camadas sem banco.
+
 ## 10. Fases
 
 | Fase | Entrega | Tamanho |
@@ -615,7 +670,7 @@ não enviar evento nenhum.
 | **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
 | **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa ✅ |
-| **F** | Passo `webhook` de saída (avisa o Make/CRM) | pequena |
+| **F** | Passo `webhook` de saída (avisa o Make/CRM) | pequena ✅ |
 
 **A ordem importa.** A fase C vem **antes** do rastreio do site de propósito: o
 score já nasce útil com abertura, clique, resposta e origem — sinais que o

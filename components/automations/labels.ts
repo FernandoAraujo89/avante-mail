@@ -37,6 +37,9 @@ export const STEP_MENU: { grupo: string; tipos: AutomationStepType[] }[] = [
     grupo: "Contato",
     tipos: ["add_tag", "remove_tag", "subscribe_list", "unsubscribe_list"],
   },
+  // Fase F. `update_field` continua fora: o motor ainda o recusa, e oferecer
+  // no menu um passo que quebra o percurso seria pior que não oferecer.
+  { grupo: "Integração", tipos: ["webhook"] },
 ];
 
 export const TRIGGER_LABEL: Record<AutomationTriggerType, string> = {

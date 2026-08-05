@@ -131,6 +131,58 @@ export function StepPanel({
         </div>
       ) : null}
 
+      {step.type === "webhook" ? (
+        <div className="grid gap-4">
+          <div className="grid gap-1.5">
+            <Label htmlFor="step-webhook-url">URL de destino *</Label>
+            <Input
+              id="step-webhook-url"
+              value={String(c.url ?? "")}
+              onChange={(e) => set({ url: e.target.value.trim() })}
+              placeholder="https://hook.eu1.make.com/..."
+            />
+            {/* O servidor recusa o que não estiver na lista dele. Dizer isso
+                aqui evita a descoberta pelo pior caminho: a automação falhando
+                em produção depois de alguém já ter montado o cenário do lado
+                de lá. */}
+            <p className="text-xs text-muted-foreground">
+              Só endereços https e de domínios autorizados no servidor. Endereço
+              de rede interna é sempre recusado.
+            </p>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="step-webhook-evento">Nome do evento</Label>
+            <Input
+              id="step-webhook-evento"
+              value={String(c.evento ?? "")}
+              onChange={(e) => set({ evento: e.target.value })}
+              placeholder="lead-quente"
+            />
+            <p className="text-xs text-muted-foreground">
+              Vai no campo <code className="rounded bg-muted px-1">evento</code>{" "}
+              do corpo enviado — é por ele que o cenário do outro lado se
+              ramifica.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">O que o destino recebe</p>
+            <p className="mt-1">
+              Um POST JSON com o evento e os dados do contato: nome, e-mail,
+              telefone, empresa, estágio, tags, pontuação, faixa e origem —
+              além do consentimento de e-mail e WhatsApp, para o outro sistema
+              não falar com quem não pode.
+            </p>
+            <p className="mt-1">
+              Vai assinado no cabeçalho{" "}
+              <code className="rounded bg-muted px-1">X-Avante-Assinatura</code>
+              , para o destino confirmar que a chamada é nossa.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {step.type === "add_tag" || step.type === "remove_tag" ? (
         <div className="grid gap-1.5">
           <Label htmlFor="step-tag">Tag</Label>

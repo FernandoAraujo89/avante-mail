@@ -180,9 +180,19 @@ export function validarFluxo(
           }
           break;
         }
+        // A validação aqui é de FORMA, não de destino: conferir a allowlist e
+        // o DNS exigiria I/O, e esta função roda a cada digitação na tela. O
+        // destino é validado de novo, para valer, na hora de executar.
+        case "webhook": {
+          const url = texto(passo.config?.url);
+          if (!url) throw new Error("Informe a URL de destino do webhook.");
+          if (!/^https:\/\//i.test(url)) {
+            throw new Error("A URL do webhook precisa começar com https://");
+          }
+          break;
+        }
         case "end":
         case "update_field":
-        case "webhook":
           break;
       }
     } catch (e) {

@@ -19,6 +19,7 @@ import { emitListDiff, emitTagDiff } from "@/lib/events";
 
 import { avaliarCondicoes } from "./condicoes";
 import { enviarEmailDoPasso, enviarWhatsAppDoPasso } from "./envios";
+import { chamarWebhookDoPasso } from "./webhook-passo";
 
 // Motor das automações (docs/plano-automacoes.md, fases 1 e 2).
 //
@@ -517,8 +518,16 @@ async function executarPasso(
       return { listId, mudou: removido.length > 0 };
     }
 
+    // Avisa um sistema de fora (Make, CRM) que algo aconteceu com este lead.
+    // A chamada é SÍNCRONA de propósito, ao contrário dos envios: o valor de
+    // um aviso está em chegar agora, e o resultado precisa aparecer no
+    // relatório da automação — um webhook que falha calado é pior que webhook
+    // nenhum, porque cria a impressão de que o CRM foi avisado.
+    case "webhook":
+      return chamarWebhookDoPasso({ config: passo.config, contato, runId });
+
     default:
-      // update_field e webhook — ainda sem fase marcada no plano.
+      // update_field — ainda sem fase marcada no plano.
       throw new Error(
         `passo "${passo.type}" ainda não implementado (ver docs/plano-automacoes.md)`
       );
