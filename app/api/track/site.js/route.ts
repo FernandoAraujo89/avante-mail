@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { corpoDoScript } from "@/lib/track/script";
 import { marcarScriptServido } from "@/lib/track/recusas";
+import { lerBaseLegal } from "@/lib/track/base-legal";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,9 @@ export const dynamic = "force-dynamic";
  * um defeito e ver a correção chegar sozinha em no máximo uma hora.
  */
 export async function GET(request: NextRequest) {
-  const corpo = corpoDoScript();
+  // A base legal declarada no sistema decide se o script já nasce coletando.
+  // Uma consulta por revalidação (a cada 1h por navegador), não por página.
+  const corpo = corpoDoScript(await lerBaseLegal());
   const etag = `"${createHash("sha1").update(corpo).digest("base64url")}"`;
 
   // Registra que a tag está viva, inclusive no 304 — o 304 É a prova de que

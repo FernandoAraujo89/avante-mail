@@ -4,6 +4,11 @@ import { and, asc, count, eq, gte } from "drizzle-orm";
 import { contactEvents, getDb, siteEventRules, SITE_MATCH_TYPES } from "@/lib/db";
 import { getBaseUrl } from "@/lib/email";
 import {
+  BASES_LEGAIS,
+  gravarBaseLegal,
+  lerBaseLegal,
+} from "@/lib/track/base-legal";
+import {
   lerCargasDoScript,
   lerRecusas,
   lerUltimaVisita,
@@ -28,7 +33,7 @@ export async function GET() {
     const db = getDb();
     const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [regras, ultimaVisita, recusas, visitasNaSemana, cargas] = await Promise.all([
+    const [regras, ultimaVisita, recusas, visitasNaSemana, cargas, baseLegal] = await Promise.all([
       db
         .select()
         .from(siteEventRules)
@@ -45,6 +50,7 @@ export async function GET() {
           )
         ),
       lerCargasDoScript(),
+      lerBaseLegal(),
     ]);
 
     const origens = origensPermitidas();
@@ -67,7 +73,32 @@ export async function GET() {
       // Quantas vezes o script foi baixado pelo site. É o que separa "a tag não
       // está lá" de "a tag está lá e calada".
       cargas,
+      baseLegal,
     });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
+
+/**
+ * Troca a base legal do rastreio.
+ *
+ * Fica numa rota própria, e não junto do cadastro de páginas, porque é a
+ * decisão mais séria desta tela: muda o que o script faz no navegador de gente
+ * de verdade. O efeito chega aos visitantes em até 1h (o cache do script).
+ */
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const valor = String(body.baseLegal ?? "");
+    if (!BASES_LEGAIS.includes(valor as (typeof BASES_LEGAIS)[number])) {
+      return NextResponse.json(
+        { error: "Base legal inválida." },
+        { status: 400 }
+      );
+    }
+    await gravarBaseLegal(valor as (typeof BASES_LEGAIS)[number]);
+    return NextResponse.json({ baseLegal: valor });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

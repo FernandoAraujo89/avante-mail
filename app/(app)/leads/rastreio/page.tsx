@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Copy, Plus, Radio, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  Plus,
+  Radio,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +51,7 @@ interface Dados {
   recusas: Recusa[];
   visitasNaSemana: number;
   cargas: { hoje: number; ultimos7dias: number };
+  baseLegal: "consentimento" | "legitimo_interesse";
 }
 
 /**
@@ -50,13 +59,23 @@ interface Dados {
  * diferente — e é por isso que a tela não pode dizer só "nada chegou": quem
  * precisa agir muda conforme o estado.
  */
-type Situacao = "sem-origem" | "sem-tag" | "calado" | "recebendo";
+type Situacao =
+  | "sem-origem"
+  | "sem-tag"
+  | "calado"
+  | "esperando"
+  | "recebendo";
 
 function diagnosticar(d: Dados | null): Situacao | null {
   if (!d) return null;
   if (!d.ativo) return "sem-origem";
   if (d.cargas.ultimos7dias === 0) return "sem-tag";
-  if (!d.ultimaVisita) return "calado";
+  // "Calado" só faz sentido quando a coleta DEPENDE de uma autorização que
+  // ninguém dá. Sob legítimo interesse, não ter visita significa outra coisa:
+  // ninguém chegou por um link nosso ainda.
+  if (!d.ultimaVisita) {
+    return d.baseLegal === "consentimento" ? "calado" : "esperando";
+  }
   return "recebendo";
 }
 
@@ -133,6 +152,25 @@ export default function RastreioPage() {
     }
   }
 
+  async function mudarBaseLegal(baseLegal: string) {
+    setSalvando(true);
+    setErro("");
+    try {
+      const res = await fetch("/api/leads/rastreio", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseLegal }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao salvar.");
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function remover(id: string) {
     try {
       await fetch(`/api/leads/rastreio/${id}`, { method: "DELETE" });
@@ -161,6 +199,10 @@ export default function RastreioPage() {
     calado: {
       titulo: "A tag está no ar, mas o rastreio está calado",
       detalhe: `O script carregou ${dados?.cargas.ultimos7dias ?? 0} vez(es) nos últimos 7 dias, e nenhuma visita chegou. O script só envia depois que o site chamar av('consentimento', true) — enquanto isso ele fica inerte de propósito.`,
+    },
+    esperando: {
+      titulo: "Pronto, esperando o primeiro lead",
+      detalhe: `O script carregou ${dados?.cargas.ultimos7dias ?? 0} vez(es) nos últimos 7 dias e está coletando. Só é rastreado quem chega por um link nosso — a primeira visita aparece quando um lead clicar num e-mail e navegar pelo site.`,
     },
     recebendo: {
       titulo: "Recebendo visitas",
@@ -200,7 +242,7 @@ export default function RastreioPage() {
           <div className="flex items-center gap-3">
             <span
               className={`flex size-10 items-center justify-center rounded-full ${
-                situacao === "recebendo"
+                situacao === "recebendo" || situacao === "esperando"
                   ? "bg-success-light/40"
                   : situacao === "calado"
                     ? "bg-warning-light/40"
@@ -209,7 +251,7 @@ export default function RastreioPage() {
             >
               <Radio
                 className={`size-5 ${
-                  situacao === "recebendo"
+                  situacao === "recebendo" || situacao === "esperando"
                     ? "text-success-dark"
                     : situacao === "calado"
                       ? "text-warning-dark"
@@ -265,6 +307,72 @@ export default function RastreioPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      {/* A decisão mais séria desta tela fica À VISTA, e não escondida num
+          arquivo de configuração do servidor: quem responder por ela um dia
+          precisa conseguir ver o que está valendo sem pedir para ninguém. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-4 text-primary" />
+            Base legal do rastreio
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="base-legal">O que autoriza a coleta</Label>
+            <Select
+              value={dados?.baseLegal ?? "consentimento"}
+              onValueChange={mudarBaseLegal}
+              disabled={!dados || salvando}
+            >
+              <SelectTrigger id="base-legal" className="max-w-md">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="consentimento">
+                  Consentimento — só coleta depois do aceite no site
+                </SelectItem>
+                <SelectItem value="legitimo_interesse">
+                  Legítimo interesse — coleta desde o carregamento
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {dados?.baseLegal === "legitimo_interesse" ? (
+            <div className="grid gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">
+                O que continua valendo neste modo
+              </p>
+              <p>
+                Os sinais de privacidade do navegador (GPC e Do Not Track)
+                bloqueiam a coleta, mesmo aqui. Um{" "}
+                <code className="rounded bg-muted px-1">
+                  av(&apos;consentimento&apos;, false)
+                </code>{" "}
+                continua funcionando e é lembrado naquele navegador para sempre.
+                E o descadastro do e-mail revoga o rastreio na hora — ou seja, o
+                direito de oposição já está em todo rodapé de e-mail que vocês
+                mandam.
+              </p>
+              <p>
+                Só é rastreado quem chegou por um link nosso e já é lead. Nunca
+                parceiro, nunca visitante anônimo.
+              </p>
+              <p className="text-foreground">
+                Isto precisa estar descrito no aviso de privacidade do site — o
+                rastreio identifica a pessoa, não é analítica anônima.
+              </p>
+            </div>
+          ) : null}
+
+          <p className="text-xs text-muted-foreground">
+            Trocar aqui muda o que o script faz no navegador dos visitantes. O
+            efeito chega em até 1 hora, que é o cache do script.
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

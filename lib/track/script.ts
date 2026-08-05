@@ -1,4 +1,5 @@
 import { getBaseUrl } from "@/lib/email";
+import type { BaseLegal } from "@/lib/track/base-legal";
 
 /**
  * O script que o site avantejuntos.com.br carrega (fase E).
@@ -16,8 +17,13 @@ import { getBaseUrl } from "@/lib/email";
  *  - não coletar nada sem consentimento explícito;
  *  - não atrapalhar o Voltar do navegador nem o bfcache.
  */
-export function corpoDoScript(): string {
+export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
   const base = getBaseUrl();
+  // A base legal entra no script como constante, e não como consulta em tempo
+  // de execução: o script não pode depender de uma chamada extra para saber se
+  // pode funcionar. Trocar o modo muda o corpo, logo muda o ETag, então os
+  // navegadores pegam a versão nova na próxima revalidação (até 1h).
+  const coletaPorPadrao = baseLegal === "legitimo_interesse";
   return `/* Avante — rastreio de leads. Gerado por /api/track/site.js */
 (function () {
   "use strict";
@@ -30,6 +36,10 @@ export function corpoDoScript(): string {
   window.__avRastreio = VERSAO;
 
   var ENDPOINT = ${JSON.stringify(`${base}/api/track/site`)};
+  // Base legal declarada no sistema. Com legítimo interesse a coleta começa no
+  // carregamento; com consentimento, só depois de o site autorizar. O que NÃO
+  // muda: GPC/DNT bloqueiam nos dois casos, e um "não" explícito vale nos dois.
+  var COLETA_POR_PADRAO = ${coletaPorPadrao};
   var CHAVE_TOKEN = "av_token";
   var CHAVE_SESSAO = "av_sessao";
   // A RECUSA é persistida; o consentimento não. A assimetria é deliberada:
@@ -275,6 +285,18 @@ export function corpoDoScript(): string {
   function ligar() {
     if (!token) token = ler(CHAVE_TOKEN);
     sessao = ler(CHAVE_SESSAO, true) || novaSessao();
+
+    // Legítimo interesse: já nasce coletando — MENOS para quem recusou antes
+    // (o "não" é persistido e vale para sempre neste navegador) e menos sob
+    // GPC/DNT, que o envio confere a cada lote. A recusa vence o modo, nunca o
+    // contrário.
+    if (COLETA_POR_PADRAO && !recusado && !recusaDoNavegador()) {
+      consentido = true;
+      // Sem uma chamada de consentimento para fazer isso, é aqui que o token e
+      // a sessão passam a sobreviver à navegação entre páginas.
+      if (token) gravar(CHAVE_TOKEN, token);
+      gravar(CHAVE_SESSAO, sessao, true);
+    }
 
     // Cliques em elementos marcados: data-av-evento="demo". Delegado no
     // documento, então funciona para conteúdo que aparece depois.
