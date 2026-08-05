@@ -32,13 +32,18 @@ import { getSetting, setSetting } from "@/lib/settings";
 /** Chaves de configuração — editáveis na tela, sem deploy. */
 export const CHAVE_MEIA_VIDA = "lead_score_meia_vida_dias";
 export const CHAVE_FAIXA_MORNO = "lead_score_faixa_morno";
+export const CHAVE_FAIXA_AQUECIDO = "lead_score_faixa_aquecido";
 export const CHAVE_FAIXA_QUENTE = "lead_score_faixa_quente";
 /** Quando a passagem completa (a do decaimento) rodou pela última vez. */
 export const CHAVE_ULTIMA_PASSAGEM = "lead_score_ultima_passagem";
 
 export const PADRAO_MEIA_VIDA_DIAS = 30;
 export const PADRAO_FAIXA_MORNO = 20;
-export const PADRAO_FAIXA_QUENTE = 50;
+export const PADRAO_FAIXA_AQUECIDO = 50;
+// "Quente" passou a ser o topo da escala quando a quarta faixa entrou. O 50 que
+// antes era o limiar de quente virou o de AQUECIDO, e quente subiu para 100 —
+// ver scripts/migrate-faixa-aquecido.ts, que move o valor já configurado.
+export const PADRAO_FAIXA_QUENTE = 100;
 
 /**
  * Pontuação sugerida pelo plano — semeada na migração, editável depois.
@@ -95,18 +100,21 @@ export const REGRAS_PADRAO: {
 export interface Configuracao {
   meiaVidaDias: number;
   faixaMorno: number;
+  faixaAquecido: number;
   faixaQuente: number;
 }
 
 export async function lerConfiguracao(): Promise<Configuracao> {
-  const [meia, morno, quente] = await Promise.all([
+  const [meia, morno, aquecido, quente] = await Promise.all([
     getSetting(CHAVE_MEIA_VIDA),
     getSetting(CHAVE_FAIXA_MORNO),
+    getSetting(CHAVE_FAIXA_AQUECIDO),
     getSetting(CHAVE_FAIXA_QUENTE),
   ]);
   return {
     meiaVidaDias: numero(meia, PADRAO_MEIA_VIDA_DIAS, 1),
     faixaMorno: numero(morno, PADRAO_FAIXA_MORNO, 0),
+    faixaAquecido: numero(aquecido, PADRAO_FAIXA_AQUECIDO, 1),
     faixaQuente: numero(quente, PADRAO_FAIXA_QUENTE, 1),
   };
 }
@@ -122,6 +130,7 @@ function numero(valor: string | null, padrao: number, minimo: number): number {
 
 export function faixaDoScore(score: number, config: Configuracao): LeadScoreBand {
   if (score >= config.faixaQuente) return "quente";
+  if (score >= config.faixaAquecido) return "aquecido";
   if (score >= config.faixaMorno) return "morno";
   return "frio";
 }

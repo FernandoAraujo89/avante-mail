@@ -40,7 +40,12 @@ interface Resposta {
   funil: Record<string, number>;
   faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
-  config: { faixaQuente: number; faixaMorno: number; meiaVidaDias: number };
+  config: {
+    faixaQuente: number;
+    faixaAquecido: number;
+    faixaMorno: number;
+    meiaVidaDias: number;
+  };
 }
 
 export default function LeadsPage() {
@@ -70,7 +75,12 @@ export default function LeadsPage() {
         funil: {},
         faixas: {},
         canais: [],
-        config: { faixaQuente: 50, faixaMorno: 20, meiaVidaDias: 30 },
+        config: {
+          faixaQuente: 100,
+          faixaAquecido: 50,
+          faixaMorno: 20,
+          meiaVidaDias: 30,
+        },
       });
       setErro(err instanceof Error ? err.message : String(err));
     }
@@ -247,7 +257,9 @@ export default function LeadsPage() {
                     <BarraDeCalor
                       score={lead.leadScore}
                       faixa={lead.leadScoreBand}
-                      limiarQuente={dados?.config.faixaQuente ?? 50}
+                      limiarMorno={dados?.config.faixaMorno ?? 20}
+                      limiarAquecido={dados?.config.faixaAquecido ?? 50}
+                      limiarQuente={dados?.config.faixaQuente ?? 100}
                     />
                     {faixaInfo(lead.leadScoreBand) ? (
                       <p className="mt-1 text-xs text-muted-foreground">

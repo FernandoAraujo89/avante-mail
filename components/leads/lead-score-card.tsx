@@ -22,7 +22,12 @@ interface Conta {
   score: number;
   faixa: string;
   linhas: Linha[];
-  config: { meiaVidaDias: number; faixaMorno: number; faixaQuente: number };
+  config: {
+    meiaVidaDias: number;
+    faixaMorno: number;
+    faixaAquecido: number;
+    faixaQuente: number;
+  };
 }
 
 /**
@@ -79,6 +84,8 @@ export function LeadScoreCard({ leadId }: { leadId: string }) {
               <BarraDeCalor
                 score={conta.score}
                 faixa={conta.faixa}
+                limiarMorno={conta.config.faixaMorno}
+                limiarAquecido={conta.config.faixaAquecido}
                 limiarQuente={conta.config.faixaQuente}
                 mostrarNumero={false}
                 className="[&>span:first-child]:h-2.5 [&>span:first-child]:w-full"
@@ -86,12 +93,12 @@ export function LeadScoreCard({ leadId }: { leadId: string }) {
 
               {/* A régua diz onde ficam os cortes. Sem ela a barra é uma
                   impressão; com ela, o operador sabe quanto falta para o lead
-                  virar quente — que é a pergunta que ele realmente tem. */}
+                  subir de faixa — que é a pergunta que ele realmente tem. */}
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>0</span>
                 <span>morno {conta.config.faixaMorno}</span>
+                <span>aquecido {conta.config.faixaAquecido}</span>
                 <span>quente {conta.config.faixaQuente}</span>
-                <span>{conta.config.faixaQuente * 2}+</span>
               </div>
             </div>
 

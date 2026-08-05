@@ -11,10 +11,19 @@ export function estagioLabel(valor: string | null): string {
   return ESTAGIOS.find((e) => e.valor === valor)?.rotulo ?? (valor ?? "—");
 }
 
-/** Faixas do Lead Score, com a cor que cada uma pede na tela. */
+/**
+ * Faixas do Lead Score, do mais quente para o mais frio.
+ *
+ * O rótulo da primeira é "Frio", e não "Novo", de propósito: "Novo" já é um
+ * ESTÁGIO do funil, e um lead poderia ser estágio Novo e faixa Novo ao mesmo
+ * tempo — duas coisas diferentes com o mesmo nome na mesma linha da tabela.
+ *
+ * As cores acompanham a escalada, e a barra de calor carrega o degradê exato.
+ */
 export const FAIXAS = [
   { valor: "quente", rotulo: "Quente", variante: "destructive" as const },
-  { valor: "morno", rotulo: "Morno", variante: "warning" as const },
+  { valor: "aquecido", rotulo: "Aquecido", variante: "warning" as const },
+  { valor: "morno", rotulo: "Morno", variante: "info" as const },
   { valor: "frio", rotulo: "Frio", variante: "secondary" as const },
 ] as const;
 

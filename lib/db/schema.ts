@@ -109,7 +109,12 @@ export type ContactEventType = (typeof CONTACT_EVENT_TYPES)[number];
 
 // Faixas do Lead Score. Os limites são configuráveis (app_settings); os nomes,
 // não — eles são a linguagem que a equipe usa.
-export const LEAD_SCORE_BANDS = ["frio", "morno", "quente"] as const;
+export const LEAD_SCORE_BANDS = [
+  "frio",
+  "morno",
+  "aquecido",
+  "quente",
+] as const;
 export type LeadScoreBand = (typeof LEAD_SCORE_BANDS)[number];
 
 // Usuários do sistema (login próprio).

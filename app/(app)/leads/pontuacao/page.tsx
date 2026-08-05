@@ -22,6 +22,7 @@ interface Regra {
 interface Config {
   meiaVidaDias: number;
   faixaMorno: number;
+  faixaAquecido: number;
   faixaQuente: number;
 }
 
@@ -201,6 +202,19 @@ export default function PontuacaoPage() {
                 />
               </div>
               <div className="grid gap-1.5">
+                <Label htmlFor="faixa-aquecido">Aquecido a partir de</Label>
+                <Input
+                  id="faixa-aquecido"
+                  type="number"
+                  value={config?.faixaAquecido ?? ""}
+                  onChange={(e) =>
+                    setConfig((c) =>
+                      c ? { ...c, faixaAquecido: Number(e.target.value) } : c
+                    )
+                  }
+                />
+              </div>
+              <div className="grid gap-1.5">
                 <Label htmlFor="faixa-quente">Quente a partir de</Label>
                 <Input
                   id="faixa-quente"
@@ -217,12 +231,19 @@ export default function PontuacaoPage() {
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <Badge variant="secondary">Frio</Badge>
                   {`abaixo de ${config.faixaMorno}`}
-                  <Badge variant="warning">Morno</Badge>
-                  {`${config.faixaMorno} a ${config.faixaQuente - 1}`}
+                  <Badge variant="info">Morno</Badge>
+                  {`${config.faixaMorno} a ${config.faixaAquecido - 1}`}
+                  <Badge variant="warning">Aquecido</Badge>
+                  {`${config.faixaAquecido} a ${config.faixaQuente - 1}`}
                   <Badge variant="destructive">Quente</Badge>
                   {`${config.faixaQuente} ou mais`}
                 </p>
               ) : null}
+              {/* "Quente" é o topo da régua: é ele que enche a barra de calor e
+                  é dele que sai a decisão de mandar ao comercial. */}
+              <p className="text-xs text-muted-foreground">
+                “Quente” é o topo da escala — é onde a barra de calor enche.
+              </p>
             </CardContent>
           </Card>
 

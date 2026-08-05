@@ -3,6 +3,7 @@ import { asc, eq } from "drizzle-orm";
 
 import { getDb, leadScoreRules } from "@/lib/db";
 import {
+  CHAVE_FAIXA_AQUECIDO,
   CHAVE_FAIXA_MORNO,
   CHAVE_FAIXA_QUENTE,
   CHAVE_MEIA_VIDA,
@@ -47,6 +48,7 @@ export async function PUT(request: NextRequest) {
     const config = body.config ?? {};
     const meiaVida = Number(config.meiaVidaDias);
     const morno = Number(config.faixaMorno);
+    const aquecido = Number(config.faixaAquecido);
     const quente = Number(config.faixaQuente);
 
     if (!Number.isFinite(meiaVida) || meiaVida < 1) {
@@ -55,17 +57,25 @@ export async function PUT(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!Number.isFinite(morno) || !Number.isFinite(quente)) {
+    if (
+      !Number.isFinite(morno) ||
+      !Number.isFinite(aquecido) ||
+      !Number.isFinite(quente)
+    ) {
       return NextResponse.json(
         { error: "Informe os limites das faixas." },
         { status: 400 }
       );
     }
-    // Faixas invertidas fariam "quente" ser um intervalo vazio — o modelo
-    // pareceria funcionar e nenhum lead nunca esquentaria.
-    if (quente <= morno) {
+    // Cortes fora de ordem fariam uma faixa virar intervalo VAZIO: o modelo
+    // pareceria funcionar e nenhum lead jamais entraria naquela faixa. Pior
+    // ainda com quatro faixas, onde a do meio some sem sintoma nenhum.
+    if (!(morno < aquecido && aquecido < quente)) {
       return NextResponse.json(
-        { error: "O limite de “quente” precisa ser maior que o de “morno”." },
+        {
+          error:
+            "Os limites precisam subir: morno < aquecido < quente. Do jeito que estão, uma das faixas nunca teria nenhum lead.",
+        },
         { status: 400 }
       );
     }
@@ -100,6 +110,7 @@ export async function PUT(request: NextRequest) {
     await Promise.all([
       setSetting(CHAVE_MEIA_VIDA, String(Math.round(meiaVida))),
       setSetting(CHAVE_FAIXA_MORNO, String(Math.round(morno))),
+      setSetting(CHAVE_FAIXA_AQUECIDO, String(Math.round(aquecido))),
       setSetting(CHAVE_FAIXA_QUENTE, String(Math.round(quente))),
     ]);
 

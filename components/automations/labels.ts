@@ -78,6 +78,7 @@ export const TRIGGER_TYPES_DISPONIVEIS: AutomationTriggerType[] = [
 export const FAIXAS_DO_GATILHO: { valor: string; rotulo: string }[] = [
   { valor: "", rotulo: "Qualquer mudança de faixa" },
   { valor: "quente", rotulo: "Virou quente" },
+  { valor: "aquecido", rotulo: "Virou aquecido" },
   { valor: "morno", rotulo: "Virou morno" },
   { valor: "frio", rotulo: "Esfriou (virou frio)" },
 ];
