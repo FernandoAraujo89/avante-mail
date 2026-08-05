@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Gauge } from "lucide-react";
 
+import { BarraDeCalor } from "@/components/leads/barra-de-calor";
 import { faixaInfo } from "@/components/leads/estagios";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +22,7 @@ interface Conta {
   score: number;
   faixa: string;
   linhas: Linha[];
-  config: { meiaVidaDias: number };
+  config: { meiaVidaDias: number; faixaMorno: number; faixaQuente: number };
 }
 
 /**
@@ -65,13 +66,33 @@ export function LeadScoreCard({ leadId }: { leadId: string }) {
           <p className="text-sm text-muted-foreground">Calculando...</p>
         ) : (
           <>
-            <div className="flex items-baseline gap-3">
-              <span className="text-4xl font-bold tabular-nums">
-                {conta.score}
-              </span>
-              {faixa ? (
-                <Badge variant={faixa.variante}>{faixa.rotulo}</Badge>
-              ) : null}
+            <div className="grid gap-3">
+              <div className="flex items-baseline gap-3">
+                <span className="text-4xl font-bold tabular-nums">
+                  {conta.score}
+                </span>
+                {faixa ? (
+                  <Badge variant={faixa.variante}>{faixa.rotulo}</Badge>
+                ) : null}
+              </div>
+
+              <BarraDeCalor
+                score={conta.score}
+                faixa={conta.faixa}
+                limiarQuente={conta.config.faixaQuente}
+                mostrarNumero={false}
+                className="[&>span:first-child]:h-2.5 [&>span:first-child]:w-full"
+              />
+
+              {/* A régua diz onde ficam os cortes. Sem ela a barra é uma
+                  impressão; com ela, o operador sabe quanto falta para o lead
+                  virar quente — que é a pergunta que ele realmente tem. */}
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>0</span>
+                <span>morno {conta.config.faixaMorno}</span>
+                <span>quente {conta.config.faixaQuente}</span>
+                <span>{conta.config.faixaQuente * 2}+</span>
+              </div>
             </div>
 
             {conta.linhas.length === 0 ? (

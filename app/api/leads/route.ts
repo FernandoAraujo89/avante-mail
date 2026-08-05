@@ -10,6 +10,7 @@ import {
   type LeadStage,
 } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
+import { lerConfiguracao } from "@/lib/leads/score";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -109,8 +110,14 @@ export async function GET(request: NextRequest) {
       .where(ehLead())
       .groupBy(contacts.leadScoreBand);
 
+    // A barra de calor precisa saber onde fica o "quente" para desenhar a
+    // escala. Vem daqui e não de uma constante: o limiar é editável em
+    // /leads/pontuacao, e uma barra com escala fixa mentiria no dia seguinte.
+    const config = await lerConfiguracao();
+
     return NextResponse.json({
       leads,
+      config,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
       faixas: Object.fromEntries(
         porFaixa.filter((r) => r.faixa).map((r) => [r.faixa as string, r.total])

@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { BarraDeCalor } from "@/components/leads/barra-de-calor";
 import {
   ESTAGIOS,
   estagioLabel,
@@ -39,6 +40,7 @@ interface Resposta {
   funil: Record<string, number>;
   faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
+  config: { faixaQuente: number; faixaMorno: number; meiaVidaDias: number };
 }
 
 export default function LeadsPage() {
@@ -63,7 +65,13 @@ export default function LeadsPage() {
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar os leads.");
       setDados(json);
     } catch (err) {
-      setDados({ leads: [], funil: {}, faixas: {}, canais: [] });
+      setDados({
+        leads: [],
+        funil: {},
+        faixas: {},
+        canais: [],
+        config: { faixaQuente: 50, faixaMorno: 20, meiaVidaDias: 30 },
+      });
       setErro(err instanceof Error ? err.message : String(err));
     }
   }, [busca, estagio, canal, faixa]);
@@ -233,23 +241,19 @@ export default function LeadsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    {/* Nota nula = o worker ainda não passou por este lead
-                        (ele entrou há segundos). Mostrar "—" em vez de 0 evita
-                        dizer que ele é frio sem ter contado nada. */}
-                    {lead.leadScore === null ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <span className="text-lg font-bold tabular-nums">
-                          {lead.leadScore}
-                        </span>
-                        {faixaInfo(lead.leadScoreBand) ? (
-                          <Badge variant={faixaInfo(lead.leadScoreBand)!.variante}>
-                            {faixaInfo(lead.leadScoreBand)!.rotulo}
-                          </Badge>
-                        ) : null}
-                      </span>
-                    )}
+                    {/* A barra dá a leitura de relance; o rótulo da faixa fica
+                        embaixo porque é o que a pontuação e os gatilhos usam —
+                        sem ele, a barra seria bonita e sem vocabulário. */}
+                    <BarraDeCalor
+                      score={lead.leadScore}
+                      faixa={lead.leadScoreBand}
+                      limiarQuente={dados?.config.faixaQuente ?? 50}
+                    />
+                    {faixaInfo(lead.leadScoreBand) ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {faixaInfo(lead.leadScoreBand)!.rotulo}
+                      </p>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <Badge variant="warning">{estagioLabel(lead.stage)}</Badge>
