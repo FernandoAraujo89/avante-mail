@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Gauge, Magnet, Search, Webhook } from "lucide-react";
+import { Flame, Gauge, Magnet, Search, Webhook } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ import {
 import { BarraDeCalor } from "@/components/leads/barra-de-calor";
 import {
   ESTAGIOS,
+  estagioInfo,
   estagioLabel,
   FAIXAS,
   faixaInfo,
@@ -35,9 +36,13 @@ import {
 import { formatDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 
+/** Precisa bater com o `PRONTOS` de app/api/leads/route.ts. */
+const PRONTOS = "prontos";
+
 interface Resposta {
   leads: LeadDto[];
   funil: Record<string, number>;
+  prontos: number;
   faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
   config: {
@@ -73,6 +78,7 @@ export default function LeadsPage() {
       setDados({
         leads: [],
         funil: {},
+        prontos: 0,
         faixas: {},
         canais: [],
         config: {
@@ -102,7 +108,7 @@ export default function LeadsPage() {
     <>
       <PageHeader
         title="Gestão de leads"
-        description="Quem chegou por formulário, anúncio ou integração. Lead não recebe campanha de parceiro — é nutrido por automação até ser convertido."
+        description="Nutrição de quem chegou por formulário, anúncio ou integração. Aqui a gente esquenta e mede o interesse; a venda acontece no Pipedrive."
       >
         <Button variant="outline" asChild>
           <Link href="/leads/pontuacao">
@@ -118,9 +124,39 @@ export default function LeadsPage() {
         </Button>
       </PageHeader>
 
-      {/* Funil: a contagem é da base inteira, não do filtro — é o "onde estão
+      {/* "Prontos para enviar" ganha a linha inteira e vem antes do ciclo de
+          propósito: é a única pergunta acionável da tela — quem já esquentou o
+          bastante para valer uma conversa com o comercial. O resto é contexto.
+
+          O número é derivado (quente + ainda nutrindo), então ele nunca fica
+          desatualizado em relação à pontuação; não há nada para alguém lembrar
+          de mover à mão. */}
+      <button
+        type="button"
+        onClick={() => setEstagio(PRONTOS)}
+        className={`mb-3 flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-4 py-3 text-left transition-colors ${
+          estagio === PRONTOS
+            ? "border-destructive bg-destructive/10"
+            : "border-destructive/40 bg-destructive/5 hover:border-destructive"
+        }`}
+      >
+        <Flame className="size-5 shrink-0 text-destructive" />
+        <span className="text-2xl font-bold tabular-nums text-destructive-hover">
+          {dados?.prontos ?? 0}
+        </span>
+        <span className="text-sm font-medium">
+          {(dados?.prontos ?? 0) === 1
+            ? "pronto para enviar ao comercial"
+            : "prontos para enviar ao comercial"}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Quentes que ainda estão em nutrição
+        </span>
+      </button>
+
+      {/* O ciclo: a contagem é da base inteira, não do filtro — é o "onde estão
           meus leads", e encolher junto com a busca não responderia isso. */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <button
           type="button"
           onClick={() => setEstagio("todos")}
@@ -207,7 +243,9 @@ export default function LeadsPage() {
             <p className="text-sm text-muted-foreground">
               {totalNoFunil === 0
                 ? "Nenhum lead ainda. Ligue uma origem de webhook para começar a receber."
-                : "Nenhum lead com os filtros atuais."}
+                : estagio === PRONTOS
+                  ? "Ninguém quente o bastante ainda. A nutrição segue rodando — quando alguém passar do limiar, aparece aqui."
+                  : "Nenhum lead com os filtros atuais."}
             </p>
             {totalNoFunil === 0 ? (
               <Button variant="outline" asChild>
@@ -268,7 +306,14 @@ export default function LeadsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="warning">{estagioLabel(lead.stage)}</Badge>
+                    <Badge variant={estagioInfo(lead.stage)?.variante ?? "secondary"}>
+                      {estagioLabel(lead.stage)}
+                    </Badge>
+                    {lead.enviadoAoComercialEm ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        em {formatDate(lead.enviadoAoComercialEm)}
+                      </p>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <span className="text-sm">

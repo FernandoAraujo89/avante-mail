@@ -57,13 +57,30 @@ export type SendStatus = (typeof SEND_STATUSES)[number];
 export const BOUNCE_TYPES = ["hard", "soft"] as const;
 export type BounceType = (typeof BOUNCE_TYPES)[number];
 
-// Estágio do lead no funil. Nulo = o contato não é lead.
+/**
+ * Estágio do lead. Nulo = o contato não é lead.
+ *
+ * Descrevem o que ESTE sistema faz, não o funil de vendas. O comercial trabalha
+ * no Pipedrive, sem integração com aqui — se os estágios espelhassem o funil
+ * deles, seriam dois sistemas afirmando a mesma verdade e divergindo, com o
+ * nosso sempre desatualizado porque ninguém atualiza duas telas.
+ *
+ * Nosso papel é nutrir e medir engajamento; quando o lead esquenta, alguém
+ * confere com o comercial e entrega. É isso que os quatro estágios registram.
+ *
+ * "Pronto para enviar" NÃO é estágio: é a visão derivada de quente + ainda
+ * nutrindo. Como estágio, precisaria de alguém marcando à mão e dessincronizaria
+ * da pontuação no primeiro decaimento.
+ */
 export const LEAD_STAGES = [
-  "novo",
-  "contatado",
-  "qualificado",
-  "convertido",
-  "perdido",
+  /** Recebendo nutrição. É onde todo lead entra. */
+  "nutrindo",
+  /** Entregue ao comercial como oportunidade (ver enviadoAoComercialEm). */
+  "enviado",
+  /** O comercial confirmou que fechou. */
+  "cliente",
+  /** Não era oportunidade, ou desistiu. */
+  "descartado",
 ] as const;
 export type LeadStage = (typeof LEAD_STAGES)[number];
 
@@ -173,6 +190,15 @@ export const contacts = pgTable("contacts", {
   // Nulo = não é lead; é parceiro/contato comum. A separação operacional é
   // feita pela LISTA "Leads"; este campo é o estágio dentro do funil.
   stage: text("stage").$type<LeadStage>(),
+  /**
+   * Quando o lead foi entregue ao comercial. Coluna própria, e não deduzida do
+   * estágio, porque a data é a informação: "mandei esse faz três semanas e não
+   * ouvi nada" é a pergunta que o operador faz, e o estágio sozinho não
+   * responde. Sobrevive ao lead voltar para nutrição.
+   */
+  enviadoAoComercialEm: timestamp("enviado_ao_comercial_em", {
+    withTimezone: true,
+  }),
 
   // Origem do PRIMEIRO contato. Gravada uma vez e NÃO sobrescrita: quem chegou
   // pelo Instagram e voltou meses depois pelo Google continua sendo do
@@ -279,6 +305,11 @@ export const AUTOMATION_TRIGGER_TYPES = [
   // único (automation_id, contact_id): um lead que oscile na fronteira da
   // faixa entra UMA vez, não a cada ida e volta.
   "lead_score_changed",
+  // O lead mudou de estágio. É o que permite "quando eu marcar como enviado ao
+  // comercial, avise o Make" sem um segundo caminho de notificação: o botão
+  // grava o estágio, o evento sai, e a automação faz o resto com o passo de
+  // webhook que já existe.
+  "lead_stage_changed",
   "manual",
 ] as const;
 export type AutomationTriggerType = (typeof AUTOMATION_TRIGGER_TYPES)[number];

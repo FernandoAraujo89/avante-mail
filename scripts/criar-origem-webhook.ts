@@ -94,7 +94,7 @@ async function main() {
 
   const defaults = {
     tags: ["lead"],
-    stage: "novo",
+    stage: "nutrindo",
     listId,
     // Padrão do sistema: liberado. Vire false para bloquear uma origem
     // específica (lista comprada, formulário sem aviso de comunicação).

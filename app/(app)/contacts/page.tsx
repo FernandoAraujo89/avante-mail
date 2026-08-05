@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { History, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 
+import {
+  ESTAGIOS,
+  estagioInfo,
+  estagioLabel,
+} from "@/components/leads/estagios";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,21 +61,15 @@ type ContactDto = {
 // Trava 3 (docs/plano-webhooks-leads.md, seção 5): lead e parceiro moram na
 // mesma tabela, então quem olha a tela precisa CONSEGUIR ver a diferença — sem
 // isso, a separação existe só no banco.
-const STAGE_LABELS: Record<string, string> = {
-  novo: "Novo",
-  contatado: "Contatado",
-  qualificado: "Qualificado",
-  convertido: "Convertido",
-  perdido: "Perdido",
-};
-
+// Os rótulos vêm de components/leads/estagios.ts: dois lugares definindo o
+// mesmo vocabulário divergiriam no primeiro dia em que alguém mudasse um só.
 const STAGE_FILTERS = [
   { value: "all", label: "Leads e contatos" },
   { value: "lead", label: "Somente leads" },
   { value: "contato", label: "Somente contatos" },
-  ...Object.entries(STAGE_LABELS).map(([value, label]) => ({
-    value,
-    label: `Lead: ${label.toLowerCase()}`,
+  ...ESTAGIOS.map((e) => ({
+    value: e.valor as string,
+    label: `Lead: ${e.rotulo.toLowerCase()}`,
   })),
 ];
 
@@ -187,7 +186,7 @@ export default function ContactsPage() {
     <>
       <PageHeader
         title="Contatos"
-        description="Parceiros e leads. Lead só recebe campanha quando alguém marca “Incluir leads” no envio."
+        description="Parceiros e leads na mesma base. Campanha vai só para quem não é lead; quem tem estágio é nutrido pela área de Leads."
       >
         <Button variant="outline" asChild>
           <Link href="/contacts/import">
@@ -332,8 +331,12 @@ export default function ContactsPage() {
                         {contact.name}
                       </Link>
                       {contact.stage ? (
-                        <Badge variant="warning">
-                          {STAGE_LABELS[contact.stage] ?? contact.stage}
+                        <Badge
+                          variant={
+                            estagioInfo(contact.stage)?.variante ?? "secondary"
+                          }
+                        >
+                          {estagioLabel(contact.stage)}
                         </Badge>
                       ) : null}
                     </span>

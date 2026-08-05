@@ -4,6 +4,7 @@ import type {
   AutomationTriggerType,
 } from "@/lib/db/schema";
 import type { StepDraft, TriggerDraft } from "@/lib/automations/arvore";
+import { estagioLabel } from "@/components/leads/estagios";
 
 // Rótulos e resumos em português da tela de automações. Um lugar só: o cartão
 // do passo, o painel lateral e a lista mostram o mesmo texto.
@@ -52,6 +53,7 @@ export const TRIGGER_LABEL: Record<AutomationTriggerType, string> = {
   email_clicked: "Link clicado",
   whatsapp_replied: "Respondeu no WhatsApp",
   lead_score_changed: "Lead mudou de faixa de pontuação",
+  lead_stage_changed: "Lead mudou de estágio",
   manual: "Manual",
 };
 
@@ -72,6 +74,7 @@ export const TRIGGER_TYPES_DISPONIVEIS: AutomationTriggerType[] = [
   "list_unsubscribed",
   "contact_created",
   "lead_score_changed",
+  "lead_stage_changed",
 ];
 
 /** Faixas oferecidas no gatilho de pontuação. Vazio = qualquer mudança. */
@@ -282,6 +285,12 @@ export function resumoDoGatilho(
         ? FAIXAS_DO_GATILHO.find((f) => f.valor === faixa)?.rotulo ??
             `${rotulo}: ${faixa}`
         : `${rotulo}: qualquer faixa`;
+    }
+    case "lead_stage_changed": {
+      const estagio = texto(c.para);
+      return estagio
+        ? `Lead virou "${estagioLabel(estagio)}"`
+        : `${rotulo}: qualquer estágio`;
     }
     default:
       return rotulo;

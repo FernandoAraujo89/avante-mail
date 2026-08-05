@@ -11,6 +11,7 @@ import {
   type LeadStage,
   type NewContact,
 } from "@/lib/db";
+import { ESTAGIO_INICIAL } from "@/components/leads/estagios";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { resolveListaDeLeads } from "@/lib/leads";
 import { firstValidPhone } from "@/lib/phone";
@@ -236,7 +237,9 @@ export async function processarEntrada(args: {
 
   const tags = [...new Set([...normalizeTags(padroes.tags), ...campos.tags])];
   const listId = typeof padroes.listId === "string" ? padroes.listId : null;
-  const stage = (typeof padroes.stage === "string" ? padroes.stage : "novo") as LeadStage;
+  const stage = (
+    typeof padroes.stage === "string" ? padroes.stage : ESTAGIO_INICIAL
+  ) as LeadStage;
   // O padrão do sistema é LIBERAR: o lead entra apto a receber, e a origem
   // bloqueia quando for o caso (`"consentimento": false` nos defaults) — por
   // exemplo uma lista comprada ou um formulário sem aviso de comunicação.

@@ -73,7 +73,7 @@ async function main() {
     "lead-quente",
     {
       id: "c-1", name: "Maria", email: "maria@x.com", phone: "+5531999998888",
-      company: "Empresa", stage: "qualificado", tags: ["lead"], leadScore: 62,
+      company: "Empresa", stage: "nutrindo", tags: ["lead"], leadScore: 62,
       leadScoreBand: "quente", sourceChannel: "instagram", utmSource: "instagram",
       utmMedium: "social", utmCampaign: "agosto", subscribed: true,
       emailOptOutAt: null, whatsappSubscribed: true,

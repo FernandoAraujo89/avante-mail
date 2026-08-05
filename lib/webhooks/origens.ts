@@ -11,6 +11,8 @@
  * token, que precisa de `crypto`, mora em `origens-token.ts`.
  */
 
+import { ESTAGIO_INICIAL } from "@/components/leads/estagios";
+
 /** Campos que o mapeamento sabe preencher, na ordem em que a tela os mostra. */
 export const CAMPOS_MAPEAVEIS = [
   { campo: "name", rotulo: "Nome", exemplo: "nome" },
@@ -122,7 +124,7 @@ export function limparDefaults(
   const bruto = (valor ?? {}) as Record<string, unknown>;
   return {
     tags: tagsNormalizadas,
-    stage: typeof bruto.stage === "string" ? bruto.stage : "novo",
+    stage: typeof bruto.stage === "string" ? bruto.stage : ESTAGIO_INICIAL,
     // Padrão do sistema é LIBERAR; a origem bloqueia quando for lista comprada
     // ou formulário sem aviso de comunicação.
     consentimento: bruto.consentimento !== false,

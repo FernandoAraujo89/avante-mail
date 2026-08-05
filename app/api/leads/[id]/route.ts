@@ -20,6 +20,10 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * Ações da ficha do lead: mudar de estágio e converter em parceiro.
  *
+ * Estágio aqui é o que NÓS fazemos com o lead (nutrindo → enviado ao comercial
+ * → virou cliente / descartado), não o funil de vendas: esse vive no Pipedrive
+ * e não conversa com este sistema.
+ *
  * As duas mexem em `contacts.stage`, que é o que define quem é lead — e por
  * tabela quem entra ou não em campanha (a trava 2 da fase B). Por isso ficam
  * nesta rota, e não soltas no PATCH genérico de contato.
@@ -134,9 +138,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ ok: true, stage, semMudanca: true });
     }
 
+    // Entrar em "enviado" carimba a data — inclusive quando o lead já esteve
+    // lá antes e voltou para nutrição: o que interessa é a entrega mais
+    // recente, que é a que ainda espera resposta do comercial. Sair de
+    // "enviado" NÃO apaga o carimbo; a entrega aconteceu, e apagar seria
+    // reescrever o histórico.
     await db
       .update(contacts)
-      .set({ stage: stage as LeadStage })
+      .set({
+        stage: stage as LeadStage,
+        ...(stage === "enviado" ? { enviadoAoComercialEm: new Date() } : {}),
+      })
       .where(eq(contacts.id, id));
 
     await emitContactEvent("lead_stage_changed", id, {

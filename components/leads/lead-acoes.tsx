@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, Send, Undo2 } from "lucide-react";
 
 import { ESTAGIOS } from "@/components/leads/estagios";
+import { formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -25,7 +26,11 @@ import {
 } from "@/components/ui/select";
 
 /**
- * As duas ações que movem o lead: andar no funil e virar parceiro.
+ * As ações da ficha: entregar ao comercial, registrar o desfecho e converter em
+ * parceiro.
+ *
+ * "Enviar ao comercial" é o botão principal porque é o que esta área existe
+ * para produzir — a nutrição roda sozinha, e a decisão humana é só esta.
  *
  * Converter é a única porta que devolve o contato ao público das campanhas
  * (limpa o estágio), então ela pede confirmação e diz, na própria janela, o que
@@ -34,11 +39,15 @@ import {
 export function LeadAcoes({
   leadId,
   estagio,
+  faixa,
+  enviadoEm,
   subscribed,
   listas,
 }: {
   leadId: string;
   estagio: string;
+  faixa: string | null;
+  enviadoEm: string | null;
   subscribed: boolean;
   listas: { id: string; name: string }[];
 }) {
@@ -95,11 +104,62 @@ export function LeadAcoes({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Andamento</CardTitle>
+        <CardTitle>O que fazer com este lead</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4">
+        {/* O botão só aparece enquanto o lead está em nutrição: depois de
+            entregue, "enviar" de novo é ruído, e o estágio abaixo continua
+            disponível para quem precisar corrigir. */}
+        {estagio === "nutrindo" ? (
+          <div className="grid gap-2">
+            <Button
+              onClick={() => mudarEstagio("enviado")}
+              disabled={salvando}
+              variant={faixa === "quente" ? "default" : "outline"}
+            >
+              <Send />
+              Enviar ao comercial
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {faixa === "quente"
+                ? "Este lead está quente. Registrar a entrega guarda a data e dispara as automações com gatilho de mudança de estágio."
+                : "Registra a data da entrega e dispara as automações com gatilho de mudança de estágio. A passagem em si você faz no Pipedrive."}
+            </p>
+          </div>
+        ) : null}
+
+        {estagio === "enviado" ? (
+          <div className="grid gap-2 rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2">
+            <p className="text-xs text-warning-dark">
+              Entregue ao comercial
+              {enviadoEm ? ` em ${formatDate(enviadoEm)}` : ", sem data registrada"}
+              . Confira no Pipedrive se fechou e registre o desfecho aqui.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => mudarEstagio("cliente")}
+                disabled={salvando}
+              >
+                <CheckCircle2 />
+                Virou cliente
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => mudarEstagio("nutrindo")}
+                disabled={salvando}
+              >
+                <Undo2 />
+                Voltar para nutrição
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid gap-2">
-          <Label htmlFor="estagio-do-lead">Estágio no funil</Label>
+          <Label htmlFor="estagio-do-lead">Estágio</Label>
           <Select
             value={estagio}
             onValueChange={mudarEstagio}
@@ -116,6 +176,10 @@ export function LeadAcoes({
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Descreve o que nós fazemos com o lead. O andamento da venda fica no
+            Pipedrive.
+          </p>
         </div>
 
         <div className="grid gap-2 border-t border-border pt-4">
@@ -130,7 +194,7 @@ export function LeadAcoes({
           <p className="text-xs text-muted-foreground">
             {listas.length === 0
               ? "Crie uma lista de parceiros para poder converter."
-              : "Tira o lead do funil e o move para uma lista de relacionamento — a partir daí ele entra nas campanhas."}
+              : "Encerra a nutrição e move o contato para uma lista de relacionamento — a partir daí ele passa a receber campanhas."}
           </p>
         </div>
 
@@ -144,9 +208,9 @@ export function LeadAcoes({
           <DialogHeader>
             <DialogTitle>Converter em parceiro</DialogTitle>
             <DialogDescription>
-              O lead sai do funil, sai da lista de leads e passa a fazer parte da
-              base de relacionamento — recebendo campanhas como qualquer
-              parceiro.
+              O contato deixa de ser lead, sai da lista de leads e passa a fazer
+              parte da base de relacionamento — recebendo campanhas como
+              qualquer parceiro.
             </DialogDescription>
           </DialogHeader>
 

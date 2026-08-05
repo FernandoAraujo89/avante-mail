@@ -55,10 +55,39 @@ do tempo sem informar nada. Os tipos sem regra ativa ficam fora da detecção de
 "quem precisa recalcular" — inclusive o próprio `lead_score_changed`, que senão
 pediria um recálculo a cada recálculo.
 
-**Ainda não é gatilho de automação.** `lead_score_changed` é gravado e aparece
-na ficha, mas não está em `AUTOMATION_TRIGGER_TYPES`: o editor de gatilhos
-precisaria de uma configuração de "qual faixa", e isso é trabalho próprio.
-É o passo natural depois da fase E.
+**É gatilho de automação** desde `12e2d99`, com escolha de faixa no editor
+("virou quente", "esfriou", ou qualquer mudança).
+
+### Os estágios descrevem NUTRIÇÃO, não venda (05/08/2026)
+
+Migração: `scripts/migrate-estagios-nutricao.ts`.
+
+O comercial trabalha no **Pipedrive**, sem integração com este sistema e sem
+previsão de ter. Estágios de venda (`novo/contatado/qualificado`) só poderiam
+ser preenchidos por quem tem a informação — e essa pessoa está na outra
+ferramenta. Ficariam eternamente desatualizados, afirmando um estado de venda
+que ninguém aqui conhece.
+
+Os quatro estágios de hoje dizem o que **nós** fazemos:
+
+| Estágio | Quer dizer |
+|---|---|
+| `nutrindo` | recebendo nutrição; é onde todo lead entra |
+| `enviado` | entregue ao comercial como oportunidade (carimba `contacts.enviado_ao_comercial_em`) |
+| `cliente` | o comercial confirmou que fechou |
+| `descartado` | não era oportunidade, ou desistiu |
+
+**"Prontos para enviar" é VISÃO derivada, não estágio** — `quente` +
+`nutrindo`, calculada em `/api/leads`. Como estágio, alguém teria de mover o
+lead à mão quando ele esquentasse, e no dia em que esquecesse a lista mentiria.
+Derivada, ela nunca desanda em relação à pontuação.
+
+**A entrega não tem caminho próprio de notificação:** o botão grava o estágio,
+sai `lead_stage_changed`, e uma automação com esse gatilho + passo de webhook
+(fase F) avisa o Make/CRM. Um caminho só, reusando o que já existe.
+
+Vocabulário separado de propósito: **faixa é temperatura** (o sistema calcula),
+**estágio é propósito** (uma pessoa decide).
 
 ### A regra que passou a valer (04/08/2026)
 
@@ -699,7 +728,8 @@ site, não só os canais próprios.
 
 **3. Demais parâmetros seguem a recomendação deste documento** — todos são
 dados, editáveis na tela depois, sem deploy:
-- estágios: `novo → contatado → qualificado → convertido/perdido`;
+- estágios: `novo → contatado → qualificado → convertido/perdido` — **superado
+  em 05/08/2026**, ver "Os estágios descrevem NUTRIÇÃO" no ESTADO ATUAL;
 - pontuação: a tabela da seção 6.2;
 - meia-vida do decaimento: 30 dias;
 - responsável: campo existe, atribuição opcional (balcão comum por padrão).

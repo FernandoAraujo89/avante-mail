@@ -5,7 +5,7 @@ import { asc, desc, eq, isNull, ne, or } from "drizzle-orm";
 
 import { LeadAcoes } from "@/components/leads/lead-acoes";
 import { LeadScoreCard } from "@/components/leads/lead-score-card";
-import { estagioLabel } from "@/components/leads/estagios";
+import { estagioInfo, estagioLabel } from "@/components/leads/estagios";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -195,7 +195,9 @@ export default async function LeadPage({
             lead.createdAt
           )}`}
         >
-          <Badge variant="warning">{estagioLabel(lead.stage)}</Badge>
+          <Badge variant={estagioInfo(lead.stage)?.variante ?? "secondary"}>
+            {estagioLabel(lead.stage)}
+          </Badge>
           {lead.subscribed ? (
             <Badge variant="success">Aceita e-mail</Badge>
           ) : (
@@ -217,6 +219,8 @@ export default async function LeadPage({
           <LeadAcoes
             leadId={lead.id}
             estagio={lead.stage}
+            faixa={lead.leadScoreBand}
+            enviadoEm={lead.enviadoAoComercialEm?.toISOString() ?? null}
             subscribed={lead.subscribed}
             listas={listasDestino}
           />

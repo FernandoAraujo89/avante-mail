@@ -15,6 +15,9 @@ import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+/** Valor de filtro da visão derivada (ver o uso, abaixo). */
+const PRONTOS = "prontos";
+
 /**
  * A área de Leads (docs/plano-webhooks-leads.md, seção 8).
  *
@@ -46,7 +49,16 @@ export async function GET(request: NextRequest) {
       );
       if (alvo) condicoes.push(alvo);
     }
-    if (estagio && LEAD_STAGES.includes(estagio as LeadStage)) {
+    // "Prontos para enviar" é uma VISÃO derivada, não um estágio.
+    //
+    // Se fosse estágio, alguém teria de mover o lead à mão quando ele
+    // esquentasse — e o dia em que esquecesse, a lista mentiria. Derivando de
+    // quente + ainda-não-entregue, ela se mantém sozinha e nunca desanda em
+    // relação à pontuação, que é quem manda aqui.
+    if (estagio === PRONTOS) {
+      condicoes.push(eq(contacts.stage, "nutrindo"));
+      condicoes.push(eq(contacts.leadScoreBand, "quente"));
+    } else if (estagio && LEAD_STAGES.includes(estagio as LeadStage)) {
       condicoes.push(eq(contacts.stage, estagio as LeadStage));
     }
     if (canal) condicoes.push(eq(contacts.sourceChannel, canal));
@@ -75,6 +87,7 @@ export async function GET(request: NextRequest) {
         createdAt: contacts.createdAt,
         leadScore: contacts.leadScore,
         leadScoreBand: contacts.leadScoreBand,
+        enviadoAoComercialEm: contacts.enviadoAoComercialEm,
       })
       .from(contacts)
       .where(and(...condicoes))
@@ -94,6 +107,19 @@ export async function GET(request: NextRequest) {
       .from(contacts)
       .where(ehLead())
       .groupBy(contacts.stage);
+
+    // Quantos estão quentes e ainda não foram entregues. É o número que faz a
+    // pessoa abrir a tela: a fila de oportunidade que o comercial ainda não viu.
+    const [pronto] = await db
+      .select({ total: count() })
+      .from(contacts)
+      .where(
+        and(
+          ehLead(),
+          eq(contacts.stage, "nutrindo"),
+          eq(contacts.leadScoreBand, "quente")
+        )
+      );
 
     // Canais existentes, para o filtro só oferecer o que existe de verdade.
     const canais = await db
@@ -119,6 +145,7 @@ export async function GET(request: NextRequest) {
       leads,
       config,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
+      prontos: pronto?.total ?? 0,
       faixas: Object.fromEntries(
         porFaixa.filter((r) => r.faixa).map((r) => [r.faixa as string, r.total])
       ),

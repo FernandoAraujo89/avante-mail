@@ -1,11 +1,25 @@
-/** Estágios do funil, com o rótulo que a tela mostra. */
+/**
+ * Estágios, na ordem do ciclo. Descrevem o que ESTE sistema faz — nutrir,
+ * entregar, registrar o desfecho —, não o funil do comercial, que vive no
+ * Pipedrive.
+ */
 export const ESTAGIOS = [
-  { valor: "novo", rotulo: "Novo" },
-  { valor: "contatado", rotulo: "Contatado" },
-  { valor: "qualificado", rotulo: "Qualificado" },
-  { valor: "convertido", rotulo: "Convertido" },
-  { valor: "perdido", rotulo: "Perdido" },
+  { valor: "nutrindo", rotulo: "Nutrindo", variante: "info" as const },
+  {
+    valor: "enviado",
+    rotulo: "Enviado ao comercial",
+    variante: "warning" as const,
+  },
+  { valor: "cliente", rotulo: "Virou cliente", variante: "success" as const },
+  { valor: "descartado", rotulo: "Descartado", variante: "secondary" as const },
 ] as const;
+
+/** O estágio de quem acaba de entrar. */
+export const ESTAGIO_INICIAL = "nutrindo";
+
+export function estagioInfo(valor: string | null) {
+  return ESTAGIOS.find((e) => e.valor === valor) ?? null;
+}
 
 export function estagioLabel(valor: string | null): string {
   return ESTAGIOS.find((e) => e.valor === valor)?.rotulo ?? (valor ?? "—");
@@ -14,9 +28,9 @@ export function estagioLabel(valor: string | null): string {
 /**
  * Faixas do Lead Score, do mais quente para o mais frio.
  *
- * O rótulo da primeira é "Frio", e não "Novo", de propósito: "Novo" já é um
- * ESTÁGIO do funil, e um lead poderia ser estágio Novo e faixa Novo ao mesmo
- * tempo — duas coisas diferentes com o mesmo nome na mesma linha da tabela.
+ * Faixa é TEMPERATURA (o sistema calcula); estágio é PROPÓSITO (uma pessoa
+ * decide). Os dois vocabulários são separados de propósito para não colidirem
+ * na mesma linha da tabela.
  *
  * As cores acompanham a escalada, e a barra de calor carrega o degradê exato.
  */
@@ -51,4 +65,5 @@ export interface LeadDto {
   createdAt: string;
   leadScore: number | null;
   leadScoreBand: string | null;
+  enviadoAoComercialEm: string | null;
 }

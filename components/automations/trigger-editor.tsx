@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ESTAGIOS } from "@/components/leads/estagios";
 import type { TriggerDraft } from "@/lib/automations/arvore";
 import type { AutomationTriggerType } from "@/lib/db/schema";
 
@@ -115,6 +116,34 @@ export function TriggerEditor({
             </div>
           ) : null}
 
+          {trigger.type === "lead_stage_changed" ? (
+            <div className="grid gap-1.5">
+              <Label>Passou a ser</Label>
+              <Select
+                value={String(trigger.config?.para ?? "qualquer")}
+                onValueChange={(para) =>
+                  atualizar(i, {
+                    config: para === "qualquer" ? {} : { para },
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="qualquer">
+                    Qualquer mudança de estágio
+                  </SelectItem>
+                  {ESTAGIOS.map((e) => (
+                    <SelectItem key={e.valor} value={e.valor}>
+                      {e.rotulo}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           {trigger.type === "list_subscribed" ||
           trigger.type === "list_unsubscribed" ? (
             <div className="grid gap-1.5">
@@ -151,6 +180,15 @@ export function TriggerEditor({
           >
             <Trash2 className="text-muted-foreground" />
           </Button>
+
+          {/* Fora das colunas de propósito: dentro delas, o parágrafo empurraria
+              o select de baixo e os dois campos parariam de se alinhar. */}
+          {trigger.type === "lead_stage_changed" ? (
+            <p className="text-xs text-muted-foreground sm:col-span-3">
+              É assim que se avisa o CRM na entrega: gatilho em &ldquo;Enviado ao
+              comercial&rdquo; com um passo de webhook.
+            </p>
+          ) : null}
         </div>
       ))}
 

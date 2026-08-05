@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FlaskConical, Inbox } from "lucide-react";
 
 import type { OrigemDto } from "@/app/(app)/leads/origens/page";
-import { ESTAGIOS } from "@/components/leads/estagios";
+import { ESTAGIO_INICIAL, ESTAGIOS } from "@/components/leads/estagios";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,7 +79,7 @@ export function OrigemDialog({
   const [ativa, setAtiva] = useState(true);
   const [mapa, setMapa] = useState<Record<string, string>>({});
   const [tags, setTags] = useState("lead");
-  const [estagio, setEstagio] = useState("novo");
+  const [estagio, setEstagio] = useState(ESTAGIO_INICIAL);
   const [consentimento, setConsentimento] = useState(true);
 
   const [payload, setPayload] = useState(EXEMPLO_FORMATADO);
@@ -114,7 +114,7 @@ export function OrigemDialog({
         Array.isArray(padroes.tags) ? (padroes.tags as string[]).join(", ") : ""
       );
       setEstagio(
-        typeof padroes.stage === "string" ? padroes.stage : "novo"
+        typeof padroes.stage === "string" ? padroes.stage : ESTAGIO_INICIAL
       );
       setConsentimento(padroes.consentimento !== false);
     } else {
@@ -123,7 +123,7 @@ export function OrigemDialog({
       setAtiva(true);
       setMapa({ ...MAPEAMENTO_PADRAO });
       setTags("lead");
-      setEstagio("novo");
+      setEstagio(ESTAGIO_INICIAL);
       setConsentimento(true);
     }
   }, [aberto, origem]);
