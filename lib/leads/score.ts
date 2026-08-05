@@ -72,18 +72,23 @@ export const REGRAS_PADRAO: {
   },
   { eventType: "tag_added", points: 1, description: "Ganhou uma tag" },
   // ── Fase E: rastreio do site ────────────────────────────────────────
+  //
+  // Os nomes descrevem o que existe em avantejuntos.com.br. O plano sugeria
+  // "viu a página de preços" e "pediu demonstração", mas o site não tem
+  // nenhuma das duas — seriam regras que jamais disparariam. As páginas reais
+  // ficam em site_event_rules, editáveis em /leads/rastreio.
   { eventType: "site_visited", points: 3, description: "Visitou o site" },
   {
     eventType: "site_event",
     points: 10,
-    description: "Viu a página de preços",
-    condition: { evento: "precos" },
+    description: "Pesquisou produto no site",
+    condition: { evento: "produto" },
   },
   {
     eventType: "site_event",
     points: 25,
-    description: "Pediu demonstração",
-    condition: { evento: "demo" },
+    description: "Pediu contato no site",
+    condition: { evento: "contato" },
   },
 ];
 
