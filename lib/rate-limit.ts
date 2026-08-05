@@ -30,11 +30,20 @@ function getRedis(): IORedis {
 /**
  * Retorna true se a ação PODE prosseguir; false se estourou o limite.
  * `key` deve identificar a ação + o sujeito (ex.: "login:1.2.3.4:a@b.c").
+ *
+ * `falharFechado` inverte a postura do módulo para uma rota específica. O
+ * padrão continua fail-open pelo motivo do topo do arquivo (ferramenta
+ * interna), mas o rastreio de site é o caso contrário: é uma rota PÚBLICA que
+ * o navegador de qualquer visitante chama, perder um evento de analytics não
+ * custa nada, e deixar a enxurrada passar custa o pool de conexões que a
+ * interface logada divide com ela (lib/db/index.ts — Pool sem `max`, então o
+ * padrão de 10 do node-postgres).
  */
 export async function rateLimitAllow(
   key: string,
   max: number,
-  windowSeconds: number
+  windowSeconds: number,
+  falharFechado = false
 ): Promise<boolean> {
   try {
     const redis = getRedis();
@@ -45,8 +54,11 @@ export async function rateLimitAllow(
     }
     return count <= max;
   } catch (error) {
-    console.error("[RATE-LIMIT] Redis indisponível, liberando:", error);
-    return true; // fail-open
+    console.error(
+      `[RATE-LIMIT] Redis indisponível, ${falharFechado ? "barrando" : "liberando"}:`,
+      error
+    );
+    return !falharFechado;
   }
 }
 

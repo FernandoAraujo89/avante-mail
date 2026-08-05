@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 
+import { casaGatilho } from "@/lib/automations/engine";
 import {
   contactEvents,
   contacts,
@@ -39,11 +40,17 @@ export const PADRAO_MEIA_VIDA_DIAS = 30;
 export const PADRAO_FAIXA_MORNO = 20;
 export const PADRAO_FAIXA_QUENTE = 50;
 
-/** Pontuação sugerida pelo plano — semeada na migração, editável depois. */
+/**
+ * Pontuação sugerida pelo plano — semeada na migração, editável depois.
+ *
+ * `condition` casa contra o payload do evento (mesma semântica do gatilho de
+ * automação). É o que permite dois pesos para o mesmo `site_event`.
+ */
 export const REGRAS_PADRAO: {
   eventType: ContactEventType;
   points: number;
   description: string;
+  condition?: Record<string, unknown>;
 }[] = [
   { eventType: "contact_created", points: 10, description: "Entrou como lead" },
   { eventType: "email_opened", points: 2, description: "Abriu um e-mail" },
@@ -64,6 +71,20 @@ export const REGRAS_PADRAO: {
     description: "Pediu para sair do WhatsApp",
   },
   { eventType: "tag_added", points: 1, description: "Ganhou uma tag" },
+  // ── Fase E: rastreio do site ────────────────────────────────────────
+  { eventType: "site_visited", points: 3, description: "Visitou o site" },
+  {
+    eventType: "site_event",
+    points: 10,
+    description: "Viu a página de preços",
+    condition: { evento: "precos" },
+  },
+  {
+    eventType: "site_event",
+    points: 25,
+    description: "Pediu demonstração",
+    condition: { evento: "demo" },
+  },
 ];
 
 export interface Configuracao {
@@ -98,6 +119,66 @@ export function faixaDoScore(score: number, config: Configuracao): LeadScoreBand
   if (score >= config.faixaQuente) return "quente";
   if (score >= config.faixaMorno) return "morno";
   return "frio";
+}
+
+/**
+ * Regras ativas agrupadas por tipo de evento, com as MAIS ESPECÍFICAS na
+ * frente.
+ *
+ * O agrupamento existe porque desde a fase E um mesmo tipo tem várias regras:
+ * `site_event` vale +10 para `{"evento":"precos"}` e +25 para
+ * `{"evento":"demo"}`. Até a fase C isto era um `Map` por tipo — e `new Map()`
+ * com chave repetida guarda SILENCIOSAMENTE a última: a segunda regra sumiria
+ * da conta sem erro, sem log e sem sintoma na tela, deixando só um número
+ * errado. Por isso o agrupamento e a queda do UNIQUE de `event_type` andam
+ * juntos, na mesma migração.
+ */
+function agruparRegras(
+  regras: LeadScoreRule[]
+): Map<ContactEventType, LeadScoreRule[]> {
+  const porTipo = new Map<ContactEventType, LeadScoreRule[]>();
+  for (const regra of regras) {
+    if (!regra.active) continue;
+    const lista = porTipo.get(regra.eventType) ?? [];
+    lista.push(regra);
+    porTipo.set(regra.eventType, lista);
+  }
+  for (const lista of porTipo.values()) {
+    lista.sort((a, b) => {
+      // Com condição primeiro: a regra específica precisa vencer o curinga.
+      const especificidade =
+        Number(Boolean(b.condition)) - Number(Boolean(a.condition));
+      if (especificidade !== 0) return especificidade;
+      // Empate entre duas regras de mesma especificidade: desempata por peso e
+      // depois por id. Sem isto, a vencedora seria a ordem em que o Postgres
+      // devolveu as linhas — e a pontuação da mesma pessoa poderia mudar entre
+      // dois recálculos sem nada ter mudado.
+      if (b.points !== a.points) return b.points - a.points;
+      return a.id.localeCompare(b.id);
+    });
+  }
+  return porTipo;
+}
+
+/**
+ * A regra que vale para um evento: a PRIMEIRA que casa, nunca a soma.
+ *
+ * Somar seria pior de duas formas. A conta deixaria de ser explicável — um
+ * evento de demonstração valeria 25 + 3 = 28 e ninguém saberia de onde saiu o
+ * 28, o que mata o propósito do card de conta aberta. E o curinga viraria um
+ * piso invisível em cima de todo evento nomeado.
+ */
+function regraQueCasa(
+  candidatas: LeadScoreRule[] | undefined,
+  payload: Record<string, unknown> | null
+): LeadScoreRule | null {
+  if (!candidatas) return null;
+  for (const regra of candidatas) {
+    // Mesma semântica do gatilho de automação (lib/automations/engine.ts):
+    // sem condição casa com tudo; com condição, todas as chaves precisam bater.
+    if (casaGatilho(regra.condition ?? null, payload)) return regra;
+  }
+  return null;
 }
 
 /** Um evento já pontuado — é o que abre a conta na ficha do lead. */
@@ -145,24 +226,26 @@ export async function calcularConta(
   agora = new Date()
 ): Promise<ContaDoScore> {
   const db = getDb();
-  const ativas = new Map(
-    regras.filter((r) => r.active).map((r) => [r.eventType, r])
-  );
+  const porTipo = agruparRegras(regras);
 
-  if (ativas.size === 0) {
+  if (porTipo.size === 0) {
     return { score: 0, faixa: faixaDoScore(0, config), linhas: [] };
   }
 
   const eventos = await db
     .select({
       type: contactEvents.type,
+      // O payload entra na conta desde a fase E: é ele que distingue "viu a
+      // página de preços" de "visitou o site", que são o mesmo tipo de evento
+      // com pesos diferentes.
+      payload: contactEvents.payload,
       createdAt: contactEvents.createdAt,
     })
     .from(contactEvents)
     .where(
       and(
         eq(contactEvents.contactId, contactId),
-        inArray(contactEvents.type, [...ativas.keys()])
+        inArray(contactEvents.type, [...porTipo.keys()])
       )
     )
     .orderBy(asc(contactEvents.createdAt));
@@ -171,7 +254,7 @@ export async function calcularConta(
   let total = 0;
 
   for (const evento of eventos) {
-    const regra = ativas.get(evento.type);
+    const regra = regraQueCasa(porTipo.get(evento.type), evento.payload);
     if (!regra) continue;
     const pontosHoje = pontosComDecaimento(
       regra.points,
@@ -252,7 +335,11 @@ export async function recalcularContato(
 export async function recalcularPendentes(limite = 200): Promise<number> {
   const db = getDb();
   const regras = await lerRegras();
-  const ativas = regras.filter((r) => r.active).map((r) => r.eventType);
+  // DISTINTOS: desde a fase E o mesmo tipo tem várias regras (uma por evento
+  // nomeado), e repetir o tipo aqui só incharia o IN da consulta.
+  const ativas = [
+    ...new Set(regras.filter((r) => r.active).map((r) => r.eventType)),
+  ];
   if (ativas.length === 0) return 0;
 
   const config = await lerConfiguracao();

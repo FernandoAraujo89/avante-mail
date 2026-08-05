@@ -14,6 +14,7 @@ import {
   Menu,
   MessageCircle,
   Newspaper,
+  Radar,
   Send,
   UserCog,
   Users,
@@ -54,6 +55,7 @@ const NAV_GROUPS: {
     items: [
       { href: "/leads", label: "Gestão de leads", icon: Magnet },
       { href: "/leads/pontuacao", label: "Pontuação", icon: Gauge },
+      { href: "/leads/rastreio", label: "Rastreio do site", icon: Radar },
       { href: "/leads/origens", label: "Origens (webhook)", icon: Webhook },
     ],
   },

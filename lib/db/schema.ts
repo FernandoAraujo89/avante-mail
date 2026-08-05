@@ -97,6 +97,13 @@ export const CONTACT_EVENT_TYPES = [
   // vira evento — o número muda o tempo todo pelo decaimento, e registrar cada
   // variação encheria a linha do tempo de ruído sem informar nada.
   "lead_score_changed",
+  // Fase E — rastreio do site. `site_visited` é a sessão (uma por visita, não
+  // por página); `site_event` é um ato nomeado ("viu preços", "pediu demo").
+  // Nenhum dos dois entra em AUTOMATION_TRIGGER_TYPES nesta fase: gatilho
+  // ligado a endpoint público dispara passo de envio, e passo de envio custa
+  // dinheiro. O motor ignora o que nenhum gatilho declara.
+  "site_visited",
+  "site_event",
 ] as const;
 export type ContactEventType = (typeof CONTACT_EVENT_TYPES)[number];
 
@@ -681,12 +688,49 @@ export const campaignSends = pgTable("campaign_sends", {
  */
 export const leadScoreRules = pgTable("lead_score_rules", {
   id: uuid("id").primaryKey().defaultRandom(),
-  eventType: text("event_type").$type<ContactEventType>().notNull().unique(),
+  // SEM unique() desde a fase E: o mesmo tipo tem várias regras quando o
+  // evento é nomeado ("viu preços" e "pediu demonstração" são os dois
+  // `site_event`, com pesos diferentes). A unicidade virou índice composto
+  // (event_type + condition) na migração — ver scripts/migrate-rastreio-site.ts.
+  eventType: text("event_type").$type<ContactEventType>().notNull(),
+  /**
+   * Recorte dentro do tipo, casado contra o payload do evento com a MESMA
+   * semântica do gatilho de automação (`casaGatilho`): nulo casa com tudo; com
+   * valor, todas as chaves precisam bater. Ex.: `{"evento":"demo"}`.
+   */
+  condition: jsonb("condition").$type<Record<string, unknown>>(),
   /** Pontos no dia do evento, antes do decaimento. Aceita negativo. */
   points: integer("points").notNull(),
   active: boolean("active").notNull().default(true),
   description: text("description"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * De que página nasce cada evento nomeado — a tradução `caminho → evento`.
+ *
+ * Vive no SERVIDOR, e não assada no script do site, por dois motivos. O
+ * endpoint precisa validar o nome do evento contra uma lista fechada de
+ * qualquer jeito (o script é código do cliente: um POST forjado manda o nome
+ * que quiser), então a lista fechada tem que estar aqui. E mudar "qual página
+ * conta como intenção" passa a valer para o histórico na próxima leitura, em
+ * vez de só dali para a frente.
+ */
+export const SITE_MATCH_TYPES = ["exato", "prefixo"] as const;
+export type SiteMatchType = (typeof SITE_MATCH_TYPES)[number];
+
+export const siteEventRules = pgTable("site_event_rules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Nome do evento gerado: slug curto, casado com a regra de pontuação. */
+  evento: text("evento").notNull(),
+  matchType: text("match_type").$type<SiteMatchType>().notNull(),
+  /** Caminho normalizado (minúsculo, sem query, sem barra final). */
+  valor: text("valor").notNull(),
+  description: text("description"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
@@ -723,3 +767,5 @@ export type AppSetting = typeof appSettings.$inferSelect;
 export type NewAppSetting = typeof appSettings.$inferInsert;
 export type LeadScoreRule = typeof leadScoreRules.$inferSelect;
 export type NewLeadScoreRule = typeof leadScoreRules.$inferInsert;
+export type SiteEventRule = typeof siteEventRules.$inferSelect;
+export type NewSiteEventRule = typeof siteEventRules.$inferInsert;

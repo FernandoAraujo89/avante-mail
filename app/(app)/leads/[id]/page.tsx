@@ -39,6 +39,8 @@ const EVENTO_LABEL: Record<string, string> = {
   whatsapp_unsubscribed: "Pediu para sair do WhatsApp",
   lead_stage_changed: "Mudou de estágio",
   lead_score_changed: "Mudou de faixa de pontuação",
+  site_visited: "Visitou o site",
+  site_event: "Ação no site",
 };
 
 function detalheDoEvento(
@@ -53,6 +55,15 @@ function detalheDoEvento(
   }
   if (tipo === "lead_score_changed") {
     return `${payload.de ?? "—"} → ${payload.para} (${payload.score} pontos)`;
+  }
+  // O caminho é o que o operador precisa ver; a URL completa não é guardada
+  // (ela carregaria o próprio token de rastreio para dentro da tela).
+  if (tipo === "site_visited") {
+    const de = payload.refHost ? ` · veio de ${payload.refHost}` : "";
+    return `${payload.path ?? "—"}${de}`;
+  }
+  if (tipo === "site_event") {
+    return `${payload.evento} · ${payload.path ?? "—"}`;
   }
   if (typeof payload.tag === "string") return payload.tag;
   if (typeof payload.origem === "string") return `origem: ${payload.origem}`;

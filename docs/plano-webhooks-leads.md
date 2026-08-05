@@ -17,9 +17,9 @@ pontos de contato com os canais da Avante.
 | — Correção do consentimento | ✅ produção | `5060116` |
 | B — Campos de lead + travas | ✅ produção | `71ba61e` |
 | D — Área de Leads + cadastro de origens | ✅ produção | `06aa4f5` |
-| C — Lead Score | ✅ feita | |
-| E — Rastreio do site | ⬜ **próxima** | |
-| F — Webhook de saída | ⬜ | |
+| C — Lead Score | ✅ produção | `7b3ad17` |
+| E — Rastreio do site | ✅ feita | |
+| F — Webhook de saída | ⬜ **última** | |
 
 **A ordem mudou:** a fase D veio antes da C porque o usuário pediu a separação
 da gestão de leads e o cadastro de origens pela tela.
@@ -427,11 +427,115 @@ para qualificado"* — tudo com o motor que já existe.
 
 ---
 
-## 7. Rastreio do site (a parte difícil)
+## 7. Rastreio do site (a parte difícil) ✅ FEITA
 
 O problema não é registrar a visita; é **saber de quem ela é**. O site
 (`avantejuntos.com.br`) e o sistema (`campanhas.avantetools.com.br`) são
 domínios diferentes, e cookie de terceiro não existe mais.
+
+### 7.0 O que foi construído, e as decisões que o plano não previa
+
+**Configuração obrigatória (sem ela o rastreio é inerte, de propósito):**
+`SITE_TRACK_ORIGINS` no `.env.local` do VPS, com as origens exatas do site.
+Lista vazia = nada é rastreado e nenhum token é gerado. Opcional:
+`TRACK_SECRET` (ver abaixo).
+
+| Peça | Onde |
+|---|---|
+| Token assinado | `lib/track/token.ts` |
+| Regras puras (allowlist, normalização, saneamento) | `lib/track/site.ts` |
+| Script entregue ao site | `lib/track/script.ts` → `/api/track/site.js` |
+| Endpoint de entrada | `app/api/track/site/route.ts` |
+| Tela de diagnóstico e configuração | `/leads/rastreio` |
+| Conferência sem banco | `npx tsx scripts/testar-track-site.ts` |
+
+**1. Chave DERIVADA, não o `JWT_SECRET`.** Sessão (`lib/session.ts`) e
+descadastro (`lib/jwt.ts`) assinam com o mesmo `JWT_SECRET` e se distinguem só
+pela claim `purpose`. Um token de rastreio assinado com aquela chave — morando
+no `localStorage` de um site que não controlamos — estaria a um descuido de
+virar token de sessão. Aqui a chave sai de um HKDF sobre o `JWT_SECRET`, com
+rótulo próprio: a confusão deixa de ser possível **por construção**. Derivar em
+vez de exigir uma variável nova evita o modo de falha mais bobo (subir sem a
+env e derrubar a rota); definir `TRACK_SECRET` depois passa a valer e desacopla
+a rotação. Conferido: token de descadastro e de sessão são **recusados** pelo
+endpoint.
+
+**2. Allowlist de domínio no `?av=`.** `/api/track/click` redireciona para
+qualquer http(s) — é o comportamento dele desde sempre. Anexar o token sem
+filtrar o destino mandaria a identidade do lead para qualquer site linkado numa
+campanha, e o dono daquele site passaria a poder escrever na ficha dele. O
+token só é anexado para as origens configuradas.
+
+**3. O que é guardado de cada visita: `path`, `titulo`, `refHost`, `sessao`.**
+Nunca a URL completa — ela contém o nosso próprio `?av=`, e gravá-la colocaria
+um token que identifica o contato dentro de um evento que a ficha do lead
+mostra na tela. Do referrer, só o host.
+
+**4. Uma visita por SESSÃO, não por página.** Índice único parcial em
+`contact_events`. Sem isso, quem abre 20 páginas ganharia 20× os pontos e
+passaria na frente de quem pediu demonstração — o modelo se corromperia
+sozinho. O índice protege o caso acidental (beacon repetido, recarga); contra
+quem varia a sessão de propósito, o que responde é o teto por contato.
+
+**5. `lead_score_rules` ganhou `condition` e perdeu o `UNIQUE`.** "Viu preços"
+(+10) e "pediu demonstração" (+25) são o **mesmo** `site_event` com pesos
+diferentes. Junto veio a correção de um defeito que a fase C tinha deixado:
+`calcularConta` montava as regras num `Map` por `eventType`, e `new Map()` com
+chave repetida guarda **silenciosamente a última** — a segunda regra sumiria da
+conta sem erro, sem log e sem sintoma, deixando só um número errado.
+
+**6. O mapa caminho → evento vive no SERVIDOR** (`site_event_rules`, editável
+em `/leads/rastreio`). O endpoint precisa validar o nome contra lista fechada de
+qualquer jeito — o script é código do cliente, e um POST forjado manda o nome
+que quiser. E **visitar** uma página de intenção gera o evento nomeado: no
+plano, "viu a página de preços" é uma visita a `/planos`, não um clique.
+
+**7. Limites falham FECHADOS nesta rota**, invertendo a postura do
+`lib/rate-limit.ts` (que é fail-open por ser ferramenta interna). Perder evento
+de analytics não custa nada; deixar a enxurrada chegar no Postgres custa o pool
+de conexões que a interface logada divide com ela.
+
+**8. A resposta não é um oráculo.** Token inválido, expirado e contato
+suprimido respondem a mesma coisa (`{esquecer:true}`), e nada da base sai da
+rota — nem nome, nem e-mail, nem "este token é válido".
+
+**9. Eventos de site NÃO entram em `AUTOMATION_TRIGGER_TYPES` nesta fase.**
+Gatilho ligado a endpoint público dispara passo de envio, e passo de envio custa
+dinheiro real. Duas semanas de dados antes de considerar.
+
+### 7.1 Consentimento — e o modo de falha mais provável da fase
+
+O script é **inerte por padrão**: lê o `av` para a memória, limpa a URL e
+enfileira, mas **não persiste nem envia nada** até o site chamar
+`av('consentimento', true)`. GPC e DNT bloqueiam mesmo com o aceite. Um "não"
+explícito para de coletar até para a memória.
+
+**Isto exige duas coisas de fora do código, e sem elas a fase entrega zero:**
+
+1. O banner de cookies do site precisa chamar `av('consentimento', true)` **em
+   toda página**, não só no clique do aceite. O script não guarda a decisão de
+   propósito — quem manda no consentimento é o banner, e guardar por conta
+   própria faria uma revogação feita lá fora não chegar aqui.
+2. O aviso de privacidade do site precisa descrever rastreio de pessoa
+   **identificada** (não há fase anônima: o `av` identifica desde o primeiro
+   hit), e a base legal é decisão de quem responde pelo jurídico.
+
+Por isso `/leads/rastreio` mostra **"última visita recebida"** e as recusas com
+motivo: sem isso, "não aparece lead nenhum" é indistinguível de "está tudo
+certo e ninguém visitou", e a fase morre parecendo defeito nosso.
+
+### 7.2 Limites que continuam de pé
+
+- **É identificação de NAVEGADOR, não de pessoa.** Link encaminhado, máquina
+  compartilhada. Por isso a visita vale pouco (+3) e nunca serve como prova de
+  identidade ou de consentimento.
+- **Robô com token legítimo.** Scanner corporativo de e-mail segue o link e
+  chega ao site com um `av` válido. Vale notar que isso **já acontece hoje** com
+  `email_clicked` — a fase E herda o defeito, não o cria.
+- **Limpar o navegador apaga a identificação.** Vale para qualquer ferramenta
+  do mercado, inclusive as pagas.
+- **A tag pode sumir num tema novo do site** e ninguém perceber por meses. O
+  "última visita" é o único alarme, e ele é passivo.
 
 ### O mecanismo
 
@@ -510,7 +614,7 @@ não enviar evento nenhum.
 | **C** | Lead Score sobre o que já é capturado + regras + decaimento + faixas | média ✅ |
 | **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
-| **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa |
+| **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa ✅ |
 | **F** | Passo `webhook` de saída (avisa o Make/CRM) | pequena |
 
 **A ordem importa.** A fase C vem **antes** do rastreio do site de propósito: o

@@ -1,30 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
-import { getDb, leadScoreRules, type ContactEventType } from "@/lib/db";
+import { getDb, leadScoreRules } from "@/lib/db";
 import {
   CHAVE_FAIXA_MORNO,
   CHAVE_FAIXA_QUENTE,
   CHAVE_MEIA_VIDA,
   lerConfiguracao,
   recalcularTodos,
-  REGRAS_PADRAO,
 } from "@/lib/leads/score";
 import { setSetting } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-/** Tipos de evento que aceitam regra — os que o sistema realmente captura. */
-const EVENTOS_PONTUAVEIS = new Set<string>(
-  REGRAS_PADRAO.map((r) => r.eventType)
-);
-
 export async function GET() {
   try {
     const db = getDb();
     const [regras, config] = await Promise.all([
-      db.select().from(leadScoreRules).orderBy(asc(leadScoreRules.eventType)),
+      db
+        .select()
+        .from(leadScoreRules)
+        // Segundo critério: sem ele, as duas regras de `site_event` sairiam em
+        // ordem imprevisível e a tela embaralharia a cada carga.
+        .orderBy(asc(leadScoreRules.eventType), asc(leadScoreRules.points)),
       lerConfiguracao(),
     ]);
     return NextResponse.json({ regras, config });
@@ -71,31 +70,31 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // Atualiza por ID, não por event_type.
+    //
+    // Desde a fase E o mesmo tipo tem VÁRIAS regras (uma por evento nomeado),
+    // então "a regra do tipo X" deixou de identificar uma linha. O
+    // `onConflictDoUpdate` por event_type que existia aqui quebraria no
+    // instante em que o UNIQUE caiu — o Postgres exige um índice único que
+    // case com a inferência do ON CONFLICT.
+    //
+    // As regras são criadas pela migração, nunca pela tela: aqui só se edita
+    // peso e liga/desliga. Uma linha que não existe é ignorada em silêncio.
     const regras = Array.isArray(body.regras) ? body.regras : [];
     for (const regra of regras) {
-      const eventType = String(regra.eventType ?? "");
-      if (!EVENTOS_PONTUAVEIS.has(eventType)) continue;
+      const id = typeof regra.id === "string" ? regra.id : "";
+      if (!id) continue;
       const points = Number(regra.points);
       if (!Number.isFinite(points)) continue;
 
       await db
-        .insert(leadScoreRules)
-        .values({
-          eventType: eventType as ContactEventType,
+        .update(leadScoreRules)
+        .set({
           points: Math.round(points),
           active: regra.active !== false,
-          description:
-            typeof regra.description === "string" ? regra.description : null,
           updatedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: leadScoreRules.eventType,
-          set: {
-            points: Math.round(points),
-            active: regra.active !== false,
-            updatedAt: new Date(),
-          },
-        });
+        .where(eq(leadScoreRules.id, id));
     }
 
     await Promise.all([
@@ -107,7 +106,10 @@ export async function PUT(request: NextRequest) {
     const recalculados = await recalcularTodos();
 
     const [novasRegras, novaConfig] = await Promise.all([
-      db.select().from(leadScoreRules).orderBy(asc(leadScoreRules.eventType)),
+      db
+        .select()
+        .from(leadScoreRules)
+        .orderBy(asc(leadScoreRules.eventType), asc(leadScoreRules.points)),
       lerConfiguracao(),
     ]);
 

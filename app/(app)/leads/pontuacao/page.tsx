@@ -77,11 +77,12 @@ export default function PontuacaoPage() {
     }
   }
 
-  function mudarRegra(eventType: string, patch: Partial<Regra>) {
+  // Por ID, não por tipo: desde a fase E duas regras dividem o mesmo
+  // `event_type` ("viu preços" e "pediu demonstração" são ambas `site_event`),
+  // e chavear por tipo faria as duas mudarem juntas.
+  function mudarRegra(id: string, patch: Partial<Regra>) {
     setRegras((atual) =>
-      (atual ?? []).map((r) =>
-        r.eventType === eventType ? { ...r, ...patch } : r
-      )
+      (atual ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r))
     );
   }
 
@@ -127,7 +128,7 @@ export default function PontuacaoPage() {
             ) : (
               regras.map((regra) => (
                 <div
-                  key={regra.eventType}
+                  key={regra.id}
                   className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 last:border-b-0 last:pb-0"
                 >
                   <label className="flex min-w-48 flex-1 cursor-pointer items-center gap-3">
@@ -135,12 +136,17 @@ export default function PontuacaoPage() {
                       type="checkbox"
                       checked={regra.active}
                       onChange={(e) =>
-                        mudarRegra(regra.eventType, { active: e.target.checked })
+                        mudarRegra(regra.id, { active: e.target.checked })
                       }
                       className="size-4 accent-[#1D50DC]"
                     />
                     <span className="text-sm">
                       {regra.description ?? regra.eventType}
+                      {regra.eventType.startsWith("site_") ? (
+                        <span className="ml-2 rounded bg-accent px-1.5 py-0.5 text-xs text-primary">
+                          site
+                        </span>
+                      ) : null}
                       {!regra.active ? (
                         <span className="ml-2 text-xs text-muted-foreground">
                           (fora da conta)
@@ -153,7 +159,7 @@ export default function PontuacaoPage() {
                       type="number"
                       value={regra.points}
                       onChange={(e) =>
-                        mudarRegra(regra.eventType, {
+                        mudarRegra(regra.id, {
                           points: Number(e.target.value),
                         })
                       }
