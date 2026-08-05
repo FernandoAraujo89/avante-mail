@@ -51,16 +51,35 @@ export const TRIGGER_LABEL: Record<AutomationTriggerType, string> = {
   email_opened: "E-mail aberto",
   email_clicked: "Link clicado",
   whatsapp_replied: "Respondeu no WhatsApp",
+  lead_score_changed: "Lead mudou de faixa de pontuação",
   manual: "Manual",
 };
 
-/** Gatilhos que o motor realmente consome hoje (fase 1 do plano). */
+/**
+ * Gatilhos oferecidos na tela.
+ *
+ * ATENÇÃO: é MENOR que AUTOMATION_TRIGGER_TYPES de propósito. O motor casa
+ * qualquer tipo declarado contra os eventos (lib/automations/engine.ts), mas
+ * `email_opened`, `email_clicked` e `whatsapp_replied` seguem fora daqui desde
+ * a fase 1 — não por falta de suporte, e sim por decisão de produto que nunca
+ * foi revista. Quem for expor esses três: o motor já os consome, basta
+ * acrescentá-los nesta lista.
+ */
 export const TRIGGER_TYPES_DISPONIVEIS: AutomationTriggerType[] = [
   "tag_added",
   "tag_removed",
   "list_subscribed",
   "list_unsubscribed",
   "contact_created",
+  "lead_score_changed",
+];
+
+/** Faixas oferecidas no gatilho de pontuação. Vazio = qualquer mudança. */
+export const FAIXAS_DO_GATILHO: { valor: string; rotulo: string }[] = [
+  { valor: "", rotulo: "Qualquer mudança de faixa" },
+  { valor: "quente", rotulo: "Virou quente" },
+  { valor: "morno", rotulo: "Virou morno" },
+  { valor: "frio", rotulo: "Esfriou (virou frio)" },
 ];
 
 export const CONDITION_LABEL: Record<string, string> = {
@@ -254,6 +273,15 @@ export function resumoDoGatilho(
     case "list_subscribed":
     case "list_unsubscribed":
       return `${rotulo}: ${nome(catalogo.lists, c.listId)}`;
+    case "lead_score_changed": {
+      const faixa = texto(c.para);
+      // Sem faixa escolhida, o cartão precisa dizer que é QUALQUER mudança —
+      // senão "Lead mudou de faixa" parece configuração pela metade.
+      return faixa
+        ? FAIXAS_DO_GATILHO.find((f) => f.valor === faixa)?.rotulo ??
+            `${rotulo}: ${faixa}`
+        : `${rotulo}: qualquer faixa`;
+    }
     default:
       return rotulo;
   }

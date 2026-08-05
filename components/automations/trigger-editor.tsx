@@ -15,7 +15,12 @@ import {
 import type { TriggerDraft } from "@/lib/automations/arvore";
 import type { AutomationTriggerType } from "@/lib/db/schema";
 
-import { TRIGGER_LABEL, TRIGGER_TYPES_DISPONIVEIS, type Catalogo } from "./labels";
+import {
+  FAIXAS_DO_GATILHO,
+  TRIGGER_LABEL,
+  TRIGGER_TYPES_DISPONIVEIS,
+  type Catalogo,
+} from "./labels";
 
 // Gatilhos de entrada: vários por automação. Um contato entra UMA vez (a
 // reentrada é barrada no banco), então gatilho repetido não duplica percurso.
@@ -76,6 +81,37 @@ export function TriggerEditor({
                 }
                 placeholder="Ex.: lead-quente"
               />
+            </div>
+          ) : null}
+
+          {trigger.type === "lead_score_changed" ? (
+            <div className="grid gap-1.5">
+              <Label>Faixa</Label>
+              <Select
+                // "" no Select do Radix não é valor válido; "qualquer" é o
+                // rótulo interno e vira config vazia, que o motor lê como
+                // "casa com qualquer mudança".
+                value={String(trigger.config?.para ?? "qualquer")}
+                onValueChange={(para) =>
+                  atualizar(i, {
+                    config: para === "qualquer" ? {} : { para },
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FAIXAS_DO_GATILHO.map((f) => (
+                    <SelectItem
+                      key={f.valor || "qualquer"}
+                      value={f.valor || "qualquer"}
+                    >
+                      {f.rotulo}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           ) : null}
 

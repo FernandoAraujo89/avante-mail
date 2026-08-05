@@ -268,6 +268,12 @@ export const AUTOMATION_TRIGGER_TYPES = [
   "email_opened",
   "email_clicked",
   "whatsapp_replied",
+  // Fase F+ — o lead mudou de FAIXA de pontuação (frio/morno/quente). Só a
+  // virada de faixa vira evento, nunca a variação do número, então este
+  // gatilho não dispara a cada recálculo. E a reentrada é barrada pelo índice
+  // único (automation_id, contact_id): um lead que oscile na fronteira da
+  // faixa entra UMA vez, não a cada ida e volta.
+  "lead_score_changed",
   "manual",
 ] as const;
 export type AutomationTriggerType = (typeof AUTOMATION_TRIGGER_TYPES)[number];
