@@ -58,36 +58,70 @@ pediria um recálculo a cada recálculo.
 **É gatilho de automação** desde `12e2d99`, com escolha de faixa no editor
 ("virou quente", "esfriou", ou qualquer mudança).
 
-### Os estágios descrevem NUTRIÇÃO, não venda (05/08/2026)
+### Qualificação e etapa: o que o agente manda (05/08/2026)
 
-Migração: `scripts/migrate-estagios-nutricao.ts`.
+Migração: `scripts/migrate-etapas-e-qualificacao.ts`.
 
-O comercial trabalha no **Pipedrive**, sem integração com este sistema e sem
-previsão de ter. Estágios de venda (`novo/contatado/qualificado`) só poderiam
-ser preenchidos por quem tem a informação — e essa pessoa está na outra
-ferramenta. Ficariam eternamente desatualizados, afirmando um estado de venda
-que ninguém aqui conhece.
+Um **agente** conversa com o lead da campanha, qualifica, e manda para cá por
+webhook. Depois ele acompanha o lead no **Pipedrive** e avisa de novo quando o
+lead anda no funil. Não existe ponte de "entregar ao comercial": o lead já
+nasce lá.
 
-Os quatro estágios de hoje dizem o que **nós** fazemos:
+Duas informações, com donos diferentes:
 
-| Estágio | Quer dizer |
-|---|---|
-| `nutrindo` | recebendo nutrição; é onde todo lead entra |
-| `enviado` | entregue ao comercial como oportunidade (carimba `contacts.enviado_ao_comercial_em`) |
-| `cliente` | o comercial confirmou que fechou |
-| `descartado` | não era oportunidade, ou desistiu |
+| | Quem define | Onde mora | Por quê |
+|---|---|---|---|
+| **Qualificação** | playbook do SDR (nosso) | código (`components/leads/qualificacoes.ts`) | vocabulário nosso, estável; muda quando o playbook muda |
+| **Etapa** | funil do Pipedrive (deles) | tabela `lead_stages`, editável em `/leads/etapas` | muda quando o comercial quiser; como constante, cada etapa nova virava um deploy nosso — e até lá o webhook seria recusado |
 
-**"Prontos para enviar" é VISÃO derivada, não estágio** — `quente` +
-`nutrindo`, calculada em `/api/leads`. Como estágio, alguém teria de mover o
-lead à mão quando ele esquentasse, e no dia em que esquecesse a lista mentiria.
-Derivada, ela nunca desanda em relação à pontuação.
+**Os dois entram pela MESMA porta** (`/api/webhooks/entrada/{slug}`), com
+`qualification` e `stage` no mapeamento da origem. Reusar a porta traz junto
+autenticação, janela anti-repetição, log do corpo cru e reprocessamento — que
+seriam reescritos numa rota nova.
 
-**A entrega não tem caminho próprio de notificação:** o botão grava o estágio,
-sai `lead_stage_changed`, e uma automação com esse gatilho + passo de webhook
-(fase F) avisa o Make/CRM. Um caminho só, reusando o que já existe.
+**Eles SOBRESCREVEM, ao contrário de nome e empresa** (que só completam
+lacunas). São o motivo do webhook existir: o agente sabe mais, e mais recente,
+sobre os dois do que qualquer coisa daqui.
 
-Vocabulário separado de propósito: **faixa é temperatura** (o sistema calcula),
-**estágio é propósito** (uma pessoa decide).
+**Aceitam texto de conversa, não só slug.** "Sim: Experiente" vira
+`experiente`; "Passou por apresentação de produto" vira
+`apresentacao-de-produto`. O agente manda o que ele fala; recusar por causa de
+um acento perderia a informação inteira.
+
+**TRAVA: contato que não é lead não vira lead por webhook.** Um parceiro que
+aparecesse num payload do agente teria `stage` preenchido e sairia calado de
+toda campanha de parceiro. A entrega é aceita, o resto é aplicado, e a recusa
+fica registrada em `webhook_deliveries.resultado.recusas` — mesmo princípio da
+trava 1: o erro precisa aparecer, não sumir.
+
+**Etapa marcada como "encerra a nutrição"** (ex.: Comprou) chama
+`encerrarPercursosDoContato`. Mora na etapa, e não numa automação, porque é a
+única ação que nenhum passo sabe fazer — não existe "encerre os outros fluxos".
+
+**ORDEM: encerrar ANTES de emitir `lead_stage_changed`.** A automação que reage
+a "comprou" (marcar a tag de ganho, avisar alguém) precisa poder rodar; se o
+evento saísse primeiro, o percurso novo nasceria e morreria no mesmo instante.
+
+Tudo o mais que a etapa deva provocar é **automação**, com gatilho `Lead andou
+no funil` (com escolha de etapa) ou `Lead foi qualificado` (com escolha de
+qualificação). Um mecanismo só para cada coisa.
+
+**A etapa NÃO se muda pela tela.** Ela espelha o Pipedrive; um controle manual
+seria uma segunda fonte da verdade sobre o mesmo fato, e as duas divergiriam no
+primeiro dia em que alguém mexesse só de um lado.
+
+**A qualificação pontua.** Quatro regras semeadas em `lead_score_rules`, com
+`condition` por qualificação — Experiente 30, Alto Potencial 25, Intermediário
+15, Iniciante 8. Editáveis em `/leads/pontuacao` como qualquer outra regra.
+
+**Só as etapas que o usuário nomeou foram semeadas** (`qualificado`,
+`apresentacao-de-produto`, `comprou`). O resto do funil se cadastra na tela:
+inventar o funil dos outros é exatamente como a tela passa a mentir — já
+aconteceu com as páginas do site no rastreio, e o custo foi retrabalho.
+
+Três vocabulários convivem na ficha e não são a mesma coisa: **faixa** é
+temperatura (o sistema calcula), **qualificação** é quem o lead é (o agente
+decide), **etapa** é onde ele está no funil do Pipedrive.
 
 ### A regra que passou a valer (04/08/2026)
 
@@ -111,12 +145,14 @@ separados é o que impede tratar lead como parceiro.
 
 | Tela | O que faz |
 |---|---|
-| `/leads` | funil por estágio, busca, filtro por canal |
-| `/leads/[id]` | ficha: origem completa, linha do tempo, automações; muda estágio e converte em parceiro |
+| `/leads` | funil por ETAPA, busca, filtros por qualificação, faixa e canal |
+| `/leads/[id]` | ficha: qualificação (com o texto do playbook), etapa, origem completa, linha do tempo, automações; converte em parceiro |
+| `/leads/etapas` | cadastro das etapas do funil do Pipedrive |
 | `/leads/origens` | cadastro das origens de webhook, sem script |
 
 **Cadastro de origem pela tela:** nome (o endereço sai do nome, sem acento),
-mapeamento campo a campo, tags e estágio de entrada, chave de consentimento,
+mapeamento campo a campo (incluindo qualificação e etapa), tags, chave de
+consentimento,
 liga/desliga, token com giro, e as últimas 50 entregas cruas.
 
 Duas coisas que a tela ganhou e o script não tinha:
@@ -729,7 +765,8 @@ site, não só os canais próprios.
 **3. Demais parâmetros seguem a recomendação deste documento** — todos são
 dados, editáveis na tela depois, sem deploy:
 - estágios: `novo → contatado → qualificado → convertido/perdido` — **superado
-  em 05/08/2026**, ver "Os estágios descrevem NUTRIÇÃO" no ESTADO ATUAL;
+  em 05/08/2026**: viraram as ETAPAS do funil do Pipedrive, cadastráveis na
+  tela. Ver "Qualificação e etapa" no ESTADO ATUAL;
 - pontuação: a tabela da seção 6.2;
 - meia-vida do decaimento: 30 dias;
 - responsável: campo existe, atribuição opcional (balcão comum por padrão).

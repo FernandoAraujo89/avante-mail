@@ -18,8 +18,6 @@ import {
   contacts,
   getDb,
   lists,
-  LEAD_STAGES,
-  type LeadStage,
 } from "@/lib/db";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { ehLead, naoEhLead } from "@/lib/leads";
@@ -91,8 +89,11 @@ export async function GET(request: NextRequest) {
     }
     if (stage === "lead") conditions.push(ehLead());
     else if (stage === "contato") conditions.push(naoEhLead());
-    else if (stage && LEAD_STAGES.includes(stage as LeadStage)) {
-      conditions.push(eq(contacts.stage, stage as LeadStage));
+    else if (stage) {
+      // Sem lista fechada para validar: as etapas vêm da tabela e mudam com o
+      // funil do comercial. Uma etapa que não existe simplesmente não casa com
+      // ninguém — que é a resposta certa para um filtro obsoleto.
+      conditions.push(eq(contacts.stage, stage));
     }
     if (listFilterIds.length > 0) {
       conditions.push(

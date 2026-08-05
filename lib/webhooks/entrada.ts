@@ -8,12 +8,18 @@ import {
   lists,
   webhookDeliveries,
   webhookSources,
-  type LeadStage,
+  LEAD_QUALIFICATIONS,
+  type LeadQualification,
   type NewContact,
 } from "@/lib/db";
-import { ESTAGIO_INICIAL } from "@/components/leads/estagios";
+import { encerrarPercursosDoContato } from "@/lib/automations/engine";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { resolveListaDeLeads } from "@/lib/leads";
+import {
+  ETAPA_DE_ENTRADA,
+  resolverEtapa,
+  slugDaEtapa,
+} from "@/lib/leads/etapas";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, normalizeTags } from "@/lib/utils";
 
@@ -104,6 +110,10 @@ export interface CamposExtraidos {
   utmTerm: string | null;
   landingPage: string | null;
   referrer: string | null;
+  /** Qualificação do playbook do SDR, como o agente a mandou. */
+  qualification: string | null;
+  /** Etapa do funil do Pipedrive — slug ou rótulo por extenso. */
+  stage: string | null;
   tags: string[];
 }
 
@@ -121,7 +131,29 @@ const CAMPOS_DE_TEXTO = [
   "utmTerm",
   "landingPage",
   "referrer",
+  "qualification",
+  "stage",
 ] as const;
+
+/**
+ * Casa o que o agente mandou com uma qualificação do playbook.
+ *
+ * Aceita o slug (`alto_potencial`) e o rótulo escrito por extenso ("Promissor:
+ * Alto Potencial", "Sim: Experiente") — o agente manda texto de conversa, não
+ * identificador, e recusar por causa de um acento perderia a informação toda.
+ */
+export function resolverQualificacao(valor: string): LeadQualification | null {
+  const alvo = slugDaEtapa(valor).replace(/-/g, "_");
+  const direto = LEAD_QUALIFICATIONS.find((q) => q === alvo);
+  if (direto) return direto;
+  // "sim_experiente", "promissor_alto_potencial": o prefixo de resposta do
+  // agente vem junto. Basta terminar com o nome da qualificação.
+  return (
+    LEAD_QUALIFICATIONS.find(
+      (q) => alvo.endsWith(`_${q}`) || alvo.startsWith(`${q}_`)
+    ) ?? null
+  );
+}
 
 /** Aplica o mapeamento da origem sobre o payload. */
 export function extrairCampos(
@@ -237,22 +269,68 @@ export async function processarEntrada(args: {
 
   const tags = [...new Set([...normalizeTags(padroes.tags), ...campos.tags])];
   const listId = typeof padroes.listId === "string" ? padroes.listId : null;
-  const stage = (
-    typeof padroes.stage === "string" ? padroes.stage : ESTAGIO_INICIAL
-  ) as LeadStage;
   // O padrão do sistema é LIBERAR: o lead entra apto a receber, e a origem
   // bloqueia quando for o caso (`"consentimento": false` nos defaults) — por
   // exemplo uma lista comprada ou um formulário sem aviso de comunicação.
   const consentimento = padroes.consentimento !== false;
 
+  // O que a entrega PEDIU e não foi feito. Vai para o log: uma qualificação
+  // escrita errada precisa aparecer em algum lugar, senão o operador só vê um
+  // lead que "não recebeu a trilha certa" e não tem como descobrir por quê.
+  const recusas: Record<string, string> = {};
+
+  // ── Qualificação e etapa: é o AGENTE que manda ───────────────────────────
+  //
+  // Ao contrário de nome e empresa (que só completam lacunas), estes dois
+  // SOBRESCREVEM: eles são o motivo do webhook existir. O agente qualifica o
+  // lead e acompanha o funil no Pipedrive; o que ele diz é mais recente do que
+  // qualquer coisa daqui.
+  const qualificacaoPedida =
+    campos.qualification ??
+    (typeof padroes.qualification === "string" ? padroes.qualification : null);
+  const qualificacao = qualificacaoPedida
+    ? resolverQualificacao(qualificacaoPedida)
+    : null;
+  if (qualificacaoPedida && !qualificacao) {
+    recusas.qualificacao = qualificacaoPedida;
+  }
+
+  const etapaPedida =
+    campos.stage ??
+    (typeof padroes.stage === "string" ? padroes.stage : null);
+  const etapa = etapaPedida ? await resolverEtapa(etapaPedida) : null;
+  if (etapaPedida && !etapa) recusas.etapa = etapaPedida;
+
   let contactId: string;
   let acao: AcaoDaEntrega;
+  // A etapa que a entrega REALMENTE aplicou. Não é `etapa?.slug`: numa criação
+  // sem etapa no payload o lead vai para a etapa de entrada, e o log dizendo
+  // "null" mandaria quem investiga procurar um problema que não existe.
+  let etapaAplicada: string | null = null;
+  let percursosEncerrados = 0;
 
   if (existente) {
     acao = "atualizado";
     contactId = existente.id;
 
+    // TRAVA: contato que NÃO é lead não vira lead por webhook.
+    //
+    // Um parceiro que aparece num payload do agente teria o `stage` preenchido
+    // e, com isso, sairia calado de toda campanha de parceiro (é `stage` que
+    // define quem é lead — ver lib/leads.ts). Recusar e registrar é a mesma
+    // escolha da trava 1: o erro precisa aparecer, não sumir.
+    const ehLead = existente.stage !== null;
+    if (!ehLead && (qualificacao || etapa)) {
+      recusas.naoEhLead =
+        "contato já existe como parceiro/cliente; etapa e qualificação não foram aplicadas";
+    }
+
     const tagsDepois = [...new Set([...(existente.tags ?? []), ...tags])];
+    const mudarQualificacao =
+      ehLead && qualificacao !== null && qualificacao !== existente.qualification;
+    const mudarEtapa =
+      ehLead && etapa !== null && etapa.slug !== existente.stage;
+
     await db
       .update(contacts)
       .set({
@@ -262,10 +340,45 @@ export async function processarEntrada(args: {
         company: existente.company ?? campos.company,
         phone: existente.phone ?? telefone,
         tags: tagsDepois,
+        ...(mudarQualificacao
+          ? { qualification: qualificacao, qualifiedAt: new Date() }
+          : {}),
+        ...(mudarEtapa
+          ? { stage: etapa.slug, stageChangedAt: new Date() }
+          : {}),
       })
       .where(eq(contacts.id, existente.id));
 
     await emitTagDiff(existente.id, existente.tags, tagsDepois);
+
+    if (mudarQualificacao) {
+      await emitContactEvent("lead_qualified", contactId, {
+        de: existente.qualification,
+        qualificacao,
+      });
+    }
+
+    if (mudarEtapa) {
+      // ORDEM IMPORTA: encerrar ANTES de emitir o evento.
+      //
+      // "Comprou" para a nutrição, mas a automação que reage a "comprou"
+      // (marcar a tag de ganho, avisar alguém) precisa poder rodar. Se o
+      // evento saísse primeiro, o percurso novo nasceria e seria morto pelo
+      // encerramento no mesmo instante — e ninguém entenderia por quê.
+      etapaAplicada = etapa.slug;
+      percursosEncerrados = etapa.stopsNurturing
+        ? await encerrarPercursosDoContato(
+            contactId,
+            `etapa "${etapa.label}" encerra a nutrição`
+          )
+        : 0;
+
+      await emitContactEvent("lead_stage_changed", contactId, {
+        de: existente.stage,
+        para: etapa.slug,
+        origem: origem.slug,
+      });
+    }
   } else {
     acao = "criado";
     const novo: NewContact = {
@@ -279,7 +392,12 @@ export async function processarEntrada(args: {
       subscribed: consentimento,
       whatsappSubscribed: consentimento && telefone !== null,
       whatsappOptInAt: consentimento && telefone ? new Date() : null,
-      stage,
+      // Sem etapa no payload, o lead entra na etapa de entrada: ele existe e
+      // ainda não andou no funil do Pipedrive.
+      stage: etapa?.slug ?? ETAPA_DE_ENTRADA,
+      stageChangedAt: new Date(),
+      qualification: qualificacao,
+      qualifiedAt: qualificacao ? new Date() : null,
       sourceChannel: campos.sourceChannel ?? campos.utmSource,
       utmSource: campos.utmSource,
       utmMedium: campos.utmMedium,
@@ -294,12 +412,20 @@ export async function processarEntrada(args: {
 
     const [criado] = await db.insert(contacts).values(novo).returning();
     contactId = criado.id;
+    etapaAplicada = novo.stage ?? null;
 
     await emitContactEvent("contact_created", contactId, {
       origem: origem.slug,
       canal: novo.sourceChannel ?? null,
     });
     await emitTagDiff(contactId, [], tags);
+
+    if (qualificacao) {
+      await emitContactEvent("lead_qualified", contactId, {
+        de: null,
+        qualificacao,
+      });
+    }
   }
 
   // TRAVA 1: lead entra SÓ na lista de leads. O `listId` vem do defaults da
@@ -326,8 +452,11 @@ export async function processarEntrada(args: {
   const resultado = {
     acao,
     tags,
-    stage,
+    stage: etapaAplicada,
+    qualificacao,
     consentimento,
+    ...(percursosEncerrados > 0 ? { percursosEncerrados } : {}),
+    ...(Object.keys(recusas).length > 0 ? { recusas } : {}),
     listId: destino.listId,
     // Fica registrado o que a origem PEDIU e não foi feito: sem isto, uma
     // origem mal configurada só apareceria como leads sumidos da lista.

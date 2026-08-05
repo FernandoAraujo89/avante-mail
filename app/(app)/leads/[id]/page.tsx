@@ -4,8 +4,10 @@ import { ArrowLeft, Pencil } from "lucide-react";
 import { asc, desc, eq, isNull, ne, or } from "drizzle-orm";
 
 import { LeadAcoes } from "@/components/leads/lead-acoes";
+import { LeadQualificacao } from "@/components/leads/lead-qualificacao";
 import { LeadScoreCard } from "@/components/leads/lead-score-card";
-import { estagioInfo, estagioLabel } from "@/components/leads/estagios";
+import { qualificacaoInfo } from "@/components/leads/qualificacoes";
+import { etapaPorSlug, listarEtapas } from "@/lib/leads/etapas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +39,8 @@ const EVENTO_LABEL: Record<string, string> = {
   email_clicked: "Clicou num e-mail",
   whatsapp_replied: "Respondeu no WhatsApp",
   whatsapp_unsubscribed: "Pediu para sair do WhatsApp",
-  lead_stage_changed: "Mudou de estágio",
+  lead_stage_changed: "Andou no funil",
+  lead_qualified: "Qualificado pelo agente",
   lead_score_changed: "Mudou de faixa de pontuação",
   site_visited: "Visitou o site",
   site_event: "Ação no site",
@@ -45,13 +48,20 @@ const EVENTO_LABEL: Record<string, string> = {
 
 function detalheDoEvento(
   tipo: string,
-  payload: Record<string, unknown> | null
+  payload: Record<string, unknown> | null,
+  rotulos: Record<string, string>
 ): string | null {
+  const rotuloDaEtapa = (slug: string | null) =>
+    slug ? rotulos[slug] ?? slug : "—";
   if (!payload) return null;
   if (tipo === "lead_stage_changed") {
-    const de = estagioLabel((payload.de as string) ?? null);
-    const para = payload.para ? estagioLabel(payload.para as string) : "parceiro";
+    const de = rotuloDaEtapa((payload.de as string) ?? null);
+    const para = payload.para ? rotuloDaEtapa(payload.para as string) : "parceiro";
     return `${de} → ${para}`;
+  }
+  if (tipo === "lead_qualified") {
+    const q = qualificacaoInfo((payload.qualificacao as string) ?? null);
+    return q ? `${q.rotulo} · potencial ${q.potencial.toLowerCase()}` : null;
   }
   if (tipo === "lead_score_changed") {
     return `${payload.de ?? "—"} → ${payload.para} (${payload.score} pontos)`;
@@ -109,7 +119,8 @@ export default async function LeadPage({
     );
   }
 
-  const [eventos, envios, fluxos, listasDestino] = await Promise.all([
+  const [eventos, envios, fluxos, listasDestino, etapas, etapaAtual] =
+    await Promise.all([
     db
       .select({
         id: contactEvents.id,
@@ -160,7 +171,15 @@ export default async function LeadPage({
           isNull(listsTable.kind)
       )
       .orderBy(asc(listsTable.name)),
-  ]);
+      // Os rótulos das etapas vêm da tabela: a linha do tempo guarda o slug, e
+      // sem a tradução ela mostraria "apresentacao-de-produto" para o operador.
+      listarEtapas(true),
+      etapaPorSlug(lead.stage),
+    ]);
+
+  const rotulosDasEtapas = Object.fromEntries(
+    etapas.map((e) => [e.slug, e.label])
+  );
 
   const origem: { rotulo: string; valor: string | null }[] = [
     { rotulo: "Canal", valor: lead.sourceChannel },
@@ -195,9 +214,12 @@ export default async function LeadPage({
             lead.createdAt
           )}`}
         >
-          <Badge variant={estagioInfo(lead.stage)?.variante ?? "secondary"}>
-            {estagioLabel(lead.stage)}
-          </Badge>
+          {qualificacaoInfo(lead.qualification) ? (
+            <Badge variant={qualificacaoInfo(lead.qualification)!.variante}>
+              {qualificacaoInfo(lead.qualification)!.rotulo}
+            </Badge>
+          ) : null}
+          <Badge variant="secondary">{etapaAtual?.label ?? lead.stage}</Badge>
           {lead.subscribed ? (
             <Badge variant="success">Aceita e-mail</Badge>
           ) : (
@@ -216,11 +238,16 @@ export default async function LeadPage({
         <div className="grid gap-6">
           <LeadScoreCard leadId={lead.id} />
 
+          <LeadQualificacao
+            qualificacao={lead.qualification}
+            qualificadoEm={lead.qualifiedAt}
+            etapa={etapaAtual?.label ?? lead.stage}
+            etapaDesde={lead.stageChangedAt}
+            encerraNutricao={etapaAtual?.stopsNurturing ?? false}
+          />
+
           <LeadAcoes
             leadId={lead.id}
-            estagio={lead.stage}
-            faixa={lead.leadScoreBand}
-            enviadoEm={lead.enviadoAoComercialEm?.toISOString() ?? null}
             subscribed={lead.subscribed}
             listas={listasDestino}
           />
@@ -301,7 +328,8 @@ export default async function LeadPage({
                 {eventos.map((e) => {
                   const detalhe = detalheDoEvento(
                     e.type,
-                    e.payload as Record<string, unknown> | null
+                    e.payload as Record<string, unknown> | null,
+                    rotulosDasEtapas
                   );
                   return (
                     <li

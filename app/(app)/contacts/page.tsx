@@ -4,11 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { History, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 
-import {
-  ESTAGIOS,
-  estagioInfo,
-  estagioLabel,
-} from "@/components/leads/estagios";
+import { etapaLabel, type EtapaDto } from "@/components/leads/estagios";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,17 +57,18 @@ type ContactDto = {
 // Trava 3 (docs/plano-webhooks-leads.md, seção 5): lead e parceiro moram na
 // mesma tabela, então quem olha a tela precisa CONSEGUIR ver a diferença — sem
 // isso, a separação existe só no banco.
-// Os rótulos vêm de components/leads/estagios.ts: dois lugares definindo o
-// mesmo vocabulário divergiriam no primeiro dia em que alguém mudasse um só.
-const STAGE_FILTERS = [
-  { value: "all", label: "Leads e contatos" },
-  { value: "lead", label: "Somente leads" },
-  { value: "contato", label: "Somente contatos" },
-  ...ESTAGIOS.map((e) => ({
-    value: e.valor as string,
-    label: `Lead: ${e.rotulo.toLowerCase()}`,
-  })),
-];
+//
+// As etapas vêm da API, não de constante: elas espelham o funil do Pipedrive.
+function filtrosDeEstagio(etapas: EtapaDto[]) {
+  return [
+    { value: "all", label: "Leads e contatos" },
+    { value: "lead", label: "Somente leads" },
+    { value: "contato", label: "Somente contatos" },
+    ...etapas
+      .filter((e) => e.active)
+      .map((e) => ({ value: e.slug, label: `Etapa: ${e.label}` })),
+  ];
+}
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<ContactDto[] | null>(null);
@@ -80,6 +77,7 @@ export default function ContactsPage() {
   const [listFilter, setListFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
+  const [etapas, setEtapas] = useState<EtapaDto[]>([]);
   const [tag, setTag] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ContactDto | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -112,14 +110,21 @@ export default function ContactsPage() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  // Listas disponíveis para o filtro.
+  // Listas e etapas disponíveis para os filtros.
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/lists");
-        if (res.ok) setAvailableLists(await res.json());
+        const [listas, funil] = await Promise.all([
+          fetch("/api/lists"),
+          fetch("/api/leads/etapas"),
+        ]);
+        if (listas.ok) setAvailableLists(await listas.json());
+        if (funil.ok) {
+          const json = await funil.json();
+          setEtapas(Array.isArray(json?.etapas) ? json.etapas : []);
+        }
       } catch {
-        // silencioso: filtro de lista fica só com "todas"
+        // silencioso: os filtros ficam só com "todas"
       }
     })();
   }, []);
@@ -227,10 +232,10 @@ export default function ContactsPage() {
         </Select>
         <Select value={stageFilter} onValueChange={setStageFilter}>
           <SelectTrigger className="w-52">
-            <SelectValue placeholder="Estágio" />
+            <SelectValue placeholder="Etapa" />
           </SelectTrigger>
           <SelectContent>
-            {STAGE_FILTERS.map((option) => (
+            {filtrosDeEstagio(etapas).map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>
@@ -331,12 +336,8 @@ export default function ContactsPage() {
                         {contact.name}
                       </Link>
                       {contact.stage ? (
-                        <Badge
-                          variant={
-                            estagioInfo(contact.stage)?.variante ?? "secondary"
-                          }
-                        >
-                          {estagioLabel(contact.stage)}
+                        <Badge variant="info">
+                          {etapaLabel(etapas, contact.stage)}
                         </Badge>
                       ) : null}
                     </span>

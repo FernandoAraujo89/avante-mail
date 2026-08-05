@@ -58,31 +58,33 @@ export const BOUNCE_TYPES = ["hard", "soft"] as const;
 export type BounceType = (typeof BOUNCE_TYPES)[number];
 
 /**
- * Estágio do lead. Nulo = o contato não é lead.
+ * A ETAPA do lead espelha o funil do **Pipedrive** e chega por webhook — o
+ * agente que conversa com o lead acompanha o funil lá e nos avisa quando ele
+ * anda ("passou por apresentação de produto", "comprou").
  *
- * Descrevem o que ESTE sistema faz, não o funil de vendas. O comercial trabalha
- * no Pipedrive, sem integração com aqui — se os estágios espelhassem o funil
- * deles, seriam dois sistemas afirmando a mesma verdade e divergindo, com o
- * nosso sempre desatualizado porque ninguém atualiza duas telas.
+ * Por isso NÃO existe uma lista de etapas no código: o funil é do Pipedrive,
+ * muda quando o comercial quiser, e uma constante aqui exigiria deploy a cada
+ * mudança de processo alheio. As etapas vivem na tabela `lead_stages`, e
+ * `contacts.stage` guarda o slug de uma delas.
  *
- * Nosso papel é nutrir e medir engajamento; quando o lead esquenta, alguém
- * confere com o comercial e entrega. É isso que os quatro estágios registram.
- *
- * "Pronto para enviar" NÃO é estágio: é a visão derivada de quente + ainda
- * nutrindo. Como estágio, precisaria de alguém marcando à mão e dessincronizaria
- * da pontuação no primeiro decaimento.
+ * A QUALIFICAÇÃO (logo abaixo) é outra coisa: é vocabulário nosso, do playbook
+ * do SDR, e por isso mora no código.
  */
-export const LEAD_STAGES = [
-  /** Recebendo nutrição. É onde todo lead entra. */
-  "nutrindo",
-  /** Entregue ao comercial como oportunidade (ver enviadoAoComercialEm). */
-  "enviado",
-  /** O comercial confirmou que fechou. */
-  "cliente",
-  /** Não era oportunidade, ou desistiu. */
-  "descartado",
+
+/**
+ * Quem o lead é, segundo a qualificação do agente. Vem do playbook do SDR e
+ * chega no mesmo webhook de entrada.
+ *
+ * Diferente da etapa, isto é definição NOSSA e estável — muda quando o
+ * playbook muda, não quando o comercial mexe no funil.
+ */
+export const LEAD_QUALIFICATIONS = [
+  "experiente",
+  "intermediario",
+  "iniciante",
+  "alto_potencial",
 ] as const;
-export type LeadStage = (typeof LEAD_STAGES)[number];
+export type LeadQualification = (typeof LEAD_QUALIFICATIONS)[number];
 
 // Natureza da lista. Nulo = lista comum (parceiros). "leads" marca a lista de
 // leads, e é o que as travas contra disparo acidental consultam — o nome
@@ -110,6 +112,10 @@ export const CONTACT_EVENT_TYPES = [
   // de automações ignora o que nenhum gatilho declara, então adicionar o tipo
   // não mexe em nenhum fluxo em produção.
   "lead_stage_changed",
+  // O agente qualificou o lead (playbook do SDR). Vira evento porque é a
+  // matéria-prima de duas coisas: pontuar quem chega mais maduro, e disparar a
+  // trilha de nutrição certa para cada perfil.
+  "lead_qualified",
   // Mudança de FAIXA do Lead Score (frio→morno→quente). Só a virada de faixa
   // vira evento — o número muda o tempo todo pelo decaimento, e registrar cada
   // variação encheria a linha do tempo de ruído sem informar nada.
@@ -188,17 +194,16 @@ export const contacts = pgTable("contacts", {
 
   // ── Lead (docs/plano-webhooks-leads.md) ──────────────────────────────
   // Nulo = não é lead; é parceiro/contato comum. A separação operacional é
-  // feita pela LISTA "Leads"; este campo é o estágio dentro do funil.
-  stage: text("stage").$type<LeadStage>(),
-  /**
-   * Quando o lead foi entregue ao comercial. Coluna própria, e não deduzida do
-   * estágio, porque a data é a informação: "mandei esse faz três semanas e não
-   * ouvi nada" é a pergunta que o operador faz, e o estágio sozinho não
-   * responde. Sobrevive ao lead voltar para nutrição.
-   */
-  enviadoAoComercialEm: timestamp("enviado_ao_comercial_em", {
-    withTimezone: true,
-  }),
+  // feita pela LISTA "Leads"; este campo é a ETAPA do funil do Pipedrive,
+  // espelhada por webhook. Sem `$type` de propósito: as etapas são dado
+  // (tabela `lead_stages`), não constante de código.
+  stage: text("stage"),
+  /** Quando a etapa mudou pela última vez. */
+  stageChangedAt: timestamp("stage_changed_at", { withTimezone: true }),
+
+  /** Qualificação dada pelo agente (playbook do SDR). */
+  qualification: text("qualification").$type<LeadQualification>(),
+  qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
 
   // Origem do PRIMEIRO contato. Gravada uma vez e NÃO sobrescrita: quem chegou
   // pelo Instagram e voltou meses depois pelo Google continua sendo do
@@ -305,11 +310,12 @@ export const AUTOMATION_TRIGGER_TYPES = [
   // único (automation_id, contact_id): um lead que oscile na fronteira da
   // faixa entra UMA vez, não a cada ida e volta.
   "lead_score_changed",
-  // O lead mudou de estágio. É o que permite "quando eu marcar como enviado ao
-  // comercial, avise o Make" sem um segundo caminho de notificação: o botão
-  // grava o estágio, o evento sai, e a automação faz o resto com o passo de
-  // webhook que já existe.
+  // A etapa do funil mudou (webhook do agente, espelhando o Pipedrive). É o
+  // que troca a trilha de nutrição quando o lead avança lá — "passou por
+  // apresentação de produto" entra num fluxo diferente de quem nunca viu.
   "lead_stage_changed",
+  // O agente qualificou o lead. Faz a nutrição começar pelo perfil certo.
+  "lead_qualified",
   "manual",
 ] as const;
 export type AutomationTriggerType = (typeof AUTOMATION_TRIGGER_TYPES)[number];
@@ -471,6 +477,42 @@ export const automationRunSteps = pgTable(
 // docs/plano-webhooks-leads.md, fase A.
 
 /** Origem que pode nos chamar: um cenário do Make, um formulário, o site. */
+/**
+ * As etapas do funil do Pipedrive, espelhadas aqui.
+ *
+ * Tabela e não constante: o funil é do comercial e muda quando eles quiserem.
+ * Como constante, cada etapa nova no Pipedrive viraria um deploy nosso — e até
+ * lá o webhook do agente chegaria com uma etapa que o sistema recusa.
+ *
+ * Só as que o usuário nomeou são semeadas. As demais se cadastram em
+ * `/leads/etapas`: inventar o funil dos outros é como a tela passa a mentir.
+ */
+export const leadStages = pgTable("lead_stages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** O que o webhook manda. É o que `contacts.stage` guarda. */
+  slug: text("slug").notNull().unique(),
+  label: text("label").notNull(),
+  /** Ordem no funil — só apresentação; nada no motor depende dela. */
+  position: integer("position").notNull().default(0),
+  /**
+   * Chegar aqui ENCERRA os percursos de automação em andamento.
+   *
+   * Mora na etapa, e não numa automação, porque é a única ação que nenhum
+   * passo sabe fazer: não existe "encerre os outros fluxos". Tudo mais que a
+   * etapa deva provocar (tag, e-mail, trocar de fluxo) é automação com gatilho
+   * `lead_stage_changed` — um mecanismo só para cada coisa.
+   */
+  stopsNurturing: boolean("stops_nurturing").notNull().default(false),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+export type LeadStageRow = typeof leadStages.$inferSelect;
+
 export const webhookSources = pgTable(
   "webhook_sources",
   {

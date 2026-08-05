@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { FlaskConical, Inbox } from "lucide-react";
 
 import type { OrigemDto } from "@/app/(app)/leads/origens/page";
-import { ESTAGIO_INICIAL, ESTAGIOS } from "@/components/leads/estagios";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,13 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/format";
 import {
@@ -79,7 +71,6 @@ export function OrigemDialog({
   const [ativa, setAtiva] = useState(true);
   const [mapa, setMapa] = useState<Record<string, string>>({});
   const [tags, setTags] = useState("lead");
-  const [estagio, setEstagio] = useState(ESTAGIO_INICIAL);
   const [consentimento, setConsentimento] = useState(true);
 
   const [payload, setPayload] = useState(EXEMPLO_FORMATADO);
@@ -113,9 +104,6 @@ export function OrigemDialog({
       setTags(
         Array.isArray(padroes.tags) ? (padroes.tags as string[]).join(", ") : ""
       );
-      setEstagio(
-        typeof padroes.stage === "string" ? padroes.stage : ESTAGIO_INICIAL
-      );
       setConsentimento(padroes.consentimento !== false);
     } else {
       setNome("");
@@ -123,7 +111,6 @@ export function OrigemDialog({
       setAtiva(true);
       setMapa({ ...MAPEAMENTO_PADRAO });
       setTags("lead");
-      setEstagio(ESTAGIO_INICIAL);
       setConsentimento(true);
     }
   }, [aberto, origem]);
@@ -174,7 +161,7 @@ export function OrigemDialog({
         slug: slugEfetivo,
         active: ativa,
         mapping: mapa,
-        defaults: { tags, stage: estagio, consentimento },
+        defaults: { tags, consentimento },
       };
 
       const res = await fetch(
@@ -315,19 +302,15 @@ export function OrigemDialog({
               </p>
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="origem-estagio">Estágio inicial</Label>
-              <Select value={estagio} onValueChange={setEstagio}>
-                <SelectTrigger id="origem-estagio">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ESTAGIOS.map((e) => (
-                    <SelectItem key={e.valor} value={e.valor}>
-                      {e.rotulo}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Etapa no funil</Label>
+              {/* Não há o que escolher aqui: a etapa vem do payload (campo
+                  "Etapa no funil" do mapeamento) e, sem ela, o lead entra na
+                  etapa de entrada. Um select aqui competiria com o agente pelo
+                  mesmo campo. */}
+              <p className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
+                Vem do próprio payload, pelo mapeamento acima. Sem esse campo, o
+                lead entra na etapa de entrada e o agente o move depois.
+              </p>
             </div>
           </div>
 

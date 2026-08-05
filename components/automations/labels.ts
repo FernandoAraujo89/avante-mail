@@ -4,7 +4,8 @@ import type {
   AutomationTriggerType,
 } from "@/lib/db/schema";
 import type { StepDraft, TriggerDraft } from "@/lib/automations/arvore";
-import { estagioLabel } from "@/components/leads/estagios";
+import type { EtapaDto } from "@/components/leads/estagios";
+import { qualificacaoLabel } from "@/components/leads/qualificacoes";
 
 // Rótulos e resumos em português da tela de automações. Um lugar só: o cartão
 // do passo, o painel lateral e a lista mostram o mesmo texto.
@@ -53,7 +54,8 @@ export const TRIGGER_LABEL: Record<AutomationTriggerType, string> = {
   email_clicked: "Link clicado",
   whatsapp_replied: "Respondeu no WhatsApp",
   lead_score_changed: "Lead mudou de faixa de pontuação",
-  lead_stage_changed: "Lead mudou de estágio",
+  lead_stage_changed: "Lead andou no funil",
+  lead_qualified: "Lead foi qualificado",
   manual: "Manual",
 };
 
@@ -75,6 +77,7 @@ export const TRIGGER_TYPES_DISPONIVEIS: AutomationTriggerType[] = [
   "contact_created",
   "lead_score_changed",
   "lead_stage_changed",
+  "lead_qualified",
 ];
 
 /** Faixas oferecidas no gatilho de pontuação. Vazio = qualquer mudança. */
@@ -109,9 +112,16 @@ export interface Catalogo {
   templates: { id: string; name: string }[];
   /** bodyText alimenta a prévia da mensagem no cartão do passo. */
   waTemplates: { id: string; name: string; bodyText?: string }[];
+  /** Etapas do funil — vêm da tabela, não de constante (espelham o Pipedrive). */
+  etapas: EtapaDto[];
 }
 
-const VAZIO: Catalogo = { lists: [], templates: [], waTemplates: [] };
+const VAZIO: Catalogo = {
+  lists: [],
+  templates: [],
+  waTemplates: [],
+  etapas: [],
+};
 
 function nome(itens: { id: string; name: string }[], id: unknown): string {
   const achado = itens.find((i) => i.id === id);
@@ -287,10 +297,16 @@ export function resumoDoGatilho(
         : `${rotulo}: qualquer faixa`;
     }
     case "lead_stage_changed": {
-      const estagio = texto(c.para);
-      return estagio
-        ? `Lead virou "${estagioLabel(estagio)}"`
-        : `${rotulo}: qualquer estágio`;
+      const slug = texto(c.para);
+      if (!slug) return `${rotulo}: qualquer etapa`;
+      const etapa = catalogo.etapas.find((e) => e.slug === slug);
+      return `Lead chegou em "${etapa?.label ?? slug}"`;
+    }
+    case "lead_qualified": {
+      const q = texto(c.qualificacao);
+      return q
+        ? `Lead qualificado como "${qualificacaoLabel(q)}"`
+        : `${rotulo}: qualquer qualificação`;
     }
     default:
       return rotulo;

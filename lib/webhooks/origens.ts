@@ -11,7 +11,7 @@
  * token, que precisa de `crypto`, mora em `origens-token.ts`.
  */
 
-import { ESTAGIO_INICIAL } from "@/components/leads/estagios";
+import { ETAPA_DE_ENTRADA } from "@/components/leads/estagios";
 
 /** Campos que o mapeamento sabe preencher, na ordem em que a tela os mostra. */
 export const CAMPOS_MAPEAVEIS = [
@@ -33,6 +33,15 @@ export const CAMPOS_MAPEAVEIS = [
   { campo: "utmTerm", rotulo: "utm_term", exemplo: "utm_term" },
   { campo: "landingPage", rotulo: "Página de entrada", exemplo: "pagina" },
   { campo: "referrer", rotulo: "Referrer", exemplo: "referrer" },
+  // Os dois campos do agente. Aceitam o valor por extenso ("Sim: Experiente",
+  // "Passou por apresentação de produto"): o agente manda texto de conversa,
+  // não identificador, e recusar por causa de um acento perderia a informação.
+  {
+    campo: "qualification",
+    rotulo: "Qualificação",
+    exemplo: "qualificacao",
+  },
+  { campo: "stage", rotulo: "Etapa no funil", exemplo: "etapa" },
 ] as const;
 
 export type CampoMapeavel = (typeof CAMPOS_MAPEAVEIS)[number]["campo"];
@@ -53,7 +62,9 @@ export const PAYLOAD_DE_EXEMPLO = {
   utm_source: "instagram",
   utm_medium: "social",
   utm_campaign: "lancamento-agosto",
-  pagina: "https://avantejuntos.com.br/planos",
+  pagina: "https://avantejuntos.com.br/seja-um-parceiro",
+  qualificacao: "Sim: Experiente",
+  etapa: "Qualificado pelo agente",
 };
 
 /**
@@ -113,6 +124,10 @@ export interface DefaultsDaOrigem {
 }
 
 /**
+ * `qualification` e `stage` NÃO têm padrão útil aqui: os dois vêm do agente no
+ * payload. O `stage` só existe como rede — origem que não mapeia etapa põe o
+ * lead na etapa de entrada.
+ *
  * `listId` NÃO faz parte disto de propósito: desde a trava 1 (fase B) o destino
  * é sempre a lista de leads, então expor a escolha na tela seria oferecer uma
  * opção que o sistema ignora.
@@ -124,7 +139,7 @@ export function limparDefaults(
   const bruto = (valor ?? {}) as Record<string, unknown>;
   return {
     tags: tagsNormalizadas,
-    stage: typeof bruto.stage === "string" ? bruto.stage : ESTAGIO_INICIAL,
+    stage: typeof bruto.stage === "string" ? bruto.stage : ETAPA_DE_ENTRADA,
     // Padrão do sistema é LIBERAR; a origem bloqueia quando for lista comprada
     // ou formulário sem aviso de comunicação.
     consentimento: bruto.consentimento !== false,

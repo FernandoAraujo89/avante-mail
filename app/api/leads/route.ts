@@ -4,19 +4,17 @@ import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import {
   contacts,
   getDb,
+  LEAD_QUALIFICATIONS,
   LEAD_SCORE_BANDS,
-  LEAD_STAGES,
+  type LeadQualification,
   type LeadScoreBand,
-  type LeadStage,
 } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
+import { listarEtapas } from "@/lib/leads/etapas";
 import { lerConfiguracao } from "@/lib/leads/score";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
-
-/** Valor de filtro da visão derivada (ver o uso, abaixo). */
-const PRONTOS = "prontos";
 
 /**
  * A área de Leads (docs/plano-webhooks-leads.md, seção 8).
@@ -35,6 +33,11 @@ export async function GET(request: NextRequest) {
     const estagio = params.get("estagio")?.trim();
     const canal = params.get("canal")?.trim();
     const faixa = params.get("faixa")?.trim();
+    const qualificacao = params.get("qualificacao")?.trim();
+
+    // As etapas válidas vêm da tabela, não de uma constante: elas espelham o
+    // funil do Pipedrive e mudam sem passar por deploy.
+    const etapas = await listarEtapas(true);
 
     // Ser lead é a condição de base — nunca opcional nesta rota.
     const condicoes: SQL[] = [ehLead()];
@@ -49,17 +52,16 @@ export async function GET(request: NextRequest) {
       );
       if (alvo) condicoes.push(alvo);
     }
-    // "Prontos para enviar" é uma VISÃO derivada, não um estágio.
-    //
-    // Se fosse estágio, alguém teria de mover o lead à mão quando ele
-    // esquentasse — e o dia em que esquecesse, a lista mentiria. Derivando de
-    // quente + ainda-não-entregue, ela se mantém sozinha e nunca desanda em
-    // relação à pontuação, que é quem manda aqui.
-    if (estagio === PRONTOS) {
-      condicoes.push(eq(contacts.stage, "nutrindo"));
-      condicoes.push(eq(contacts.leadScoreBand, "quente"));
-    } else if (estagio && LEAD_STAGES.includes(estagio as LeadStage)) {
-      condicoes.push(eq(contacts.stage, estagio as LeadStage));
+    if (estagio && etapas.some((e) => e.slug === estagio)) {
+      condicoes.push(eq(contacts.stage, estagio));
+    }
+    if (
+      qualificacao &&
+      LEAD_QUALIFICATIONS.includes(qualificacao as LeadQualification)
+    ) {
+      condicoes.push(
+        eq(contacts.qualification, qualificacao as LeadQualification)
+      );
     }
     if (canal) condicoes.push(eq(contacts.sourceChannel, canal));
     if (faixa && LEAD_SCORE_BANDS.includes(faixa as LeadScoreBand)) {
@@ -87,7 +89,8 @@ export async function GET(request: NextRequest) {
         createdAt: contacts.createdAt,
         leadScore: contacts.leadScore,
         leadScoreBand: contacts.leadScoreBand,
-        enviadoAoComercialEm: contacts.enviadoAoComercialEm,
+        stageChangedAt: contacts.stageChangedAt,
+        qualification: contacts.qualification,
       })
       .from(contacts)
       .where(and(...condicoes))
@@ -108,18 +111,13 @@ export async function GET(request: NextRequest) {
       .where(ehLead())
       .groupBy(contacts.stage);
 
-    // Quantos estão quentes e ainda não foram entregues. É o número que faz a
-    // pessoa abrir a tela: a fila de oportunidade que o comercial ainda não viu.
-    const [pronto] = await db
-      .select({ total: count() })
+    // Distribuição por qualificação — "quem são os meus leads", que é a
+    // pergunta que a nutrição precisa responder para escolher a trilha.
+    const porQualificacao = await db
+      .select({ qualificacao: contacts.qualification, total: count() })
       .from(contacts)
-      .where(
-        and(
-          ehLead(),
-          eq(contacts.stage, "nutrindo"),
-          eq(contacts.leadScoreBand, "quente")
-        )
-      );
+      .where(ehLead())
+      .groupBy(contacts.qualification);
 
     // Canais existentes, para o filtro só oferecer o que existe de verdade.
     const canais = await db
@@ -144,8 +142,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       leads,
       config,
+      etapas,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
-      prontos: pronto?.total ?? 0,
+      qualificacoes: Object.fromEntries(
+        porQualificacao
+          .filter((r) => r.qualificacao)
+          .map((r) => [r.qualificacao as string, r.total])
+      ),
       faixas: Object.fromEntries(
         porFaixa.filter((r) => r.faixa).map((r) => [r.faixa as string, r.total])
       ),

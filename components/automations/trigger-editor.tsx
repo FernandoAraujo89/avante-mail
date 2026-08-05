@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ESTAGIOS } from "@/components/leads/estagios";
+import { QUALIFICACOES } from "@/components/leads/qualificacoes";
 import type { TriggerDraft } from "@/lib/automations/arvore";
 import type { AutomationTriggerType } from "@/lib/db/schema";
 
@@ -116,9 +116,37 @@ export function TriggerEditor({
             </div>
           ) : null}
 
+          {trigger.type === "lead_qualified" ? (
+            <div className="grid gap-1.5">
+              <Label>Qualificação</Label>
+              <Select
+                value={String(trigger.config?.qualificacao ?? "qualquer")}
+                onValueChange={(q) =>
+                  atualizar(i, {
+                    config: q === "qualquer" ? {} : { qualificacao: q },
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="qualquer">
+                    Qualquer qualificação
+                  </SelectItem>
+                  {QUALIFICACOES.map((q) => (
+                    <SelectItem key={q.valor} value={q.valor}>
+                      {q.rotulo}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           {trigger.type === "lead_stage_changed" ? (
             <div className="grid gap-1.5">
-              <Label>Passou a ser</Label>
+              <Label>Chegou em</Label>
               <Select
                 value={String(trigger.config?.para ?? "qualquer")}
                 onValueChange={(para) =>
@@ -132,11 +160,11 @@ export function TriggerEditor({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="qualquer">
-                    Qualquer mudança de estágio
+                    Qualquer etapa
                   </SelectItem>
-                  {ESTAGIOS.map((e) => (
-                    <SelectItem key={e.valor} value={e.valor}>
-                      {e.rotulo}
+                  {catalogo.etapas.map((e) => (
+                    <SelectItem key={e.slug} value={e.slug}>
+                      {e.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -185,8 +213,8 @@ export function TriggerEditor({
               o select de baixo e os dois campos parariam de se alinhar. */}
           {trigger.type === "lead_stage_changed" ? (
             <p className="text-xs text-muted-foreground sm:col-span-3">
-              É assim que se avisa o CRM na entrega: gatilho em &ldquo;Enviado ao
-              comercial&rdquo; com um passo de webhook.
+              A etapa chega pelo webhook do agente, espelhando o Pipedrive. É
+              assim que se troca a trilha de nutrição quando o lead avança lá.
             </p>
           ) : null}
         </div>

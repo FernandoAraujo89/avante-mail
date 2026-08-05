@@ -60,6 +60,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     lists: [],
     templates: [],
     waTemplates: [],
+    etapas: [],
   });
   const [waTemplates, setWaTemplates] = useState<WaTemplateOption[] | null>(null);
 
@@ -127,15 +128,17 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
   useEffect(() => {
     (async () => {
       try {
-        const [listas, modelos, wa] = await Promise.all([
+        const [listas, modelos, wa, etapas] = await Promise.all([
           fetch("/api/lists").then((r) => r.json()),
           fetch("/api/templates").then((r) => r.json()),
           fetch("/api/whatsapp-templates").then((r) => r.json()),
+          fetch("/api/leads/etapas").then((r) => r.json()),
         ]);
         setCatalogo({
           lists: Array.isArray(listas) ? listas : [],
           templates: Array.isArray(modelos) ? modelos : [],
           waTemplates: Array.isArray(wa) ? wa : [],
+          etapas: Array.isArray(etapas?.etapas) ? etapas.etapas : [],
         });
         setWaTemplates(Array.isArray(wa) ? wa : []);
       } catch {

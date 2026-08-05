@@ -244,6 +244,38 @@ async function encerrar(
     .where(eq(automationRuns.id, runId));
 }
 
+/**
+ * Encerra TODOS os percursos em andamento de um contato.
+ *
+ * Existe porque nenhum passo sabe fazer isso — um fluxo só encerra a si mesmo.
+ * Quem chama é a etapa do funil marcada como "encerra a nutrição" (o lead
+ * comprou, ou saiu): daí em diante ele não pode continuar recebendo a régua de
+ * quem ainda está decidindo.
+ *
+ * Devolve quantos parou, para o log da entrega poder dizer o que aconteceu.
+ */
+export async function encerrarPercursosDoContato(
+  contactId: string,
+  motivo: string
+): Promise<number> {
+  const parados = await getDb()
+    .update(automationRuns)
+    .set({
+      status: "stopped",
+      stoppedReason: motivo,
+      nextRunAt: null,
+      finishedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(automationRuns.contactId, contactId),
+        inArray(automationRuns.status, ["running", "waiting"])
+      )
+    )
+    .returning({ id: automationRuns.id });
+  return parados.length;
+}
+
 async function registrar(
   runId: string,
   stepId: string,

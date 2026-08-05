@@ -7,6 +7,7 @@ import {
   BarChart3,
   FileCode2,
   Gauge,
+  GitBranch,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -55,6 +56,7 @@ const NAV_GROUPS: {
     items: [
       { href: "/leads", label: "Gestão de leads", icon: Magnet },
       { href: "/leads/pontuacao", label: "Pontuação", icon: Gauge },
+      { href: "/leads/etapas", label: "Etapas do funil", icon: GitBranch },
       { href: "/leads/rastreio", label: "Rastreio do site", icon: Radar },
       { href: "/leads/origens", label: "Origens (webhook)", icon: Webhook },
     ],

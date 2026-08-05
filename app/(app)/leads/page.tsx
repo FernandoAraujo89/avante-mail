@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Flame, Gauge, Magnet, Search, Webhook } from "lucide-react";
+import { Gauge, ListChecks, Magnet, Search, Webhook } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -26,23 +26,24 @@ import {
 } from "@/components/ui/table";
 import { BarraDeCalor } from "@/components/leads/barra-de-calor";
 import {
-  ESTAGIOS,
-  estagioInfo,
-  estagioLabel,
+  etapaLabel,
   FAIXAS,
   faixaInfo,
+  type EtapaDto,
   type LeadDto,
 } from "@/components/leads/estagios";
+import {
+  QUALIFICACOES,
+  qualificacaoInfo,
+} from "@/components/leads/qualificacoes";
 import { formatDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 
-/** Precisa bater com o `PRONTOS` de app/api/leads/route.ts. */
-const PRONTOS = "prontos";
-
 interface Resposta {
   leads: LeadDto[];
+  etapas: EtapaDto[];
   funil: Record<string, number>;
-  prontos: number;
+  qualificacoes: Record<string, number>;
   faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
   config: {
@@ -60,6 +61,7 @@ export default function LeadsPage() {
   const [estagio, setEstagio] = useState("todos");
   const [canal, setCanal] = useState("todos");
   const [faixa, setFaixa] = useState("todas");
+  const [qualificacao, setQualificacao] = useState("todas");
 
   const carregar = useCallback(async () => {
     try {
@@ -69,6 +71,7 @@ export default function LeadsPage() {
       if (estagio !== "todos") params.set("estagio", estagio);
       if (canal !== "todos") params.set("canal", canal);
       if (faixa !== "todas") params.set("faixa", faixa);
+      if (qualificacao !== "todas") params.set("qualificacao", qualificacao);
 
       const res = await fetch(`/api/leads?${params.toString()}`);
       const json = await res.json();
@@ -77,8 +80,9 @@ export default function LeadsPage() {
     } catch (err) {
       setDados({
         leads: [],
+        etapas: [],
         funil: {},
-        prontos: 0,
+        qualificacoes: {},
         faixas: {},
         canais: [],
         config: {
@@ -90,7 +94,7 @@ export default function LeadsPage() {
       });
       setErro(err instanceof Error ? err.message : String(err));
     }
-  }, [busca, estagio, canal, faixa]);
+  }, [busca, estagio, canal, faixa, qualificacao]);
 
   useEffect(() => {
     const timer = setTimeout(carregar, 300);
@@ -117,6 +121,12 @@ export default function LeadsPage() {
           </Link>
         </Button>
         <Button variant="outline" asChild>
+          <Link href="/leads/etapas">
+            <ListChecks />
+            Etapas do funil
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
           <Link href="/leads/origens">
             <Webhook />
             Origens (webhook)
@@ -124,38 +134,12 @@ export default function LeadsPage() {
         </Button>
       </PageHeader>
 
-      {/* "Prontos para enviar" ganha a linha inteira e vem antes do ciclo de
-          propósito: é a única pergunta acionável da tela — quem já esquentou o
-          bastante para valer uma conversa com o comercial. O resto é contexto.
+      {/* O funil do Pipedrive, espelhado. A contagem é da base inteira, não do
+          filtro — é o "onde estão meus leads", e encolher junto com a busca não
+          responderia isso.
 
-          O número é derivado (quente + ainda nutrindo), então ele nunca fica
-          desatualizado em relação à pontuação; não há nada para alguém lembrar
-          de mover à mão. */}
-      <button
-        type="button"
-        onClick={() => setEstagio(PRONTOS)}
-        className={`mb-3 flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-4 py-3 text-left transition-colors ${
-          estagio === PRONTOS
-            ? "border-destructive bg-destructive/10"
-            : "border-destructive/40 bg-destructive/5 hover:border-destructive"
-        }`}
-      >
-        <Flame className="size-5 shrink-0 text-destructive" />
-        <span className="text-2xl font-bold tabular-nums text-destructive-hover">
-          {dados?.prontos ?? 0}
-        </span>
-        <span className="text-sm font-medium">
-          {(dados?.prontos ?? 0) === 1
-            ? "pronto para enviar ao comercial"
-            : "prontos para enviar ao comercial"}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          Quentes que ainda estão em nutrição
-        </span>
-      </button>
-
-      {/* O ciclo: a contagem é da base inteira, não do filtro — é o "onde estão
-          meus leads", e encolher junto com a busca não responderia isso. */}
+          As colunas vêm da tabela de etapas, não de uma constante: quem manda
+          no funil é o comercial, e a tela precisa acompanhar sem deploy. */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <button
           type="button"
@@ -169,23 +153,32 @@ export default function LeadsPage() {
           <p className="text-xs text-muted-foreground">Todos</p>
           <p className="mt-1 text-2xl font-bold tabular-nums">{totalNoFunil}</p>
         </button>
-        {ESTAGIOS.map((e) => (
-          <button
-            key={e.valor}
-            type="button"
-            onClick={() => setEstagio(e.valor)}
-            className={`rounded-lg border px-4 py-3 text-left transition-colors ${
-              estagio === e.valor
-                ? "border-primary bg-accent"
-                : "border-border bg-card hover:border-muted-foreground/40"
-            }`}
-          >
-            <p className="text-xs text-muted-foreground">{e.rotulo}</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">
-              {dados?.funil[e.valor] ?? 0}
-            </p>
-          </button>
-        ))}
+        {(dados?.etapas ?? [])
+          // Etapa desativada só aparece se ainda tiver alguém dentro — senão a
+          // tela mostraria coluna vazia de um processo que não existe mais.
+          .filter((e) => e.active || (dados?.funil[e.slug] ?? 0) > 0)
+          .map((e) => (
+            <button
+              key={e.slug}
+              type="button"
+              onClick={() => setEstagio(e.slug)}
+              className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                estagio === e.slug
+                  ? "border-primary bg-accent"
+                  : "border-border bg-card hover:border-muted-foreground/40"
+              }`}
+            >
+              <p className="text-xs text-muted-foreground">{e.label}</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">
+                {dados?.funil[e.slug] ?? 0}
+              </p>
+              {e.stopsNurturing ? (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  encerra a nutrição
+                </p>
+              ) : null}
+            </button>
+          ))}
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -207,6 +200,19 @@ export default function LeadsPage() {
             {FAIXAS.map((f) => (
               <SelectItem key={f.valor} value={f.valor}>
                 {f.rotulo} ({dados?.faixas?.[f.valor] ?? 0})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={qualificacao} onValueChange={setQualificacao}>
+          <SelectTrigger className="w-52">
+            <SelectValue placeholder="Qualificação" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas as qualificações</SelectItem>
+            {QUALIFICACOES.map((q) => (
+              <SelectItem key={q.valor} value={q.valor}>
+                {q.rotulo} ({dados?.qualificacoes?.[q.valor] ?? 0})
               </SelectItem>
             ))}
           </SelectContent>
@@ -243,9 +249,7 @@ export default function LeadsPage() {
             <p className="text-sm text-muted-foreground">
               {totalNoFunil === 0
                 ? "Nenhum lead ainda. Ligue uma origem de webhook para começar a receber."
-                : estagio === PRONTOS
-                  ? "Ninguém quente o bastante ainda. A nutrição segue rodando — quando alguém passar do limiar, aparece aqui."
-                  : "Nenhum lead com os filtros atuais."}
+                : "Nenhum lead com os filtros atuais."}
             </p>
             {totalNoFunil === 0 ? (
               <Button variant="outline" asChild>
@@ -262,7 +266,8 @@ export default function LeadsPage() {
               <TableRow>
                 <TableHead>Lead</TableHead>
                 <TableHead>Pontuação</TableHead>
-                <TableHead>Estágio</TableHead>
+                <TableHead>Qualificação</TableHead>
+                <TableHead>Etapa</TableHead>
                 <TableHead>Origem</TableHead>
                 <TableHead>Entrou em</TableHead>
               </TableRow>
@@ -306,12 +311,25 @@ export default function LeadsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={estagioInfo(lead.stage)?.variante ?? "secondary"}>
-                      {estagioLabel(lead.stage)}
-                    </Badge>
-                    {lead.enviadoAoComercialEm ? (
+                    {qualificacaoInfo(lead.qualification) ? (
+                      <Badge
+                        variant={qualificacaoInfo(lead.qualification)!.variante}
+                      >
+                        {qualificacaoInfo(lead.qualification)!.rotulo}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        sem qualificação
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm">
+                      {etapaLabel(dados?.etapas ?? [], lead.stage)}
+                    </span>
+                    {lead.stageChangedAt ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        em {formatDate(lead.enviadoAoComercialEm)}
+                        desde {formatDate(lead.stageChangedAt)}
                       </p>
                     ) : null}
                   </TableCell>

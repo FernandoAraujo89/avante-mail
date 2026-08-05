@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 
-import {
-  contactLists,
-  contacts,
-  getDb,
-  LEAD_STAGES,
-  lists,
-  type LeadStage,
-} from "@/lib/db";
+import { contactLists, contacts, getDb, lists } from "@/lib/db";
 import { emitContactEvent, emitListDiff } from "@/lib/events";
 import { idsDasListasDeLeads } from "@/lib/leads";
 import { errorMessage } from "@/lib/utils";
@@ -18,15 +11,17 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 
 /**
- * Ações da ficha do lead: mudar de estágio e converter em parceiro.
+ * A ação da ficha do lead: converter em parceiro.
  *
- * Estágio aqui é o que NÓS fazemos com o lead (nutrindo → enviado ao comercial
- * → virou cliente / descartado), não o funil de vendas: esse vive no Pipedrive
- * e não conversa com este sistema.
+ * A ETAPA do funil NÃO se muda aqui de propósito. Ela espelha o Pipedrive e
+ * chega pelo webhook do agente; um controle manual seria uma segunda fonte da
+ * verdade sobre o mesmo fato, e as duas divergiriam no primeiro dia em que
+ * alguém mexesse só de um lado. Etapa errada se corrige no Pipedrive, e o
+ * agente reenvia.
  *
- * As duas mexem em `contacts.stage`, que é o que define quem é lead — e por
- * tabela quem entra ou não em campanha (a trava 2 da fase B). Por isso ficam
- * nesta rota, e não soltas no PATCH genérico de contato.
+ * Converter mexe em `contacts.stage`, que é o que define quem é lead — e por
+ * tabela quem entra ou não em campanha (a trava 2 da fase B). Por isso fica
+ * nesta rota, e não solta no PATCH genérico de contato.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
@@ -126,37 +121,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       });
     }
 
-    // ── Mudar de estágio ─────────────────────────────────────────────────
-    const stage = typeof body.stage === "string" ? body.stage : "";
-    if (!LEAD_STAGES.includes(stage as LeadStage)) {
-      return NextResponse.json(
-        { error: "Estágio inválido." },
-        { status: 400 }
-      );
-    }
-    if (stage === lead.stage) {
-      return NextResponse.json({ ok: true, stage, semMudanca: true });
-    }
-
-    // Entrar em "enviado" carimba a data — inclusive quando o lead já esteve
-    // lá antes e voltou para nutrição: o que interessa é a entrega mais
-    // recente, que é a que ainda espera resposta do comercial. Sair de
-    // "enviado" NÃO apaga o carimbo; a entrega aconteceu, e apagar seria
-    // reescrever o histórico.
-    await db
-      .update(contacts)
-      .set({
-        stage: stage as LeadStage,
-        ...(stage === "enviado" ? { enviadoAoComercialEm: new Date() } : {}),
-      })
-      .where(eq(contacts.id, id));
-
-    await emitContactEvent("lead_stage_changed", id, {
-      de: lead.stage,
-      para: stage,
-    });
-
-    return NextResponse.json({ ok: true, stage });
+    return NextResponse.json(
+      {
+        error:
+          "A etapa do funil vem do Pipedrive pelo webhook do agente e não se altera por aqui.",
+      },
+      { status: 400 }
+    );
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

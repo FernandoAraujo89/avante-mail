@@ -32,6 +32,7 @@ import {
   type MetricaDoPasso,
 } from "@/lib/automations/relatorio";
 import { automations, getDb, lists, templates, whatsappTemplates } from "@/lib/db";
+import { listarEtapas } from "@/lib/leads/etapas";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -90,6 +91,7 @@ export async function AutomationReport({ id }: { id: string }) {
     waTemplates: await db
       .select({ id: whatsappTemplates.id, name: whatsappTemplates.name })
       .from(whatsappTemplates),
+    etapas: await listarEtapas(true),
   };
 
   const { resumo, passos } = relatorio;
