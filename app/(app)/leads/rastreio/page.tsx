@@ -42,6 +42,22 @@ interface Dados {
   ultimaVisita: string | null;
   recusas: Recusa[];
   visitasNaSemana: number;
+  cargas: { hoje: number; ultimos7dias: number };
+}
+
+/**
+ * Os quatro estados possíveis, na ordem em que se resolvem. Cada um tem um dono
+ * diferente — e é por isso que a tela não pode dizer só "nada chegou": quem
+ * precisa agir muda conforme o estado.
+ */
+type Situacao = "sem-origem" | "sem-tag" | "calado" | "recebendo";
+
+function diagnosticar(d: Dados | null): Situacao | null {
+  if (!d) return null;
+  if (!d.ativo) return "sem-origem";
+  if (d.cargas.ultimos7dias === 0) return "sem-tag";
+  if (!d.ultimaVisita) return "calado";
+  return "recebendo";
 }
 
 /** O motivo técnico traduzido para quem vai consertar. */
@@ -126,9 +142,35 @@ export default function RastreioPage() {
     }
   }
 
-  const chegando = dados?.ultimaVisita
-    ? Date.now() - new Date(dados.ultimaVisita).getTime() < 7 * 24 * 3600 * 1000
-    : false;
+  const situacao = diagnosticar(dados);
+
+  // Cada estado com o texto de quem age nele. O erro que esta tela precisa
+  // evitar é dizer "a tag pode não ter sido colada" quando a tag ESTÁ lá e o
+  // problema é outro — manda o time do site procurar defeito onde não há.
+  const TEXTO: Record<Situacao, { titulo: string; detalhe: string }> = {
+    "sem-origem": {
+      titulo: "Rastreio desligado",
+      detalhe:
+        "Nenhuma origem configurada no servidor (SITE_TRACK_ORIGINS). Nada é rastreado até isso existir.",
+    },
+    "sem-tag": {
+      titulo: "A tag não está carregando",
+      detalhe:
+        "O script não foi baixado nenhuma vez nos últimos 7 dias — sinal de que a tag não está publicada no site. É com o time do site.",
+    },
+    calado: {
+      titulo: "A tag está no ar, mas o rastreio está calado",
+      detalhe: `O script carregou ${dados?.cargas.ultimos7dias ?? 0} vez(es) nos últimos 7 dias, e nenhuma visita chegou. O script só envia depois que o site chamar av('consentimento', true) — enquanto isso ele fica inerte de propósito.`,
+    },
+    recebendo: {
+      titulo: "Recebendo visitas",
+      detalhe: `Última visita: ${
+        dados?.ultimaVisita ? formatDateTime(dados.ultimaVisita) : "—"
+      } · ${dados?.visitasNaSemana ?? 0} nos últimos 7 dias · o script carregou ${
+        dados?.cargas.ultimos7dias ?? 0
+      } vez(es) no período.`,
+    },
+  };
 
   return (
     <>
@@ -151,37 +193,36 @@ export default function RastreioPage() {
         </div>
       ) : null}
 
-      {/* Situação: é o alarme de "a tag caiu e ninguém percebeu". */}
+      {/* Situação: o alarme de "parou de chegar e ninguém percebeu" — e, mais
+          importante, de QUEM é o próximo passo. */}
       <Card className="mb-6">
         <CardContent className="flex flex-wrap items-center justify-between gap-4 p-6">
           <div className="flex items-center gap-3">
             <span
               className={`flex size-10 items-center justify-center rounded-full ${
-                chegando ? "bg-success-light/40" : "bg-muted"
+                situacao === "recebendo"
+                  ? "bg-success-light/40"
+                  : situacao === "calado"
+                    ? "bg-warning-light/40"
+                    : "bg-muted"
               }`}
             >
               <Radio
-                className={`size-5 ${chegando ? "text-success-dark" : "text-muted-foreground"}`}
+                className={`size-5 ${
+                  situacao === "recebendo"
+                    ? "text-success-dark"
+                    : situacao === "calado"
+                      ? "text-warning-dark"
+                      : "text-muted-foreground"
+                }`}
               />
             </span>
-            <div>
+            <div className="max-w-2xl">
               <p className="font-medium">
-                {!dados
-                  ? "Carregando..."
-                  : !dados.ativo
-                    ? "Rastreio inerte"
-                    : chegando
-                      ? "Recebendo visitas"
-                      : "Nenhuma visita recebida ainda"}
+                {situacao ? TEXTO[situacao].titulo : "Carregando..."}
               </p>
               <p className="text-sm text-muted-foreground">
-                {!dados
-                  ? ""
-                  : !dados.ativo
-                    ? "Nenhuma origem configurada no servidor (SITE_TRACK_ORIGINS) — nada é rastreado até isso existir."
-                    : dados.ultimaVisita
-                      ? `Última visita: ${formatDateTime(dados.ultimaVisita)} · ${dados.visitasNaSemana} nos últimos 7 dias`
-                      : "A tag pode não ter sido colada, ou o site ainda não chamou o consentimento."}
+                {situacao ? TEXTO[situacao].detalhe : ""}
               </p>
             </div>
           </div>
@@ -196,6 +237,34 @@ export default function RastreioPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* Só no estado "calado": é onde a decisão trava, e a tela precisa dizer
+          exatamente o que falta em vez de deixar parecer defeito nosso. */}
+      {situacao === "calado" ? (
+        <Card className="mb-6 border-warning-dark/30 bg-warning-light/20">
+          <CardContent className="p-6">
+            <p className="font-medium text-warning-dark">
+              O que falta para começar a receber
+            </p>
+            <p className="mt-1 text-sm text-warning-dark/90">
+              A tag está publicada e funcionando — o script foi baixado{" "}
+              {dados?.cargas.ultimos7dias} vez(es) nos últimos 7 dias. O que não
+              existe é o consentimento: enquanto o site não chamar{" "}
+              <code className="rounded bg-warning-light/60 px-1">
+                av(&apos;consentimento&apos;, true)
+              </code>
+              , o script observa e não envia nada. É assim por decisão de
+              projeto, não por defeito.
+            </p>
+            <p className="mt-2 text-sm text-warning-dark/90">
+              Se o site ainda não tem banner de cookies, essa é uma decisão de
+              base legal antes de ser técnica — o rastreio identifica a pessoa
+              (nome e e-mail já estão na nossa base), o que é mais forte do que
+              a analítica anônima que a maioria dos sites usa.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -237,8 +306,34 @@ export default function RastreioPage() {
                 <code className="rounded bg-warning-light/60 px-1">
                   av(&apos;consentimento&apos;, false)
                 </code>
-                . Sem isso o rastreio fica calado — e é assim mesmo que deve
-                ser.
+                .
+              </p>
+              {/* As duas armadilhas reais, aprendidas na instalação. Quem lê
+                  esta tela é quem vai passar a instrução ao time do site. */}
+              <p className="mt-2">
+                <span className="font-medium">Em toda página</span>, não só no
+                clique do botão. Se o banner já sabe que a pessoa aceitou antes,
+                ele precisa chamar de novo a cada carregamento — o script guarda
+                o “não”, nunca o “sim”, para uma revogação feita no banner
+                chegar até aqui.
+              </p>
+              <p className="mt-2">
+                O valor tem que ser o booleano{" "}
+                <code className="rounded bg-warning-light/60 px-1">true</code>.
+                A string{" "}
+                <code className="rounded bg-warning-light/60 px-1">
+                  &apos;true&apos;
+                </code>{" "}
+                ou uma variável que chegue vazia contam como{" "}
+                <span className="font-medium">recusa</span>, de propósito: erro
+                de ligação aparece como “não coleta”, nunca como coleta
+                silenciosa.
+              </p>
+              <p className="mt-2">
+                Não bloqueie o script atrás do consentimento no gerenciador de
+                tags. Ele precisa carregar sempre para capturar o identificador
+                que vem na URL e limpá-lo da barra de endereço — já nasce
+                calado.
               </p>
             </div>
 
@@ -353,6 +448,11 @@ export default function RastreioPage() {
             <CardTitle>Chamadas recusadas</CardTitle>
           </CardHeader>
           <CardContent>
+            <p className="mb-3 text-xs text-muted-foreground">
+              O que bateu no endereço e não virou evento. Nem tudo aqui é
+              problema: uma sonda de teste ou um token velho de visitante
+              aparecem como recusa e é assim que deve ser.
+            </p>
             <ul className="grid gap-2">
               {dados.recusas.slice(0, 15).map((r, i) => (
                 <li

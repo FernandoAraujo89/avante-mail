@@ -3,7 +3,11 @@ import { and, asc, count, eq, gte } from "drizzle-orm";
 
 import { contactEvents, getDb, siteEventRules, SITE_MATCH_TYPES } from "@/lib/db";
 import { getBaseUrl } from "@/lib/email";
-import { lerRecusas, lerUltimaVisita } from "@/lib/track/recusas";
+import {
+  lerCargasDoScript,
+  lerRecusas,
+  lerUltimaVisita,
+} from "@/lib/track/recusas";
 import { normalizarPath, origensPermitidas, slugEvento } from "@/lib/track/site";
 import { errorMessage } from "@/lib/utils";
 
@@ -24,7 +28,7 @@ export async function GET() {
     const db = getDb();
     const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [regras, ultimaVisita, recusas, visitasNaSemana] = await Promise.all([
+    const [regras, ultimaVisita, recusas, visitasNaSemana, cargas] = await Promise.all([
       db
         .select()
         .from(siteEventRules)
@@ -40,6 +44,7 @@ export async function GET() {
             gte(contactEvents.createdAt, seteDiasAtras)
           )
         ),
+      lerCargasDoScript(),
     ]);
 
     const origens = origensPermitidas();
@@ -59,6 +64,9 @@ export async function GET() {
       ultimaVisita,
       recusas,
       visitasNaSemana: visitasNaSemana[0]?.total ?? 0,
+      // Quantas vezes o script foi baixado pelo site. É o que separa "a tag não
+      // está lá" de "a tag está lá e calada".
+      cargas,
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

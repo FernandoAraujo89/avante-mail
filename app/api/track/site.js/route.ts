@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { corpoDoScript } from "@/lib/track/script";
+import { marcarScriptServido } from "@/lib/track/recusas";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,12 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const corpo = corpoDoScript();
   const etag = `"${createHash("sha1").update(corpo).digest("base64url")}"`;
+
+  // Registra que a tag está viva, inclusive no 304 — o 304 É a prova de que
+  // o navegador pediu o script, só já tinha a cópia. Sem esta contagem, "não
+  // chega visita" não distingue "a tag não foi colada" de "a tag está lá e
+  // ninguém chamou o consentimento", que são problemas de donos diferentes.
+  await marcarScriptServido();
 
   // 304 quando nada mudou: o site institucional carrega isto em toda página.
   if (request.headers.get("if-none-match") === etag) {

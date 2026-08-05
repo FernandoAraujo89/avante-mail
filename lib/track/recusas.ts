@@ -91,6 +91,57 @@ export async function lerRecusas(): Promise<Recusa[]> {
   }
 }
 
+/**
+ * Quantas vezes o script foi BAIXADO pelo site, por dia.
+ *
+ * É o sinal que separa os dois "não chega nada" que, sem ele, são
+ * indistinguíveis: a tag não foi colada, ou a tag está lá e o site nunca chama
+ * o consentimento. O primeiro se resolve com o time do site; o segundo é
+ * decisão de quem responde pelo jurídico. Confundir os dois custa semanas.
+ *
+ * Contador por dia, sem nada de pessoal: nem IP, nem identificador, nem
+ * referência a visitante. É só "a tag carregou N vezes hoje".
+ */
+function chaveDoDia(data = new Date()): string {
+  return `track:script:${data.toISOString().slice(0, 10)}`;
+}
+
+export async function marcarScriptServido(): Promise<void> {
+  try {
+    const r = redis();
+    const chave = chaveDoDia();
+    const total = await r.incr(chave);
+    // Só na primeira do dia: evita reescrever a validade a cada carga.
+    if (total === 1) await r.expire(chave, 30 * 24 * 60 * 60);
+  } catch {
+    // Redis fora: o script continua sendo servido. É diagnóstico, não função.
+  }
+}
+
+export interface CargasDoScript {
+  ultimos7dias: number;
+  hoje: number;
+}
+
+export async function lerCargasDoScript(): Promise<CargasDoScript> {
+  try {
+    const dias: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - i);
+      dias.push(chaveDoDia(d));
+    }
+    const valores = await redis().mget(...dias);
+    const numeros = valores.map((v) => Number(v) || 0);
+    return {
+      hoje: numeros[0],
+      ultimos7dias: numeros.reduce((a, b) => a + b, 0),
+    };
+  } catch {
+    return { hoje: 0, ultimos7dias: 0 };
+  }
+}
+
 /** Marca a última visita ACEITA — o "está chegando?" da tela. */
 const CHAVE_ULTIMA = "track:ultima-visita";
 
