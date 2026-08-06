@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import {
   contacts,
@@ -12,7 +23,7 @@ import {
 import { ehLead } from "@/lib/leads";
 import { listarEtapas } from "@/lib/leads/etapas";
 import { lerConfiguracao } from "@/lib/leads/score";
-import { errorMessage } from "@/lib/utils";
+import { errorMessage, normalizeIds } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -155,6 +166,42 @@ export async function GET(request: NextRequest) {
       canais: canais
         .filter((c) => c.canal)
         .map((c) => ({ canal: c.canal as string, total: c.total })),
+    });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
+
+/**
+ * Excluir vários leads de uma vez, da listagem.
+ *
+ * O `isNotNull(stage)` no WHERE não é redundante com a tela: a lista só mostra
+ * lead, mas o corpo da requisição é um id qualquer, e sem essa condição um id
+ * de parceiro apagaria da base de campanha alguém que a área de Leads nem
+ * enxerga. Quem não passou pela condição volta em `recusados` — some da conta
+ * seria pior do que a recusa, porque a tela diria "5 excluídos" tendo apagado 3.
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const db = getDb();
+    const body = await request.json().catch(() => ({}));
+    const ids = normalizeIds(body.ids);
+
+    if (ids.length === 0) {
+      return NextResponse.json(
+        { error: "Nenhum lead selecionado." },
+        { status: 400 }
+      );
+    }
+
+    const excluidos = await db
+      .delete(contacts)
+      .where(and(inArray(contacts.id, ids), isNotNull(contacts.stage)))
+      .returning({ id: contacts.id });
+
+    return NextResponse.json({
+      excluidos: excluidos.length,
+      recusados: ids.length - excluidos.length,
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

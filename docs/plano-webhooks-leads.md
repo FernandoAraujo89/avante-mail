@@ -110,6 +110,25 @@ qualificação). Um mecanismo só para cada coisa.
 seria uma segunda fonte da verdade sobre o mesmo fato, e as duas divergiriam no
 primeiro dia em que alguém mexesse só de um lado.
 
+**A exclusão de lead é REAL e mora nas duas telas** — botão na ficha e seleção
+com caixas na listagem. Apaga o contato inteiro; o banco leva junto (cascata) a
+linha do tempo, as listas, os percursos e os envios. A entrega de webhook que
+criou o lead sobrevive com `contact_id` nulo, para o log de recebimento não
+abrir buraco.
+
+Não é arquivamento porque o motivo mais provável de usar isto é pedido de apagar
+dado pessoal, e um lead "excluído" que continua na tabela não atende o pedido.
+As duas rotas recusam quem **não** é lead (`stage` nulo): a listagem só mostra
+lead, mas o corpo da requisição é um id qualquer, e sem a condição um id de
+parceiro apagaria da base de campanha alguém que a área de Leads nem enxerga. No
+lote, quem foi recusado volta em `recusados` e a tela diz — some da conta seria
+pior, porque diria "5 excluídos" tendo apagado 3.
+
+A janela conta **eventos e envios de verdade** (consulta própria), e não o
+tamanho das listas da ficha, que são cortadas em 50 e 20 — senão diria "50
+eventos" para quem tem 200. E avisa que o lead **volta** se o agente reenviar o
+contato: sem isso, a exclusão pareceria ter falhado.
+
 **A qualificação pontua.** Quatro regras semeadas em `lead_score_rules`, com
 `condition` por qualificação — Experiente 30, Alto Potencial 25, Intermediário
 15, Iniciante 8. Editáveis em `/leads/pontuacao` como qualquer outra regra.
@@ -148,6 +167,7 @@ separados é o que impede tratar lead como parceiro.
 | `/leads` | funil por ETAPA, busca, filtros por qualificação, faixa e canal |
 | `/leads/[id]` | ficha: qualificação (com o texto do playbook), etapa, origem completa, linha do tempo, automações; converte em parceiro |
 | `/leads/etapas` | cadastro das etapas do funil do Pipedrive |
+| Exclusão | na ficha (um) e por seleção na listagem (vários) |
 | `/leads/origens` | cadastro das origens de webhook, sem script |
 
 **Cadastro de origem pela tela:** nome (o endereço sai do nome, sem acento),

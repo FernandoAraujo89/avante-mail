@@ -132,3 +132,51 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
+
+/**
+ * Excluir o lead — de vez, com a ficha e o histórico.
+ *
+ * A rota é de LEAD e recusa quem não é (`stage` nulo), como a PATCH acima. Um
+ * id de parceiro que chegasse aqui apagaria da base de campanha um contato que
+ * a área de Leads nem deveria enxergar; parceiro se exclui em /contacts, onde
+ * quem clica está vendo o público das campanhas.
+ *
+ * A exclusão é REAL, não um arquivamento: o pedido de apagar dado pessoal é o
+ * motivo mais provável de alguém usar isto, e um lead "excluído" que continua
+ * na tabela não atende esse pedido. O banco leva junto (cascata) eventos,
+ * listas, percursos de automação e envios; a entrega de webhook que o criou
+ * sobrevive com `contact_id` nulo, para o log de recebimento não abrir buraco.
+ */
+export async function DELETE(_request: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    const db = getDb();
+
+    const [lead] = await db
+      .select({ id: contacts.id, stage: contacts.stage })
+      .from(contacts)
+      .where(eq(contacts.id, id));
+
+    if (!lead) {
+      return NextResponse.json(
+        { error: "Lead não encontrado." },
+        { status: 404 }
+      );
+    }
+    if (!lead.stage) {
+      return NextResponse.json(
+        {
+          error:
+            "Este contato não é um lead — exclua pela área de Contatos, onde dá para ver o que ele recebe de campanha.",
+        },
+        { status: 400 }
+      );
+    }
+
+    await db.delete(contacts).where(eq(contacts.id, id));
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}

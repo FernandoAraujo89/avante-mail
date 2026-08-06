@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Pencil } from "lucide-react";
-import { asc, desc, eq, isNull, ne, or } from "drizzle-orm";
+import { asc, count, desc, eq, isNull, ne, or } from "drizzle-orm";
 
 import { LeadAcoes } from "@/components/leads/lead-acoes";
 import { LeadQualificacao } from "@/components/leads/lead-qualificacao";
@@ -119,8 +119,16 @@ export default async function LeadPage({
     );
   }
 
-  const [eventos, envios, fluxos, listasDestino, etapas, etapaAtual] =
-    await Promise.all([
+  const [
+    eventos,
+    envios,
+    fluxos,
+    listasDestino,
+    etapas,
+    etapaAtual,
+    [totalEventos],
+    [totalEnvios],
+  ] = await Promise.all([
     db
       .select({
         id: contactEvents.id,
@@ -175,6 +183,17 @@ export default async function LeadPage({
       // sem a tradução ela mostraria "apresentacao-de-produto" para o operador.
       listarEtapas(true),
       etapaPorSlug(lead.stage),
+      // Contagens REAIS do que a exclusão apaga. As listas acima são cortadas
+      // em 50 e 20 para a linha do tempo caber na tela; usar o tamanho delas
+      // faria a janela dizer "50 eventos" para quem tem 200.
+      db
+        .select({ total: count() })
+        .from(contactEvents)
+        .where(eq(contactEvents.contactId, id)),
+      db
+        .select({ total: count() })
+        .from(campaignSends)
+        .where(eq(campaignSends.contactId, id)),
     ]);
 
   const rotulosDasEtapas = Object.fromEntries(
@@ -248,8 +267,11 @@ export default async function LeadPage({
 
           <LeadAcoes
             leadId={lead.id}
+            nome={lead.name}
             subscribed={lead.subscribed}
             listas={listasDestino}
+            totalEventos={totalEventos?.total ?? 0}
+            totalEnvios={totalEnvios?.total ?? 0}
           />
 
           <Card>

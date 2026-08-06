@@ -2,12 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Gauge, ListChecks, Magnet, Search, Webhook } from "lucide-react";
+import {
+  Gauge,
+  ListChecks,
+  Magnet,
+  Search,
+  Trash2,
+  Webhook,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -62,6 +77,12 @@ export default function LeadsPage() {
   const [canal, setCanal] = useState("todos");
   const [faixa, setFaixa] = useState("todas");
   const [qualificacao, setQualificacao] = useState("todas");
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [excluirAberto, setExcluirAberto] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+  // Separado do erro: `carregar` começa com setErro(""), e o resultado da
+  // exclusão sobrevive ao recarregamento que vem logo depois dela.
+  const [aviso, setAviso] = useState("");
 
   const carregar = useCallback(async () => {
     try {
@@ -77,6 +98,9 @@ export default function LeadsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar os leads.");
       setDados(json);
+      // A seleção não sobrevive ao filtro: marcado fora da tela é marcado que
+      // ninguém vê, e a exclusão levaria junto quem sumiu da lista.
+      setSelecionados(new Set());
     } catch (err) {
       setDados({
         leads: [],
@@ -100,6 +124,61 @@ export default function LeadsPage() {
     const timer = setTimeout(carregar, 300);
     return () => clearTimeout(timer);
   }, [carregar]);
+
+  // O aviso da última exclusão some assim que a pessoa mexe nos filtros: senão
+  // fica pendurado descrevendo uma ação que já saiu de vista.
+  useEffect(() => {
+    setAviso("");
+  }, [busca, estagio, canal, faixa, qualificacao]);
+
+  const leadsVisiveis = dados?.leads ?? [];
+  const todosMarcados =
+    leadsVisiveis.length > 0 &&
+    leadsVisiveis.every((l) => selecionados.has(l.id));
+
+  function alternarUm(id: string) {
+    setSelecionados((antes) => {
+      const agora = new Set(antes);
+      if (agora.has(id)) agora.delete(id);
+      else agora.add(id);
+      return agora;
+    });
+  }
+
+  function alternarTodos() {
+    setSelecionados(() =>
+      todosMarcados ? new Set() : new Set(leadsVisiveis.map((l) => l.id))
+    );
+  }
+
+  async function excluirSelecionados() {
+    if (selecionados.size === 0) return;
+    setExcluindo(true);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selecionados] }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao excluir os leads.");
+      setExcluirAberto(false);
+      await carregar();
+      // Recusa não é silêncio: se algum id não era lead, a tela diz, senão
+      // "5 selecionados" viraria "3 excluídos" sem explicação nenhuma.
+      const excluidos = `${json.excluidos} lead${json.excluidos === 1 ? "" : "s"} excluído${json.excluidos === 1 ? "" : "s"}.`;
+      setAviso(
+        json.recusados > 0
+          ? `${excluidos} ${json.recusados} não ${json.recusados === 1 ? "era lead e foi mantido" : "eram leads e foram mantidos"}.`
+          : excluidos
+      );
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+      setExcluirAberto(false);
+    } finally {
+      setExcluindo(false);
+    }
+  }
 
   const totalNoFunil = useMemo(
     () => Object.values(dados?.funil ?? {}).reduce((a, b) => a + b, 0),
@@ -238,6 +317,38 @@ export default function LeadsPage() {
         </div>
       ) : null}
 
+      {aviso ? (
+        <div className="mb-4 rounded-lg border bg-accent/50 px-4 py-3 text-sm">
+          {aviso}
+        </div>
+      ) : null}
+
+      {selecionados.size > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-accent/50 px-4 py-2">
+          <span className="text-sm font-medium">
+            {selecionados.size} lead{selecionados.size === 1 ? "" : "s"}{" "}
+            selecionado{selecionados.size === 1 ? "" : "s"}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelecionados(new Set())}
+            >
+              Limpar seleção
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setExcluirAberto(true)}
+            >
+              <Trash2 />
+              Excluir selecionados
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Card>
         {leads === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
@@ -264,6 +375,15 @@ export default function LeadsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="Selecionar todos"
+                    className="size-4 cursor-pointer accent-primary align-middle"
+                    checked={todosMarcados}
+                    onChange={alternarTodos}
+                  />
+                </TableHead>
                 <TableHead>Lead</TableHead>
                 <TableHead>Pontuação</TableHead>
                 <TableHead>Qualificação</TableHead>
@@ -275,6 +395,15 @@ export default function LeadsPage() {
             <TableBody>
               {leads.map((lead) => (
                 <TableRow key={lead.id}>
+                  <TableCell className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label={`Selecionar ${lead.name}`}
+                      className="size-4 cursor-pointer accent-primary align-middle"
+                      checked={selecionados.has(lead.id)}
+                      onChange={() => alternarUm(lead.id)}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Link
                       href={`/leads/${lead.id}`}
@@ -359,6 +488,47 @@ export default function LeadsPage() {
           atuais
         </p>
       ) : null}
+
+      <Dialog open={excluirAberto} onOpenChange={setExcluirAberto}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir leads</DialogTitle>
+            <DialogDescription>
+              <span className="font-medium text-foreground">
+                {selecionados.size} lead{selecionados.size === 1 ? "" : "s"}
+              </span>{" "}
+              {selecionados.size === 1 ? "será apagado" : "serão apagados"} da
+              base, junto com a origem, a pontuação, a linha do tempo e o
+              histórico de envios. Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* A porta de entrada continua aberta: se o agente reenviar esses
+              contatos, eles voltam com ficha nova. Dizer aqui evita a conclusão
+              errada de que a exclusão falhou. */}
+          <p className="text-xs text-muted-foreground">
+            Se o agente enviar esses contatos de novo pelo webhook, eles voltam
+            a entrar como leads novos.
+          </p>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setExcluirAberto(false)}
+              disabled={excluindo}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={excluirSelecionados}
+              disabled={excluindo}
+            >
+              {excluindo ? "Excluindo..." : "Excluir selecionados"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
