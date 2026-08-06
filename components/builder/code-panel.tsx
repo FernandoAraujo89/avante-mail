@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { CodeEditor } from "@/components/ui/code-editor";
 import { limparHtmlDoUsuario } from "@/lib/email-builder/codigo";
 import type { EmailDesign } from "@/lib/email-builder/types";
 
@@ -142,11 +142,10 @@ export function CodePanel({
             Compilando o código...
           </p>
         ) : (
-          <Textarea
+          <CodeEditor
             value={codigo}
-            onChange={(e) => setCodigo(e.target.value)}
-            spellCheck={false}
-            className="min-h-[52vh] font-mono text-xs leading-relaxed"
+            onChange={setCodigo}
+            className="h-[52vh]"
             aria-label={titulo}
           />
         )}
