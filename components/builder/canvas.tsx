@@ -462,6 +462,19 @@ function BlockView({
   const { settings } = design;
 
   let content: React.ReactNode;
+
+  // Com HTML próprio, o canvas mostra o HTML — não a versão visual dele. Se
+  // continuasse desenhando pelos atributos, a tela mostraria um bloco e o
+  // envio levaria outro, que é o pior desfecho possível para um editor.
+  //
+  // Só o CONTEÚDO muda: o wrapper lá embaixo continua dando seleção, barra de
+  // ferramentas e alça de arrastar. Um bloco de código que não se pudesse
+  // mover nem apagar seria uma armadilha.
+  const temCodigoProprio = Boolean(block.customHtml?.trim());
+
+  if (temCodigoProprio) {
+    content = <CodigoProprio html={block.customHtml!} envolverEmTr />;
+  } else
   switch (block.type) {
     case "text":
       content = (
@@ -612,8 +625,53 @@ function BlockView({
           onEnd={() => onDragChange(null)}
         />
       ) : null}
+      {temCodigoProprio ? <SeloDeCodigo /> : null}
       {content}
     </div>
+  );
+}
+
+/**
+ * Desenha um pedaço escrito à mão.
+ *
+ * Vai com `dangerouslySetInnerHTML` de propósito — é o HTML do próprio autor,
+ * já sem `<script>` e sem `on*` (limparHtmlDoUsuario), exibido na tela dele.
+ *
+ * `envolverEmTr` é para bloco: o que o usuário escreve é um `<td>`, e `<td>`
+ * solto no documento é descartado pelo navegador — a tabela e o `<tr>` daqui
+ * são os mesmos que a compilação põe em volta, então a tela mostra o que o
+ * e-mail vai ter. A linha já traz a tabela inteira e vai direto.
+ */
+function CodigoProprio({
+  html,
+  envolverEmTr,
+}: {
+  html: string;
+  envolverEmTr?: boolean;
+}) {
+  if (!envolverEmTr) {
+    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <tbody dangerouslySetInnerHTML={{ __html: `<tr>${html}</tr>` }} />
+    </table>
+  );
+}
+
+/**
+ * Sem o selo, um pedaço com código próprio ficaria idêntico a um comum — e a
+ * pessoa mexeria nos controles laterais sem entender por que nada muda.
+ *
+ * No rodapé à esquerda porque o topo inteiro já é de alguém: alça de arrastar
+ * de um lado, barra de ferramentas do outro, e a barra some por cima do selo
+ * justamente quando o pedaço está selecionado.
+ */
+function SeloDeCodigo() {
+  return (
+    <span className="pointer-events-none absolute bottom-1 left-1 z-10 rounded bg-foreground/80 px-1.5 py-0.5 text-[10px] font-medium text-background">
+      HTML próprio
+    </span>
   );
 }
 
@@ -806,6 +864,11 @@ export function RowView({
     !selection?.blockId &&
     !selection?.colId;
 
+  // Estrutura com HTML próprio: as colunas continuam guardadas, mas não são o
+  // que sai no e-mail, então não é o que a tela mostra. Como no bloco, troca-se
+  // só o conteúdo — mover, duplicar e remover a linha continuam funcionando.
+  const rowTemCodigoProprio = Boolean(row.customHtml?.trim());
+
   return (
     <div
       data-row-root
@@ -881,6 +944,11 @@ export function RowView({
         />
       ) : null}
 
+      {rowTemCodigoProprio && !readOnly ? <SeloDeCodigo /> : null}
+
+      {rowTemCodigoProprio ? (
+        <CodigoProprio html={row.customHtml!} />
+      ) : (
       <div className="flex flex-wrap">
         {row.columns.map((column) =>
           readOnly ? (
@@ -920,6 +988,7 @@ export function RowView({
           )
         )}
       </div>
+      )}
     </div>
   );
 }

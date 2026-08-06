@@ -1,5 +1,14 @@
 // Modelo de documento do Criador de email (WYSIWYG).
 // O design é a fonte da verdade dos templates visuais; o MJML é gerado dele.
+//
+// `customHtml` é a saída de emergência, disponível em três níveis (bloco, linha
+// e documento): quando preenchido, o HTML escrito à mão SUBSTITUI o que aquele
+// pedaço geraria. É override e não conversão — o design continua guardado ao
+// lado, então voltar ao visual é apagar um campo, não refazer o e-mail.
+//
+// Não existe caminho de volta automático (HTML editado → atributos), porque
+// HTML livre não cabe no modelo: quem escreve `<td>` com três tabelas dentro
+// não tem "alinhamento" nem "tamanho da fonte" para onde voltar.
 
 export interface DesignSettings {
   bodyBackground: string;
@@ -11,6 +20,8 @@ export interface DesignSettings {
 
 export interface TextBlock {
   id: string;
+  /** HTML próprio (um `<td>…</td>`) que substitui o gerado. */
+  customHtml?: string;
   type: "text";
   html: string;
   attrs: {
@@ -23,6 +34,8 @@ export interface TextBlock {
 
 export interface ImageBlock {
   id: string;
+  /** HTML próprio (um `<td>…</td>`) que substitui o gerado. */
+  customHtml?: string;
   type: "image";
   src: string;
   alt: string;
@@ -37,6 +50,8 @@ export interface ImageBlock {
 
 export interface ButtonBlock {
   id: string;
+  /** HTML próprio (um `<td>…</td>`) que substitui o gerado. */
+  customHtml?: string;
   type: "button";
   text: string;
   href: string;
@@ -52,12 +67,16 @@ export interface ButtonBlock {
 
 export interface SpacerBlock {
   id: string;
+  /** HTML próprio (um `<td>…</td>`) que substitui o gerado. */
+  customHtml?: string;
   type: "spacer";
   attrs: { height: number };
 }
 
 export interface DividerBlock {
   id: string;
+  /** HTML próprio (um `<td>…</td>`) que substitui o gerado. */
+  customHtml?: string;
   type: "divider";
   attrs: {
     borderColor: string;
@@ -74,6 +93,8 @@ export interface SocialItem {
 
 export interface SocialBlock {
   id: string;
+  /** HTML próprio (um `<td>…</td>`) que substitui o gerado. */
+  customHtml?: string;
   type: "social";
   items: SocialItem[];
   attrs: {
@@ -101,6 +122,8 @@ export interface Column {
 
 export interface Row {
   id: string;
+  /** HTML próprio (a tabela inteira da linha) que substitui o gerado. */
+  customHtml?: string;
   columns: Column[];
   attrs: {
     backgroundColor: string; // vazio = herda contentBackground
@@ -112,6 +135,12 @@ export interface EmailDesign {
   version: 1;
   settings: DesignSettings;
   rows: Row[];
+  /**
+   * HTML do e-mail INTEIRO, escrito à mão. Preenchido, o criador visual deixa
+   * de mandar no que é enviado — as linhas continuam guardadas para o caso de
+   * voltar atrás, mas não geram mais nada.
+   */
+  customHtml?: string;
 }
 
 export interface SavedModule {

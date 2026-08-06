@@ -119,6 +119,46 @@ function mapColumn(
   );
 }
 
+/**
+ * Guarda ou remove o `customHtml` de um objeto do design.
+ *
+ * Remover é apagar a chave, e não guardar string vazia: o compilador decide
+ * pela presença, e um `customHtml: ""` viraria "tem override, e ele é vazio" —
+ * o pedaço sumiria do e-mail sem ninguém ter pedido.
+ */
+export function comCustomHtml<T extends { customHtml?: string }>(
+  alvo: T,
+  html: string | null
+): T {
+  if (html) return { ...alvo, customHtml: html };
+  const copia = { ...alvo };
+  delete copia.customHtml;
+  return copia;
+}
+
+/**
+ * Liga ou desliga o HTML próprio de uma linha.
+ */
+export function setRowCustomHtml(
+  design: EmailDesign,
+  rowId: string,
+  html: string | null
+): EmailDesign {
+  return replaceRows(
+    design,
+    design.rows.map((r) => (r.id === rowId ? comCustomHtml(r, html) : r))
+  );
+}
+
+/** Idem para um bloco. */
+export function setBlockCustomHtml(
+  design: EmailDesign,
+  blockId: string,
+  html: string | null
+): EmailDesign {
+  return updateBlock(design, blockId, (b) => comCustomHtml(b, html));
+}
+
 export function addBlock(
   design: EmailDesign,
   rowId: string,

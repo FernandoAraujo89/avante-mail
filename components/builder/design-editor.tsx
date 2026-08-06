@@ -9,8 +9,13 @@ import {
   type RowAction,
   type Selection,
 } from "@/components/builder/canvas";
+import {
+  CodePanel,
+  type AlvoDoCodigo,
+} from "@/components/builder/code-panel";
 import { BuilderSidebar } from "@/components/builder/sidebar";
 import { Button } from "@/components/ui/button";
+import { Code2, RotateCcw } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -34,11 +39,15 @@ import {
   moveBlockTo,
   moveRow,
   moveRowTo,
+  comCustomHtml,
   removeBlock,
   removeRow,
+  setBlockCustomHtml,
+  setRowCustomHtml,
   updateBlock,
   updateRowAttrs,
 } from "@/lib/email-builder/ops";
+import { BLOCK_LABELS } from "@/lib/email-builder/presets";
 import { createBlock } from "@/lib/email-builder/presets";
 import type {
   Block,
@@ -68,6 +77,8 @@ export function DesignEditor({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [modules, setModules] = useState<SavedModule[]>([]);
   const [drag, setDrag] = useState<DragState | null>(null);
+
+  const [alvoDoCodigo, setAlvoDoCodigo] = useState<AlvoDoCodigo | null>(null);
 
   const [moduleRowId, setModuleRowId] = useState<string | null>(null);
   const [moduleName, setModuleName] = useState("");
@@ -234,6 +245,53 @@ export function DesignEditor({
     apply((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
   }
 
+  // ─── Código à mão ────────────────────────────────────────────
+
+  /**
+   * O que o botão "Código" abre depende do que está selecionado — bloco, ou a
+   * estrutura, ou (sem seleção) o e-mail inteiro. É a mesma lógica que a pessoa
+   * já usa para editar: clicou no pedaço, o painel fala daquele pedaço.
+   */
+  const alvoAtual: AlvoDoCodigo = (() => {
+    if (selection?.blockId) {
+      const achado = value.rows
+        .flatMap((r) => r.columns.flatMap((c) => c.blocks))
+        .find((b) => b.id === selection.blockId);
+      if (achado) {
+        return {
+          tipo: "bloco",
+          id: achado.id,
+          rotulo: BLOCK_LABELS[achado.type],
+        };
+      }
+    }
+    if (selection?.rowId) return { tipo: "linha", id: selection.rowId };
+    return { tipo: "documento" };
+  })();
+
+  const htmlProprioDoAlvo = (alvo: AlvoDoCodigo): string | null => {
+    if (alvo.tipo === "documento") return value.customHtml ?? null;
+    if (alvo.tipo === "linha") {
+      return value.rows.find((r) => r.id === alvo.id)?.customHtml ?? null;
+    }
+    return (
+      value.rows
+        .flatMap((r) => r.columns.flatMap((c) => c.blocks))
+        .find((b) => b.id === alvo.id)?.customHtml ?? null
+    );
+  };
+
+  function aplicarCodigo(alvo: AlvoDoCodigo, html: string | null) {
+    if (alvo.tipo === "documento") {
+      apply((d) => comCustomHtml(d, html));
+    } else if (alvo.tipo === "linha") {
+      apply((d) => setRowCustomHtml(d, alvo.id, html));
+    } else {
+      apply((d) => setBlockCustomHtml(d, alvo.id, html));
+    }
+    setAlvoDoCodigo(null);
+  }
+
   // ─── Salvar módulo (linha reutilizável) ──────────────────────
 
   async function handleSaveModule() {
@@ -259,8 +317,57 @@ export function DesignEditor({
     }
   }
 
+  const rotuloDoBotao =
+    alvoAtual.tipo === "bloco"
+      ? `Código do bloco`
+      : alvoAtual.tipo === "linha"
+        ? "Código da estrutura"
+        : "Código do e-mail";
+
   return (
     <>
+      {/* Aviso do override de documento: enquanto ele existe, tudo o que se
+          mexe no canvas fica guardado mas não é enviado. Dizer isso aqui, e não
+          só dentro do painel, evita a pessoa editar meia hora à toa. */}
+      {value.customHtml ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning-dark/30 bg-warning-light/30 px-4 py-3 text-sm text-warning-dark">
+          <span>
+            Este e-mail está com <strong>HTML próprio</strong>. O criador visual
+            continua guardando o que você monta, mas quem é enviado é o código.
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAlvoDoCodigo({ tipo: "documento" })}
+            >
+              <Code2 />
+              Editar código
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => aplicarCodigo({ tipo: "documento" }, null)}
+            >
+              <RotateCcw />
+              Voltar ao visual
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mb-3 flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setAlvoDoCodigo(alvoAtual)}
+          title="Mostra o HTML do que está selecionado; sem seleção, o e-mail inteiro"
+        >
+          <Code2 />
+          {rotuloDoBotao}
+        </Button>
+      </div>
+
       <div className="grid items-start gap-6 lg:grid-cols-[1fr_340px]">
         <Canvas
           design={value}
@@ -301,6 +408,17 @@ export function DesignEditor({
           />
         </div>
       </div>
+
+      <CodePanel
+        alvo={alvoDoCodigo}
+        design={value}
+        htmlProprio={alvoDoCodigo ? htmlProprioDoAlvo(alvoDoCodigo) : null}
+        onAplicar={(html) => alvoDoCodigo && aplicarCodigo(alvoDoCodigo, html)}
+        onVoltarAoGerado={() =>
+          alvoDoCodigo && aplicarCodigo(alvoDoCodigo, null)
+        }
+        onFechar={() => setAlvoDoCodigo(null)}
+      />
 
       {/* Dialog: salvar linha como módulo reutilizável */}
       <Dialog
