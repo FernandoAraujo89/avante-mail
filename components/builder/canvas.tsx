@@ -23,6 +23,7 @@ import {
   Underline,
 } from "lucide-react";
 
+import { limparHtmlDoUsuario } from "@/lib/email-builder/codigo";
 import { limparHtmlColado, textoParaHtml } from "@/lib/email-builder/paste";
 import { BLOCK_LABELS } from "@/lib/email-builder/presets";
 import type {
@@ -67,6 +68,9 @@ interface CanvasProps {
   onDragChange: (drag: DragState | null) => void;
   onSelect: (selection: Selection | null) => void;
   onTextCommit: (blockId: string, html: string) => void;
+  /** Edição inline de um pedaço com HTML próprio: devolve o novo `customHtml`. */
+  onRowHtmlCommit: (rowId: string, html: string) => void;
+  onBlockHtmlCommit: (blockId: string, html: string) => void;
   onRowAction: (rowId: string, action: RowAction) => void;
   onBlockAction: (
     rowId: string,
@@ -126,6 +130,19 @@ function ToolbarButton({
 
 function exec(command: string, value?: string) {
   document.execCommand(command, false, value);
+}
+
+/**
+ * Cola limpando. Sem isto o navegador insere o HTML da ORIGEM (fontes,
+ * tamanhos, <p> aninhados), que quebra o layout, ignora a tipografia do
+ * e-mail e ainda vai parar no envio.
+ */
+function aoColarLimpo(e: React.ClipboardEvent) {
+  e.preventDefault();
+  const html = e.clipboardData.getData("text/html");
+  const texto = e.clipboardData.getData("text/plain");
+  const limpo = html ? limparHtmlColado(html) : textoParaHtml(texto);
+  if (limpo) exec("insertHTML", limpo);
 }
 
 // Nota: o tipo `Selection` deste arquivo é o de blocos selecionados e sombreia
@@ -346,6 +363,83 @@ function RowDropZone({
   );
 }
 
+/**
+ * Botões de formatação de texto. Agem na seleção do navegador, então servem a
+ * qualquer editável em foco — o bloco de texto comum e também o conteúdo de um
+ * pedaço com HTML próprio, que continua editável no canvas.
+ */
+function FerramentasDeTexto() {
+  return (
+    <>
+      <ToolbarButton
+        label="Negrito"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          exec("bold");
+        }}
+      >
+        <Bold />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Itálico"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          exec("italic");
+        }}
+      >
+        <Italic />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Sublinhado"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          exec("underline");
+        }}
+      >
+        <Underline />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Link"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const url = window.prompt("URL do link:", "https://");
+          if (url) exec("createLink", url);
+        }}
+      >
+        <Link2 />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Diminuir a fonte do trecho selecionado"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          ajustarTamanho(-2);
+        }}
+      >
+        <AArrowDown />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Aumentar a fonte do trecho selecionado"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          ajustarTamanho(2);
+        }}
+      >
+        <AArrowUp />
+      </ToolbarButton>
+      <ToolbarButton
+        label="Limpar formatação do trecho selecionado"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          exec("removeFormat");
+        }}
+      >
+        <RemoveFormatting />
+      </ToolbarButton>
+      <span className="mx-0.5 h-4 w-px bg-border" />
+    </>
+  );
+}
+
 function BlockToolbar({
   block,
   onAction,
@@ -353,77 +447,14 @@ function BlockToolbar({
   block: Block;
   onAction: (action: BlockAction) => void;
 }) {
+  // Texto comum OU HTML próprio: nos dois casos o conteúdo é um contentEditable
+  // e os comandos de formatação funcionam sobre a seleção.
+  const editaTexto =
+    block.type === "text" || Boolean(block.customHtml?.trim());
+
   return (
     <div className="absolute -top-3.5 right-1 z-20 flex items-center gap-0.5 rounded-md border border-border bg-card px-1 py-0.5 shadow-lg">
-      {block.type === "text" ? (
-        <>
-          <ToolbarButton
-            label="Negrito"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              exec("bold");
-            }}
-          >
-            <Bold />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Itálico"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              exec("italic");
-            }}
-          >
-            <Italic />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Sublinhado"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              exec("underline");
-            }}
-          >
-            <Underline />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Link"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const url = window.prompt("URL do link:", "https://");
-              if (url) exec("createLink", url);
-            }}
-          >
-            <Link2 />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Diminuir a fonte do trecho selecionado"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              ajustarTamanho(-2);
-            }}
-          >
-            <AArrowDown />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Aumentar a fonte do trecho selecionado"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              ajustarTamanho(2);
-            }}
-          >
-            <AArrowUp />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Limpar formatação do trecho selecionado"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              exec("removeFormat");
-            }}
-          >
-            <RemoveFormatting />
-          </ToolbarButton>
-          <span className="mx-0.5 h-4 w-px bg-border" />
-        </>
-      ) : null}
+      {editaTexto ? <FerramentasDeTexto /> : null}
       <ToolbarButton label="Mover para cima" onClick={() => onAction("up")}>
         <ChevronUp />
       </ToolbarButton>
@@ -446,6 +477,7 @@ function BlockView({
   selected,
   onSelect,
   onTextCommit,
+  onHtmlCommit,
   onAction,
   dragEnabled,
   onDragChange,
@@ -455,6 +487,8 @@ function BlockView({
   selected: boolean;
   onSelect: () => void;
   onTextCommit: (html: string) => void;
+  /** Recebe o `customHtml` editado direto no canvas; ausente = só leitura. */
+  onHtmlCommit?: (html: string) => void;
   onAction: (action: BlockAction) => void;
   dragEnabled?: boolean;
   onDragChange?: (drag: DragState | null) => void;
@@ -469,11 +503,18 @@ function BlockView({
   //
   // Só o CONTEÚDO muda: o wrapper lá embaixo continua dando seleção, barra de
   // ferramentas e alça de arrastar. Um bloco de código que não se pudesse
-  // mover nem apagar seria uma armadilha.
+  // mover nem apagar seria uma armadilha. E o texto segue editável no lugar,
+  // como num bloco comum — o que se digita volta para o `customHtml`.
   const temCodigoProprio = Boolean(block.customHtml?.trim());
 
   if (temCodigoProprio) {
-    content = <CodigoProprio html={block.customHtml!} envolverEmTr />;
+    content = (
+      <CodigoProprio
+        html={block.customHtml!}
+        envolverEmTr
+        onCommit={onHtmlCommit}
+      />
+    );
   } else
   switch (block.type) {
     case "text":
@@ -492,18 +533,7 @@ function BlockView({
             outline: "none",
             wordBreak: "break-word",
           }}
-          onPaste={(e) => {
-            // Sem isto o navegador insere o HTML da ORIGEM (fontes, tamanhos,
-            // <p> aninhados), que quebra o layout, ignora a tipografia do
-            // e-mail e ainda vai parar no <mj-text> do envio.
-            e.preventDefault();
-            const html = e.clipboardData.getData("text/html");
-            const texto = e.clipboardData.getData("text/plain");
-            const limpo = html
-              ? limparHtmlColado(html)
-              : textoParaHtml(texto);
-            if (limpo) exec("insertHTML", limpo);
-          }}
+          onPaste={aoColarLimpo}
           onBlur={(e) => onTextCommit(e.currentTarget.innerHTML)}
           dangerouslySetInnerHTML={{ __html: block.html }}
         />
@@ -637,24 +667,74 @@ function BlockView({
  * Vai com `dangerouslySetInnerHTML` de propósito — é o HTML do próprio autor,
  * já sem `<script>` e sem `on*` (limparHtmlDoUsuario), exibido na tela dele.
  *
+ * Com `onCommit`, o pedaço continua editável como texto: passar para o código
+ * não pode custar o WYSIWYG. A pessoa clica, escreve e formata como num bloco
+ * comum, e ao sair do campo o HTML editado volta para o `customHtml` — passando
+ * de novo pelo limparHtmlDoUsuario, porque um colar pode trazer script. Sem
+ * `onCommit` (previews de módulo), fica só leitura como antes.
+ *
  * `envolverEmTr` é para bloco: o que o usuário escreve é um `<td>`, e `<td>`
  * solto no documento é descartado pelo navegador — a tabela e o `<tr>` daqui
  * são os mesmos que a compilação põe em volta, então a tela mostra o que o
- * e-mail vai ter. A linha já traz a tabela inteira e vai direto.
+ * e-mail vai ter. A linha já traz a tabela inteira e vai direto. Ao guardar,
+ * o caminho inverso: sai o `<tr>` do wrapper, fica só o conteúdo dele.
  */
 function CodigoProprio({
   html,
   envolverEmTr,
+  onCommit,
 }: {
   html: string;
   envolverEmTr?: boolean;
+  onCommit?: (html: string) => void;
 }) {
+  // O editável é o MESMO elemento que carrega o dangerouslySetInnerHTML: o
+  // usuário só consegue mexer dentro dele, e o React continua dono do resto.
+  const edicao = onCommit
+    ? ({
+        contentEditable: true,
+        suppressContentEditableWarning: true,
+        spellCheck: false,
+        style: { outline: "none" },
+        onPaste: aoColarLimpo,
+      } as const)
+    : null;
+
   if (!envolverEmTr) {
-    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+    return (
+      <div
+        {...edicao}
+        onBlur={
+          onCommit
+            ? (e) => onCommit(limparHtmlDoUsuario(e.currentTarget.innerHTML))
+            : undefined
+        }
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
   }
   return (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <tbody dangerouslySetInnerHTML={{ __html: `<tr>${html}</tr>` }} />
+      <tbody
+        {...edicao}
+        onBlur={
+          onCommit
+            ? (e) => {
+                // Guarda-se só o miolo do <tr> — o wrapper é do canvas, e a
+                // compilação põe o dela. Se a edição engoliu o <tr> inteiro,
+                // vale o que sobrou (vazio inclusive: aí o override cai e o
+                // bloco volta ao visual).
+                const tr = e.currentTarget.querySelector("tr");
+                onCommit(
+                  limparHtmlDoUsuario(
+                    tr ? tr.innerHTML : e.currentTarget.innerHTML
+                  )
+                );
+              }
+            : undefined
+        }
+        dangerouslySetInnerHTML={{ __html: `<tr>${html}</tr>` }}
+      />
     </table>
   );
 }
@@ -683,6 +763,7 @@ function ColumnView({
   drag,
   onSelect,
   onTextCommit,
+  onBlockHtmlCommit,
   onBlockAction,
   onDragChange,
   onMoveBlockTo,
@@ -696,6 +777,7 @@ function ColumnView({
   drag: DragState | null;
   onSelect: (selection: Selection) => void;
   onTextCommit: (blockId: string, html: string) => void;
+  onBlockHtmlCommit: (blockId: string, html: string) => void;
   onBlockAction: CanvasProps["onBlockAction"];
   onDragChange: (drag: DragState | null) => void;
   onMoveBlockTo: CanvasProps["onMoveBlockTo"];
@@ -811,6 +893,7 @@ function ColumnView({
                   })
                 }
                 onTextCommit={(html) => onTextCommit(block.id, html)}
+                onHtmlCommit={(html) => onBlockHtmlCommit(block.id, html)}
                 onAction={(action) =>
                   onBlockAction(row.id, column.id, block.id, action)
                 }
@@ -836,6 +919,8 @@ export function RowView({
   drag,
   onSelect,
   onTextCommit,
+  onHtmlCommit,
+  onBlockHtmlCommit,
   onRowAction,
   onBlockAction,
   onDragChange,
@@ -850,6 +935,10 @@ export function RowView({
   drag?: DragState | null;
   onSelect?: (selection: Selection) => void;
   onTextCommit?: (blockId: string, html: string) => void;
+  /** Recebe o `customHtml` DA LINHA editado direto no canvas. */
+  onHtmlCommit?: (html: string) => void;
+  /** Idem para o `customHtml` de um bloco dentro dela. */
+  onBlockHtmlCommit?: (blockId: string, html: string) => void;
   onRowAction?: (action: RowAction) => void;
   onBlockAction?: CanvasProps["onBlockAction"];
   onDragChange?: (drag: DragState | null) => void;
@@ -895,6 +984,9 @@ export function RowView({
     >
       {rowSelected && onRowAction ? (
         <div className="absolute -top-3.5 right-1 z-20 flex items-center gap-0.5 rounded-md border border-border bg-card px-1 py-0.5 shadow-lg">
+          {/* Com HTML próprio o conteúdo da linha é um editável — os botões de
+              formatação valem aqui do mesmo jeito que num bloco de texto. */}
+          {rowTemCodigoProprio ? <FerramentasDeTexto /> : null}
           <ToolbarButton
             label="Mover para cima"
             onClick={() => onRowAction("up")}
@@ -947,7 +1039,10 @@ export function RowView({
       {rowTemCodigoProprio && !readOnly ? <SeloDeCodigo /> : null}
 
       {rowTemCodigoProprio ? (
-        <CodigoProprio html={row.customHtml!} />
+        <CodigoProprio
+          html={row.customHtml!}
+          onCommit={readOnly ? undefined : onHtmlCommit}
+        />
       ) : (
       <div className="flex flex-wrap">
         {row.columns.map((column) =>
@@ -979,6 +1074,7 @@ export function RowView({
               drag={drag ?? null}
               onSelect={onSelect!}
               onTextCommit={onTextCommit!}
+              onBlockHtmlCommit={onBlockHtmlCommit!}
               onBlockAction={onBlockAction!}
               onDragChange={onDragChange!}
               onMoveBlockTo={onMoveBlockTo!}
@@ -1000,6 +1096,8 @@ export function Canvas({
   onDragChange,
   onSelect,
   onTextCommit,
+  onRowHtmlCommit,
+  onBlockHtmlCommit,
   onRowAction,
   onBlockAction,
   onMoveBlockTo,
@@ -1078,6 +1176,8 @@ export function Canvas({
                   drag={drag}
                   onSelect={onSelect}
                   onTextCommit={onTextCommit}
+                  onHtmlCommit={(html) => onRowHtmlCommit(row.id, html)}
+                  onBlockHtmlCommit={onBlockHtmlCommit}
                   onRowAction={(action) => onRowAction(row.id, action)}
                   onBlockAction={onBlockAction}
                   onDragChange={onDragChange}

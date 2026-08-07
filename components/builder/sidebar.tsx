@@ -947,13 +947,16 @@ export function BuilderSidebar({
  * editor está quebrado — quando na verdade é o código dela que manda agora.
  */
 function AvisoDeCodigoProprio({ o }: { o: "bloco" | "estrutura" }) {
+  const rotulo = o === "bloco" ? "Código do bloco" : "Código da estrutura";
   return (
     <div className="grid gap-2 rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-3 text-xs text-warning-dark">
       <p className="font-medium">Este {o} está com HTML próprio.</p>
       <p>
-        Os controles visuais não valem mais aqui — quem manda é o código. Use o
-        botão <span className="font-medium">Código do {o}</span>, acima do
-        e-mail, para editar ou voltar ao gerado.
+        Estes controles não valem mais aqui — quem manda é o código. O texto
+        continua editável direto no e-mail, com a barra de formatação. Para
+        mexer no resto, use o botão{" "}
+        <span className="font-medium">{rotulo}</span>, acima do e-mail, para
+        editar o código ou voltar ao gerado.
       </p>
     </div>
   );

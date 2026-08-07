@@ -380,6 +380,15 @@ export function DesignEditor({
               b.type === "text" ? { ...b, html } : b
             )
           }
+          // Edição inline de pedaços com HTML próprio: o canvas devolve o HTML
+          // já saneado, e ele entra pelo mesmo caminho do painel de código.
+          // Vazio (tudo apagado) derruba o override e o visual volta a valer.
+          onRowHtmlCommit={(rowId, html) =>
+            apply((d) => setRowCustomHtml(d, rowId, html))
+          }
+          onBlockHtmlCommit={(blockId, html) =>
+            apply((d) => setBlockCustomHtml(d, blockId, html))
+          }
           onRowAction={handleRowAction}
           onBlockAction={handleBlockAction}
           onMoveBlockTo={handleMoveBlockTo}
