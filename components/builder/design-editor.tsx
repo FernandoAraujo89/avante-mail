@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { absorverHtmlEmBlocoDeTexto } from "@/lib/email-builder/absorver";
 import {
   addBlock,
   addRow,
@@ -262,12 +263,37 @@ export function DesignEditor({
           tipo: "bloco",
           id: achado.id,
           rotulo: BLOCK_LABELS[achado.type],
+          blockType: achado.type,
         };
       }
     }
     if (selection?.rowId) return { tipo: "linha", id: selection.rowId };
     return { tipo: "documento" };
   })();
+
+  const acharBloco = (blockId: string) =>
+    value.rows
+      .flatMap((r) => r.columns.flatMap((c) => c.blocks))
+      .find((b) => b.id === blockId);
+
+  /**
+   * HTML editado de um bloco: TEXTO absorve o código e segue bloco comum
+   * (conteúdo vira `html`, moldura vira atributos — nada de override, os
+   * controles do painel continuam valendo). Os demais tipos não têm para onde
+   * absorver e ficam com o override de sempre.
+   */
+  function aplicarHtmlNoBloco(blockId: string, html: string | null) {
+    const bloco = acharBloco(blockId);
+    if (bloco?.type === "text" && html) {
+      apply((d) =>
+        updateBlock(d, blockId, (b) =>
+          b.type === "text" ? absorverHtmlEmBlocoDeTexto(b, html) : b
+        )
+      );
+      return;
+    }
+    apply((d) => setBlockCustomHtml(d, blockId, html));
+  }
 
   const htmlProprioDoAlvo = (alvo: AlvoDoCodigo): string | null => {
     if (alvo.tipo === "documento") return value.customHtml ?? null;
@@ -287,7 +313,7 @@ export function DesignEditor({
     } else if (alvo.tipo === "linha") {
       apply((d) => setRowCustomHtml(d, alvo.id, html));
     } else {
-      apply((d) => setBlockCustomHtml(d, alvo.id, html));
+      aplicarHtmlNoBloco(alvo.id, html);
     }
     setAlvoDoCodigo(null);
   }
@@ -381,13 +407,14 @@ export function DesignEditor({
             )
           }
           // Edição inline de pedaços com HTML próprio: o canvas devolve o HTML
-          // já saneado, e ele entra pelo mesmo caminho do painel de código.
+          // já saneado, e ele entra pelo mesmo caminho do painel de código —
+          // bloco de texto com override antigo é absorvido no primeiro commit.
           // Vazio (tudo apagado) derruba o override e o visual volta a valer.
           onRowHtmlCommit={(rowId, html) =>
             apply((d) => setRowCustomHtml(d, rowId, html))
           }
           onBlockHtmlCommit={(blockId, html) =>
-            apply((d) => setBlockCustomHtml(d, blockId, html))
+            aplicarHtmlNoBloco(blockId, html || null)
           }
           onRowAction={handleRowAction}
           onBlockAction={handleBlockAction}

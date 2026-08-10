@@ -6,9 +6,12 @@
 // pedaço geraria. É override e não conversão — o design continua guardado ao
 // lado, então voltar ao visual é apagar um campo, não refazer o e-mail.
 //
-// Não existe caminho de volta automático (HTML editado → atributos), porque
-// HTML livre não cabe no modelo: quem escreve `<td>` com três tabelas dentro
-// não tem "alinhamento" nem "tamanho da fonte" para onde voltar.
+// EXCEÇÃO: bloco de TEXTO não usa override — o `html` dele já é HTML livre,
+// então editar o código ABSORVE de volta (lib/email-builder/absorver.ts):
+// conteúdo vira `html`, moldura vira atributos, e o bloco segue 100% editável.
+// Nos demais níveis não existe caminho de volta automático, porque HTML livre
+// não cabe no modelo: quem escreve uma linha com três tabelas dentro não tem
+// "alinhamento" nem "tamanho da fonte" para onde voltar.
 
 export interface DesignSettings {
   bodyBackground: string;

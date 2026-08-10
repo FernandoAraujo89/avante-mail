@@ -688,8 +688,10 @@ function CodigoProprio({
   envolverEmTr?: boolean;
   onCommit?: (html: string) => void;
 }) {
-  // O editável é o MESMO elemento que carrega o dangerouslySetInnerHTML: o
-  // usuário só consegue mexer dentro dele, e o React continua dono do resto.
+  // O host da edição é sempre um <div>: Safari se recusa a pôr o caret quando
+  // o próprio contentEditable é um elemento de tabela (tbody/tr/td). Por isso
+  // o bloco NÃO edita a tabela-wrapper diretamente — o div de fora é o
+  // editável e a tabela vive dentro dele, via dangerouslySetInnerHTML.
   const edicao = onCommit
     ? ({
         contentEditable: true,
@@ -714,29 +716,98 @@ function CodigoProprio({
     );
   }
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <tbody
-        {...edicao}
-        onBlur={
-          onCommit
-            ? (e) => {
-                // Guarda-se só o miolo do <tr> — o wrapper é do canvas, e a
-                // compilação põe o dela. Se a edição engoliu o <tr> inteiro,
-                // vale o que sobrou (vazio inclusive: aí o override cai e o
-                // bloco volta ao visual).
-                const tr = e.currentTarget.querySelector("tr");
-                onCommit(
-                  limparHtmlDoUsuario(
-                    tr ? tr.innerHTML : e.currentTarget.innerHTML
-                  )
-                );
-              }
-            : undefined
-        }
-        dangerouslySetInnerHTML={{ __html: `<tr>${html}</tr>` }}
-      />
-    </table>
+    <div
+      {...edicao}
+      // Clique na borda do bloco põe o caret FORA do <td> (filho direto do
+      // host, antes/depois da tabela) — o que se digitasse ali ficaria fora
+      // do commit. Empurra o caret para dentro da célula mais próxima.
+      onClick={onCommit ? (e) => caretParaDentroDoTd(e.currentTarget) : undefined}
+      onFocus={onCommit ? (e) => caretParaDentroDoTd(e.currentTarget) : undefined}
+      onBlur={
+        onCommit
+          ? (e) => {
+              // Guarda-se só o miolo do <tr> — a tabela e o <tr> são do
+              // canvas, e a compilação põe os dela. Se a edição engoliu a
+              // tabela inteira, vale o que sobrou (vazio inclusive: aí o
+              // override cai e o bloco volta ao visual).
+              onCommit(limparHtmlDoUsuario(miolaDoTr(e.currentTarget)));
+            }
+          : undefined
+      }
+      dangerouslySetInnerHTML={{
+        __html: `<table style="width:100%;border-collapse:collapse"><tbody><tr>${html}</tr></tbody></table>`,
+      }}
+    />
   );
+}
+
+/**
+ * Serializa o conteúdo editado de um bloco-wrapper (host > table > tr > td).
+ *
+ * O navegador às vezes deixa conteúdo digitado FORA da tabela (caret na borda
+ * do host). Descartá-lo seria sumir com texto que a pessoa viu na tela — o que
+ * ficou de fora é reencaixado no começo/fim da primeira/última célula.
+ */
+function miolaDoTr(host: HTMLElement): string {
+  const tabela = host.querySelector("table");
+  const tr = tabela?.querySelector("tr");
+  if (!tabela || !tr) return host.innerHTML;
+
+  const antes: string[] = [];
+  const depois: string[] = [];
+  let passouTabela = false;
+  for (const filho of Array.from(host.childNodes)) {
+    if (filho === tabela) {
+      passouTabela = true;
+      continue;
+    }
+    const trecho =
+      filho.nodeType === Node.TEXT_NODE
+        ? filho.textContent ?? ""
+        : filho instanceof HTMLElement
+          ? filho.outerHTML
+          : "";
+    if (!trecho.trim()) continue;
+    (passouTabela ? depois : antes).push(trecho);
+  }
+
+  const tds = tr.querySelectorAll("td");
+  if (tds.length > 0) {
+    if (antes.length) tds[0].insertAdjacentHTML("afterbegin", antes.join(""));
+    if (depois.length)
+      tds[tds.length - 1].insertAdjacentHTML("beforeend", depois.join(""));
+    return tr.innerHTML;
+  }
+  // Sem célula nenhuma: vale tudo o que sobrou, na ordem.
+  return [antes.join(""), tr.innerHTML, depois.join("")].join("");
+}
+
+/**
+ * Caret solto no host (fora de qualquer <td>) vai para a célula mais próxima.
+ *
+ * Adiado para depois do evento: no `focus`, o navegador ainda não assentou a
+ * seleção — corrigir na hora leria a seleção antiga (ou nenhuma) e desistiria.
+ */
+function caretParaDentroDoTd(host: HTMLElement) {
+  setTimeout(() => {
+    if (document.activeElement !== host) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const node = range.startContainer;
+    const el = node instanceof HTMLElement ? node : node.parentElement;
+    if (!el || !host.contains(el)) return;
+    if (el.closest("td")) return; // já está dentro de uma célula
+    const tds = host.querySelectorAll("td");
+    if (tds.length === 0) return;
+    const noInicio = range.startOffset === 0;
+    const td = noInicio ? tds[0] : tds[tds.length - 1];
+    const novo = document.createRange();
+    novo.selectNodeContents(td);
+    novo.collapse(noInicio);
+    sel.removeAllRanges();
+    sel.addRange(novo);
+  }, 0);
 }
 
 /**

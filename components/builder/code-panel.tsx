@@ -14,12 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import { CodeEditor } from "@/components/ui/code-editor";
 import { limparHtmlDoUsuario } from "@/lib/email-builder/codigo";
-import type { EmailDesign } from "@/lib/email-builder/types";
+import type { BlockType, EmailDesign } from "@/lib/email-builder/types";
 
 export type AlvoDoCodigo =
   | { tipo: "documento" }
   | { tipo: "linha"; id: string }
-  | { tipo: "bloco"; id: string; rotulo: string };
+  | { tipo: "bloco"; id: string; rotulo: string; blockType: BlockType };
 
 const TITULOS = {
   documento: "Código do e-mail",
@@ -101,12 +101,19 @@ export function CodePanel({
       ? `${TITULOS.bloco}: ${alvo.rotulo}`
       : TITULOS[alvo.tipo];
 
+  // Bloco de TEXTO absorve o código aplicado (conteúdo + moldura viram o
+  // próprio bloco) — os controles seguem valendo. Os demais alvos viram
+  // override: o código passa a mandar e os controles daquele pedaço param.
+  const absorve = alvo.tipo === "bloco" && alvo.blockType === "text";
+
   const descricao =
     alvo.tipo === "documento"
       ? "O e-mail inteiro, como sai do compilador. Editar aqui faz o criador visual parar de mandar no que é enviado."
       : alvo.tipo === "linha"
         ? "A tabela desta estrutura. Editar aqui faz os blocos dentro dela pararem de valer."
-        : "O <td> deste bloco. Editar aqui faz os controles do bloco pararem de valer.";
+        : absorve
+          ? "O <td> deste bloco. Ao aplicar, o bloco absorve o código — o conteúdo vira o texto do bloco e os controles visuais continuam valendo."
+          : "O <td> deste bloco. Editar aqui faz os controles do bloco pararem de valer.";
 
   return (
     <Dialog
@@ -132,8 +139,9 @@ export function CodePanel({
 
         {htmlProprio ? (
           <p className="rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2 text-xs text-warning-dark">
-            Este pedaço já está com HTML próprio. Os controles visuais dele estão
-            desligados até você voltar ao gerado.
+            {absorve
+              ? "Este bloco está com HTML próprio de uma versão antiga. Ao aplicar, ele volta a ser um bloco comum, com o código absorvido."
+              : "Este pedaço já está com HTML próprio. Os controles visuais dele estão desligados até você voltar ao gerado."}
           </p>
         ) : null}
 
