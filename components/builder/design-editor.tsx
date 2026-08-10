@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Canvas,
@@ -15,7 +15,7 @@ import {
 } from "@/components/builder/code-panel";
 import { BuilderSidebar } from "@/components/builder/sidebar";
 import { Button } from "@/components/ui/button";
-import { Code2, RotateCcw } from "lucide-react";
+import { Code2, Redo2, RotateCcw, Undo2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +26,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { absorverHtmlEmBlocoDeTexto } from "@/lib/email-builder/absorver";
+import {
+  absorverHtmlEmBlocoDeTexto,
+  aplicarAttrsNaEstrutura,
+  aplicarAttrsNoBloco,
+} from "@/lib/email-builder/absorver";
 import {
   addBlock,
   addRow,
@@ -100,8 +104,72 @@ export function DesignEditor({
     loadModules();
   }, [loadModules]);
 
-  const apply = (fn: (design: EmailDesign) => EmailDesign) =>
-    onChange(fn(value));
+  // ─── Desfazer / refazer ──────────────────────────────────────
+  //
+  // Toda mudança de design passa por `apply`, então o histórico vive aqui:
+  // antes de aplicar, o estado atual vai para a pilha. Applies em sequência
+  // rápida (digitação num campo dispara um por tecla) colapsam num passo só.
+
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const passadoRef = useRef<EmailDesign[]>([]);
+  const futuroRef = useRef<EmailDesign[]>([]);
+  const ultimoApplyRef = useRef(0);
+  const [, marcarHistorico] = useState(0);
+
+  const apply = (fn: (design: EmailDesign) => EmailDesign) => {
+    const agora = Date.now();
+    if (agora - ultimoApplyRef.current > 600) {
+      passadoRef.current.push(valueRef.current);
+      if (passadoRef.current.length > 100) passadoRef.current.shift();
+    }
+    ultimoApplyRef.current = agora;
+    futuroRef.current = [];
+    marcarHistorico((v) => v + 1);
+    onChangeRef.current(fn(valueRef.current));
+  };
+
+  const undo = useCallback(() => {
+    const anterior = passadoRef.current.pop();
+    if (!anterior) return;
+    futuroRef.current.push(valueRef.current);
+    ultimoApplyRef.current = 0; // o próximo apply abre um passo novo
+    marcarHistorico((v) => v + 1);
+    onChangeRef.current(anterior);
+  }, []);
+
+  const redo = useCallback(() => {
+    const seguinte = futuroRef.current.pop();
+    if (!seguinte) return;
+    passadoRef.current.push(valueRef.current);
+    ultimoApplyRef.current = 0;
+    marcarHistorico((v) => v + 1);
+    onChangeRef.current(seguinte);
+  }, []);
+
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      const tecla = e.key.toLowerCase();
+      if (tecla !== "z" && tecla !== "y") return;
+      // Dentro de campo de texto ou edição inline, vale o desfazer nativo.
+      const ativo = document.activeElement as HTMLElement | null;
+      if (
+        ativo &&
+        (ativo.tagName === "INPUT" ||
+          ativo.tagName === "TEXTAREA" ||
+          ativo.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      if (tecla === "y" || e.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [undo, redo]);
 
   // ─── Inserções da paleta ─────────────────────────────────────
 
@@ -235,11 +303,36 @@ export function DesignEditor({
   }
 
   function handleUpdateBlock(blockId: string, updater: (b: Block) => Block) {
-    apply((d) => updateBlock(d, blockId, updater));
+    apply((d) =>
+      updateBlock(d, blockId, (b) => {
+        // Texto com override antigo: a primeira mexida no painel absorve o
+        // código e o ajuste já cai num bloco comum.
+        const base =
+          b.type === "text" && b.customHtml?.trim()
+            ? absorverHtmlEmBlocoDeTexto(b, b.customHtml)
+            : b;
+        const novo = updater(base);
+        // Demais tipos com HTML próprio: o controle escreve direto no código.
+        return novo.type !== "text" && novo.customHtml?.trim()
+          ? { ...novo, customHtml: aplicarAttrsNoBloco(novo) }
+          : novo;
+      })
+    );
   }
 
   function handleUpdateRowAttrs(rowId: string, patch: Partial<Row["attrs"]>) {
-    apply((d) => updateRowAttrs(d, rowId, patch));
+    apply((d) => {
+      const comAttrs = updateRowAttrs(d, rowId, patch);
+      // Estrutura com HTML próprio: fundo/espaçamento entram no código também.
+      return {
+        ...comAttrs,
+        rows: comAttrs.rows.map((r) =>
+          r.id === rowId && r.customHtml?.trim()
+            ? { ...r, customHtml: aplicarAttrsNaEstrutura(r.customHtml, r.attrs) }
+            : r
+        ),
+      };
+    });
   }
 
   function handleUpdateSettings(patch: Partial<DesignSettings>) {
@@ -382,7 +475,27 @@ export function DesignEditor({
         </div>
       ) : null}
 
-      <div className="mb-3 flex items-center justify-end">
+      <div className="mb-3 flex items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={undo}
+          disabled={passadoRef.current.length === 0}
+          title="Desfazer (Ctrl+Z)"
+        >
+          <Undo2 />
+          Desfazer
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={redo}
+          disabled={futuroRef.current.length === 0}
+          title="Refazer (Ctrl+Shift+Z)"
+        >
+          <Redo2 />
+          Refazer
+        </Button>
         <Button
           variant="outline"
           size="sm"

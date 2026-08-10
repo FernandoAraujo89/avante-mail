@@ -9,9 +9,10 @@
 // EXCEÇÃO: bloco de TEXTO não usa override — o `html` dele já é HTML livre,
 // então editar o código ABSORVE de volta (lib/email-builder/absorver.ts):
 // conteúdo vira `html`, moldura vira atributos, e o bloco segue 100% editável.
-// Nos demais níveis não existe caminho de volta automático, porque HTML livre
-// não cabe no modelo: quem escreve uma linha com três tabelas dentro não tem
-// "alinhamento" nem "tamanho da fonte" para onde voltar.
+// Nos demais níveis não existe caminho de volta automático (HTML livre não
+// vira colunas/atributos), mas NADA fica travado: o texto edita-se inline no
+// canvas, e os controles do painel escrevem direto no customHtml
+// (aplicarAttrsNaEstrutura / aplicarAttrsNoBloco, no mesmo absorver.ts).
 
 export interface DesignSettings {
   bodyBackground: string;

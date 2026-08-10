@@ -17,7 +17,7 @@
 // Roda só no navegador (DOMParser); o commit da edição inline e o painel de
 // código são ambos client-side.
 
-import type { TextBlock } from "./types";
+import type { Block, Row, TextBlock } from "./types";
 
 /**
  * Lê uma propriedade do ATRIBUTO style, sem passar pelo CSSOM — o CSSOM
@@ -95,4 +95,144 @@ export function absorverHtmlEmBlocoDeTexto(
   const novo: TextBlock = { ...bloco, html: conteudo, attrs };
   delete novo.customHtml;
   return novo;
+}
+
+// ─── Controles escrevendo no HTML próprio ────────────────────────
+//
+// Estrutura e blocos que não são de texto continuam com override (tabela livre
+// não vira colunas/atributos), mas os controles do painel NÃO morrem: cada
+// ajuste é aplicado cirurgicamente no próprio código, nos elementos que o
+// gerador teria estilizado. Quem edita a moldura na mão e depois mexe num
+// controle vê o controle vencer NAQUELA propriedade — as demais ficam como
+// escreveu.
+
+/** Fundo e espaçamento da ESTRUTURA aplicados na tabela externa do código. */
+export function aplicarAttrsNaEstrutura(
+  html: string,
+  attrs: Row["attrs"]
+): string {
+  const doc = new DOMParser().parseFromString(
+    `<div id="__raiz__">${html}</div>`,
+    "text/html"
+  );
+  const raiz = doc.getElementById("__raiz__");
+  const tabela = raiz?.querySelector("table");
+  if (!raiz || !tabela) return html;
+
+  if (attrs.backgroundColor) {
+    // O MJML põe a cor duas vezes (background e background-color) — repete-se
+    // o padrão para valer tanto no canvas quanto nos clientes de e-mail.
+    tabela.style.background = attrs.backgroundColor;
+    tabela.style.backgroundColor = attrs.backgroundColor;
+    tabela.setAttribute("bgcolor", attrs.backgroundColor);
+  } else {
+    tabela.style.removeProperty("background");
+    tabela.style.removeProperty("background-color");
+    tabela.removeAttribute("bgcolor");
+  }
+
+  const td = tabela.querySelector("td");
+  if (td && attrs.padding.trim()) td.style.padding = attrs.padding;
+
+  return raiz.innerHTML;
+}
+
+/**
+ * Atributos de um bloco com HTML próprio aplicados no código dele (o `<td>`).
+ * Bloco de texto nunca chega aqui — ele absorve o código e vira bloco comum.
+ */
+export function aplicarAttrsNoBloco(bloco: Block): string {
+  const html = bloco.customHtml ?? "";
+  const doc = new DOMParser().parseFromString(
+    `<table><tbody><tr>${html}</tr></tbody></table>`,
+    "text/html"
+  );
+  const tr = doc.querySelector("tr");
+  const td = tr?.querySelector("td");
+  if (!tr || !td) return html;
+
+  const attrs = bloco.attrs as Partial<{ align: string; padding: string }>;
+  if (attrs.align) {
+    td.setAttribute("align", attrs.align);
+    td.style.textAlign = attrs.align;
+  }
+  if (attrs.padding?.trim()) td.style.padding = attrs.padding;
+
+  if (bloco.type === "image") {
+    const img = td.querySelector("img");
+    if (img) {
+      if (bloco.src) img.setAttribute("src", bloco.src);
+      img.setAttribute("alt", bloco.alt);
+      if (bloco.attrs.width) {
+        img.setAttribute("width", String(bloco.attrs.width));
+        img.style.width = `${bloco.attrs.width}px`;
+      } else {
+        img.removeAttribute("width");
+        img.style.width = "100%";
+      }
+      img.style.borderRadius = `${bloco.attrs.borderRadius}px`;
+      const a = img.closest("a");
+      if (bloco.href) {
+        if (a) a.setAttribute("href", bloco.href);
+        else {
+          const novo = doc.createElement("a");
+          novo.setAttribute("href", bloco.href);
+          novo.setAttribute("target", "_blank");
+          img.replaceWith(novo);
+          novo.appendChild(img);
+        }
+      } else if (a) {
+        a.replaceWith(img);
+      }
+    }
+  } else if (bloco.type === "button") {
+    const a = td.querySelector("a");
+    if (a) {
+      if (bloco.text.trim()) a.textContent = bloco.text;
+      a.setAttribute("href", bloco.href);
+      a.style.color = bloco.attrs.color;
+      a.style.fontSize = `${bloco.attrs.fontSize}px`;
+      const tdBotao = a.closest("td") ?? td;
+      tdBotao.style.background = bloco.attrs.backgroundColor;
+      tdBotao.setAttribute("bgcolor", bloco.attrs.backgroundColor);
+      tdBotao.style.borderRadius = `${bloco.attrs.borderRadius}px`;
+    }
+  } else if (bloco.type === "spacer") {
+    const alvo = td.querySelector("div") ?? td;
+    alvo.style.height = `${bloco.attrs.height}px`;
+    alvo.style.lineHeight = `${bloco.attrs.height}px`;
+  } else if (bloco.type === "divider") {
+    const p = td.querySelector("p");
+    if (p)
+      p.style.borderTop = `${bloco.attrs.borderWidth}px solid ${bloco.attrs.borderColor}`;
+  } else if (bloco.type === "social") {
+    const imgs = Array.from(td.querySelectorAll("img"));
+    for (const img of imgs) {
+      img.setAttribute("width", String(bloco.attrs.iconSize));
+      img.setAttribute("height", String(bloco.attrs.iconSize));
+      img.style.width = `${bloco.attrs.iconSize}px`;
+      img.style.height = `${bloco.attrs.iconSize}px`;
+      // O MJML trava o tamanho também na célula e na tabelinha do ícone —
+      // sem ajustá-las, o ícone fica preso na medida antiga.
+      const celula = img.closest("td");
+      if (celula && celula !== td) {
+        celula.style.width = `${bloco.attrs.iconSize}px`;
+        celula.style.height = `${bloco.attrs.iconSize}px`;
+      }
+      const tabelaIcone = img.closest("table");
+      if (tabelaIcone && td.contains(tabelaIcone)) {
+        tabelaIcone.style.width = `${bloco.attrs.iconSize}px`;
+      }
+    }
+    // Cada rede é um <a><img></a>, na ordem dos itens. Trocar link/ícone de
+    // item existente funciona; ADICIONAR/REMOVER item não tem onde encaixar
+    // num código livre — aí é pelo painel de código.
+    const as = Array.from(td.querySelectorAll("a"));
+    bloco.items.forEach((item, i) => {
+      if (as[i] && item.href) as[i].setAttribute("href", item.href);
+      if (imgs[i] && item.iconSrc) imgs[i].setAttribute("src", item.iconSrc);
+    });
+  }
+
+  return tr.innerHTML;
 }

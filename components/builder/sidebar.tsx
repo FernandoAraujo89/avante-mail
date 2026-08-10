@@ -776,14 +776,13 @@ export function BuilderSidebar({
             <div className="p-4">
               {selectedBlock.block.customHtml?.trim() ? (
                 <AvisoDeCodigoProprio o="bloco" />
-              ) : (
-                <BlockInspector
-                  block={selectedBlock.block}
-                  onUpdate={(updater) =>
-                    onUpdateBlock(selectedBlock.block.id, updater)
-                  }
-                />
-              )}
+              ) : null}
+              <BlockInspector
+                block={selectedBlock.block}
+                onUpdate={(updater) =>
+                  onUpdateBlock(selectedBlock.block.id, updater)
+                }
+              />
             </div>
           </div>
         ) : selectedRow ? (
@@ -799,12 +798,11 @@ export function BuilderSidebar({
             <div className="p-4">
               {selectedRow.customHtml?.trim() ? (
                 <AvisoDeCodigoProprio o="estrutura" />
-              ) : (
-                <RowInspector
-                  row={selectedRow}
-                  onUpdate={(patch) => onUpdateRowAttrs(selectedRow.id, patch)}
-                />
-              )}
+              ) : null}
+              <RowInspector
+                row={selectedRow}
+                onUpdate={(patch) => onUpdateRowAttrs(selectedRow.id, patch)}
+              />
             </div>
             <div className="border-t border-border">
               <Section
@@ -940,24 +938,21 @@ export function BuilderSidebar({
 }
 
 /**
- * O que aparece no lugar dos controles quando o pedaço tem HTML próprio.
+ * Dica acima dos controles quando o pedaço tem HTML próprio.
  *
- * Deixar os controles no ar seria pior do que escondê-los: a pessoa mudaria o
- * tamanho da fonte cinco vezes, não veria nada acontecer, e concluiria que o
- * editor está quebrado — quando na verdade é o código dela que manda agora.
+ * Nada fica travado: os ajustes abaixo são aplicados direto no código, e o
+ * texto continua editável no e-mail. A dica só explica onde mexer no que os
+ * controles não cobrem (a estrutura do código em si).
  */
 function AvisoDeCodigoProprio({ o }: { o: "bloco" | "estrutura" }) {
   const rotulo = o === "bloco" ? "Código do bloco" : "Código da estrutura";
   return (
-    <div className="grid gap-2 rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-3 text-xs text-warning-dark">
-      <p className="font-medium">Este {o} está com HTML próprio.</p>
-      <p>
-        Estes controles não valem mais aqui — quem manda é o código. O texto
-        continua editável direto no e-mail, com a barra de formatação. Para
-        mexer no resto, use o botão{" "}
-        <span className="font-medium">{rotulo}</span>, acima do e-mail, para
-        editar o código ou voltar ao gerado.
-      </p>
+    <div className="mb-4 rounded-lg border border-info/30 bg-info/10 px-3 py-2.5 text-xs text-muted-foreground">
+      {o === "bloco" ? "Este bloco" : "Esta estrutura"} está com{" "}
+      <span className="font-medium">HTML próprio</span>. Os ajustes abaixo são
+      aplicados direto no código, e o texto segue editável no e-mail. Para
+      mudar a estrutura do código — ou voltar ao gerado — use o botão{" "}
+      <span className="font-medium">{rotulo}</span>, acima do e-mail.
     </div>
   );
 }
