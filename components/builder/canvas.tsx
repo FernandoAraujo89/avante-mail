@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import {
   AArrowDown,
   AArrowUp,
@@ -519,9 +519,9 @@ function BlockView({
   switch (block.type) {
     case "text":
       content = (
-        <div
+        <EditavelHtml
+          html={block.html}
           contentEditable
-          suppressContentEditableWarning
           spellCheck={false}
           style={{
             fontSize: block.attrs.fontSize,
@@ -535,7 +535,6 @@ function BlockView({
           }}
           onPaste={aoColarLimpo}
           onBlur={(e) => onTextCommit(e.currentTarget.innerHTML)}
-          dangerouslySetInnerHTML={{ __html: block.html }}
         />
       );
       break;
@@ -662,10 +661,32 @@ function BlockView({
 }
 
 /**
+ * contentEditable FORA do reconciliador do React.
+ *
+ * Com dangerouslySetInnerHTML, o commit do React reescreve o innerHTML em
+ * re-renders mesmo quando o __html é idêntico — recriando os nós de texto e
+ * matando caret e seleção. Como clicar num bloco re-renderiza (seleção), a
+ * edição virava roleta: o cursor não ficava onde se clicou e a seleção se
+ * desfazia sozinha. Aqui o HTML entra imperativamente, e SÓ quando o VALOR da
+ * prop muda de fato (deps do efeito) — re-render sem mudança não toca no DOM.
+ */
+function EditavelHtml({
+  html,
+  ...props
+}: { html: string } & React.HTMLAttributes<HTMLDivElement>) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && el.innerHTML !== html) el.innerHTML = html;
+  }, [html]);
+  return <div ref={ref} suppressContentEditableWarning {...props} />;
+}
+
+/**
  * Desenha um pedaço escrito à mão.
  *
- * Vai com `dangerouslySetInnerHTML` de propósito — é o HTML do próprio autor,
- * já sem `<script>` e sem `on*` (limparHtmlDoUsuario), exibido na tela dele.
+ * O HTML é do próprio autor, já sem `<script>` e sem `on*`
+ * (limparHtmlDoUsuario), exibido na tela dele via EditavelHtml.
  *
  * Com `onCommit`, o pedaço continua editável como texto: passar para o código
  * não pode custar o WYSIWYG. A pessoa clica, escreve e formata como num bloco
@@ -704,19 +725,20 @@ function CodigoProprio({
 
   if (!envolverEmTr) {
     return (
-      <div
+      <EditavelHtml
+        html={html}
         {...edicao}
         onBlur={
           onCommit
             ? (e) => onCommit(limparHtmlDoUsuario(e.currentTarget.innerHTML))
             : undefined
         }
-        dangerouslySetInnerHTML={{ __html: html }}
       />
     );
   }
   return (
-    <div
+    <EditavelHtml
+      html={`<table style="width:100%;border-collapse:collapse"><tbody><tr>${html}</tr></tbody></table>`}
       {...edicao}
       // Clique na borda do bloco põe o caret FORA do <td> (filho direto do
       // host, antes/depois da tabela) — o que se digitasse ali ficaria fora
@@ -734,9 +756,6 @@ function CodigoProprio({
             }
           : undefined
       }
-      dangerouslySetInnerHTML={{
-        __html: `<table style="width:100%;border-collapse:collapse"><tbody><tr>${html}</tr></tbody></table>`,
-      }}
     />
   );
 }
