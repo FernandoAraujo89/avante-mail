@@ -72,6 +72,7 @@ Antes de tudo: `cp .env.local.example .env.local` e preencha as variáveis
 | Comando            | O que faz                                  |
 | ------------------ | ------------------------------------------ |
 | `npm run dev`      | Next.js em modo dev (localhost:3000)       |
+| `npm test`         | Testes de unidade (vitest)                 |
 | `npm run worker`   | Worker de disparo (BullMQ, tsx watch)      |
 | `npm run seed`     | Popula o banco com dados de teste          |
 | `npm run db:push`  | Cria/atualiza as tabelas no Neon           |
@@ -102,6 +103,61 @@ worker/email-worker.ts (processo separado, concorrência 5)
 - **Abertura**: pixel 1×1 em `/api/track/open?sid=...`
 - **Clique**: o CTA passa por `/api/track/click?sid=...&url=...` e redireciona
 - **Descadastro**: link com JWT em `/unsubscribe?token=...` (página pública)
+
+## Canal SMS (Twilio)
+
+Terceiro canal, ao lado de e-mail e WhatsApp: mesma campanha, mesma fila,
+mesma tabela de envios, mesmo painel de métricas.
+
+### Configuração
+
+1. **Console da Twilio → Account → API keys & tokens**: crie uma API Key do
+   tipo **Restricted** com permissão de _Read_, _List_ e _Create_ somente em
+   **messages**. Guarde o Secret — ele aparece uma única vez.
+2. **Messaging → Services**: copie o SID do Messaging Service do SMS (começa
+   com `MG`). É por ele que tudo é enviado — nunca pelo número.
+3. Preencha no `.env.local` (em produção, no `.env.local` **do servidor**, que
+   o `deploy.sh` não sobrescreve):
+
+   ```
+   TWILIO_SMS_ENABLED=true
+   TWILIO_ACCOUNT_SID=AC...
+   TWILIO_API_KEY_SID=SK...
+   TWILIO_API_KEY_SECRET=...
+   TWILIO_AUTH_TOKEN=...
+   TWILIO_SMS_MESSAGING_SERVICE_SID=MG...
+   TWILIO_STATUS_CALLBACK_URL=https://campanhas.avantetools.com.br/api/webhooks/twilio/status
+   ```
+
+4. Suba a app. Com o canal ligado e alguma variável faltando, ela **não sobe** e
+   diz exatamente qual falta (`instrumentation.ts`). Para desligar o canal,
+   `TWILIO_SMS_ENABLED=false`.
+
+### Duas credenciais, dois papéis
+
+Trocar uma pela outra é o erro clássico do setup:
+
+| Credencial              | Para quê                                          |
+| ----------------------- | ------------------------------------------------- |
+| API Key SID + Secret    | Autentica as **chamadas à API** (envio)           |
+| Auth Token              | Valida a **assinatura dos webhooks** que chegam   |
+
+O Auth Token não autentica chamada nenhuma aqui: a API Key Restricted tem o
+mínimo de permissão necessária, e é ela que envia.
+
+### GSM-7 e custo
+
+O SMS cobra por **segmento**, não por mensagem. Em GSM-7 cabem 160 caracteres
+por segmento; um único caractere fora do alfabeto (um emoji, um travessão
+colado do Word) derruba a mensagem inteira para UCS-2 e o segmento cai para
+70 — um texto de 150 caracteres passa de 1 para 3 segmentos, triplicando o
+custo sem aviso. Por isso `lib/sms/gsm7.ts` translitera acentos (`ç`→`c`,
+`ã`→`a`) e bloqueia emoji, e o editor mostra a prévia sanitizada, a contagem e
+o custo antes do disparo.
+
+Telefone segue o mesmo rigor: `lib/sms/phone.ts` aceita a bagunça que vem de
+planilha (`(37) 99947-2264`, `037 9947-2264`, `+55…`) e recusa fixo, DDD
+inexistente e número de outro país — SMS para fixo é dinheiro jogado fora.
 
 ## Decisões de engenharia
 
