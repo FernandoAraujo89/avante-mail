@@ -42,6 +42,12 @@ export const AVANTE_SOCIAL_ITEMS: SocialItem[] = [
   },
 ];
 
+/**
+ * Entrelinha padrão dos blocos de texto (múltiplo da fonte). Blocos salvos
+ * antes do controle de entrelinha não têm o atributo — caem aqui.
+ */
+export const ENTRELINHA_PADRAO = 1.6;
+
 export function createBlock(type: BlockType): Block {
   switch (type) {
     case "text":
@@ -49,7 +55,13 @@ export function createBlock(type: BlockType): Block {
         id: uid(),
         type: "text",
         html: "Escreva aqui o seu texto. Você pode usar variáveis como {{nome_parceiro}}.",
-        attrs: { fontSize: 14, color: "", align: "left", padding: "10px 24px" },
+        attrs: {
+          fontSize: 14,
+          lineHeight: ENTRELINHA_PADRAO,
+          color: "",
+          align: "left",
+          padding: "10px 24px",
+        },
       };
     case "image":
       return {

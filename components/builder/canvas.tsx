@@ -25,7 +25,7 @@ import {
 
 import { limparHtmlDoUsuario } from "@/lib/email-builder/codigo";
 import { limparHtmlColado, textoParaHtml } from "@/lib/email-builder/paste";
-import { BLOCK_LABELS } from "@/lib/email-builder/presets";
+import { BLOCK_LABELS, ENTRELINHA_PADRAO } from "@/lib/email-builder/presets";
 import type {
   Block,
   BlockType,
@@ -528,7 +528,9 @@ function BlockView({
             color: block.attrs.color || settings.textColor,
             textAlign: block.attrs.align,
             padding: block.attrs.padding,
-            lineHeight: 1.6,
+            // || e não ??: enquanto o campo do painel está vazio o valor é 0,
+            // e texto com entrelinha 0 viraria uma pilha ilegível.
+            lineHeight: block.attrs.lineHeight || ENTRELINHA_PADRAO,
             fontFamily: settings.fontFamily,
             outline: "none",
             wordBreak: "break-word",

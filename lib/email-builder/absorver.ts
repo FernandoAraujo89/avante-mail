@@ -6,7 +6,8 @@
 // já é HTML livre; só a moldura precisa de tradução:
 //
 //   <td align/padding>            → attrs.align / attrs.padding
-//     <div font-size/color/align> → attrs.fontSize / attrs.color / attrs.align
+//     <div font-size/color/align/line-height>
+//                                 → attrs.fontSize / .color / .align / .lineHeight
 //       conteúdo                  → block.html
 //
 // A moldura é do bloco: propriedade de wrapper que não tem atributo
@@ -78,6 +79,12 @@ export function absorverHtmlEmBlocoDeTexto(
       const cor = propriedadeDoStyle(styleDiv, "color");
       // Só hex: rgb()/nomes não servem ao input de cor do painel.
       if (cor && /^#[0-9a-f]{3,8}$/i.test(cor)) attrs.color = cor;
+      // Só múltiplo sem unidade (o que o gerador escreve): px/% não têm
+      // tradução direta para o controle, que fala em × da fonte.
+      const entrelinha = propriedadeDoStyle(styleDiv, "line-height")?.match(
+        /^(\d+(?:\.\d+)?)$/
+      );
+      if (entrelinha) attrs.lineHeight = parseFloat(entrelinha[1]);
       const alignDiv = propriedadeDoStyle(styleDiv, "text-align")?.toLowerCase();
       if (alinhamentoValido(alignDiv ?? null)) attrs.align = alignDiv as typeof attrs.align;
       conteudo = div.innerHTML.trim();

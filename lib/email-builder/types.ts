@@ -30,6 +30,8 @@ export interface TextBlock {
   html: string;
   attrs: {
     fontSize: number;
+    /** Entrelinha em múltiplo da fonte; ausente/0 = ENTRELINHA_PADRAO. */
+    lineHeight?: number;
     color: string; // vazio = herda da configuração global
     align: "left" | "center" | "right";
     padding: string;

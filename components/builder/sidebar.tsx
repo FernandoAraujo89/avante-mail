@@ -37,6 +37,7 @@ import {
 import { findBlock } from "@/lib/email-builder/ops";
 import {
   BLOCK_LABELS,
+  ENTRELINHA_PADRAO,
   FONT_OPTIONS,
   STRUCTURES,
 } from "@/lib/email-builder/presets";
@@ -150,6 +151,7 @@ function NumberField({
   onChange,
   min = 0,
   max = 999,
+  step,
   suffix = "px",
 }: {
   label: string;
@@ -157,6 +159,7 @@ function NumberField({
   onChange: (value: number) => void;
   min?: number;
   max?: number;
+  step?: number;
   suffix?: string;
 }) {
   return (
@@ -166,6 +169,7 @@ function NumberField({
         value={value}
         min={min}
         max={max}
+        step={step}
         onChange={(e) => onChange(Number(e.target.value) || 0)}
       />
     </Field>
@@ -394,6 +398,15 @@ function BlockInspector({
             min={8}
             max={60}
             onChange={(v) => patchAttrs({ fontSize: v })}
+          />
+          <NumberField
+            label="Entrelinha"
+            suffix="× da fonte"
+            value={block.attrs.lineHeight ?? ENTRELINHA_PADRAO}
+            min={0.8}
+            max={3}
+            step={0.1}
+            onChange={(v) => patchAttrs({ lineHeight: v })}
           />
           <AlignField
             value={block.attrs.align}

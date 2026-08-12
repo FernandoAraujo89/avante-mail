@@ -2,6 +2,7 @@
 // O MJML gerado passa pelo mesmo pipeline dos templates de código
 // (variáveis Handlebars → mjml2html → pixel de tracking).
 
+import { ENTRELINHA_PADRAO } from "./presets";
 import type { Block, EmailDesign, Row } from "./types";
 
 function escAttr(value: string): string {
@@ -40,7 +41,10 @@ function compileBlock(block: Block, design: EmailDesign): string {
   switch (block.type) {
     case "text": {
       const color = block.attrs.color || design.settings.textColor;
-      return `<mj-text font-size="${block.attrs.fontSize}px" color="${escAttr(color)}" align="${block.attrs.align}" line-height="1.6" padding="${escAttr(block.attrs.padding)}">${block.html}</mj-text>`;
+      // Number() porque o design chega de JSON da API: um valor não numérico
+      // não pode vazar para dentro do atributo.
+      const entrelinha = Number(block.attrs.lineHeight) || ENTRELINHA_PADRAO;
+      return `<mj-text font-size="${block.attrs.fontSize}px" color="${escAttr(color)}" align="${block.attrs.align}" line-height="${entrelinha}" padding="${escAttr(block.attrs.padding)}">${block.html}</mj-text>`;
     }
     case "image": {
       const width =
