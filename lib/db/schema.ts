@@ -31,7 +31,7 @@ export const CAMPAIGN_STATUSES = [
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 
 // Canal de envio da campanha. E-mail é o padrão histórico.
-export const CAMPAIGN_CHANNELS = ["email", "whatsapp"] as const;
+export const CAMPAIGN_CHANNELS = ["email", "whatsapp", "sms"] as const;
 export type CampaignChannel = (typeof CAMPAIGN_CHANNELS)[number];
 
 // Tipo do envio. O Avante News é o boletim semanal dos parceiros White Label:
@@ -107,6 +107,12 @@ export const CONTACT_EVENT_TYPES = [
   "email_clicked",
   "whatsapp_replied",
   "whatsapp_unsubscribed",
+  // Canal SMS (Twilio): resposta recebida no inbound e opt-out por palavra
+  // (PARAR/SAIR/…) ou pelo erro 21610/21614 no status callback. Mesma lógica
+  // dos análogos de WhatsApp — o motor de automações ignora tipos que nenhum
+  // gatilho declara, então adicionar não mexe em fluxo em produção.
+  "sms_replied",
+  "sms_unsubscribed",
   // Movimentação do lead no funil, feita na área de Leads. Fica registrado
   // aqui para a linha do tempo da ficha e para o Lead Score (fase C) — o motor
   // de automações ignora o que nenhum gatilho declara, então adicionar o tipo
@@ -191,6 +197,15 @@ export const contacts = pgTable("contacts", {
   whatsappSubscribed: boolean("whatsapp_subscribed").notNull().default(false),
   whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),
   whatsappOptOutAt: timestamp("whatsapp_opt_out_at", { withTimezone: true }),
+  // Canal SMS: consentimento próprio, separado do e-mail e do WhatsApp — a
+  // LGPD trata cada canal como um aceite. Mesmo telefone do WhatsApp, mas o
+  // opt-out de um canal NÃO derruba o outro: quem respondeu SAIR no WhatsApp
+  // pode continuar aceitando SMS, e vice-versa. `smsOptOutAt` preenchido
+  // também cobre o número inválido/fixo (erro 21614 da Twilio): o significado
+  // operacional é o mesmo — não gastar mais dinheiro tentando.
+  smsSubscribed: boolean("sms_subscribed").notNull().default(false),
+  smsOptInAt: timestamp("sms_opt_in_at", { withTimezone: true }),
+  smsOptOutAt: timestamp("sms_opt_out_at", { withTimezone: true }),
 
   // ── Lead (docs/plano-webhooks-leads.md) ──────────────────────────────
   // Nulo = não é lead; é parceiro/contato comum. A separação operacional é
