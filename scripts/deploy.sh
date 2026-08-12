@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Deploy do Avante Mail para o VPS Contabo (stack em Docker Compose).
 # Uso: ./scripts/deploy.sh  (a partir da raiz do projeto)
+#
+# Antes, exporte o destino (fora do repositório, que é público):
+#   export AVANTE_DEPLOY_SERVER=usuario@ip-do-vps
 set -euo pipefail
 
-SERVER=root@169.58.32.104
+SERVER="${AVANTE_DEPLOY_SERVER:?defina AVANTE_DEPLOY_SERVER (ex.: export AVANTE_DEPLOY_SERVER=usuario@ip-do-vps)}"
 DIR=/root/avante-mail
 
 echo "→ Enviando arquivos..."
