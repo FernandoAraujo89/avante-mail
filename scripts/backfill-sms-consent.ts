@@ -28,16 +28,20 @@ import {
 // do escritório. Por isso cada telefone passa por `parseBrazilianMobile`, e o
 // que sobra é relatado por motivo.
 //
-// Rode NO SERVIDOR, onde está a base de verdade e o Node é o 22 do contêiner:
+// Rode NO SERVIDOR, onde está a base de verdade:
 //
-//   docker compose run --rm --no-deps app npx tsx scripts/backfill-sms-consent.ts
+//   docker compose run --rm --no-deps app npx jiti scripts/backfill-sms-consent.ts
 //
-// Rodando na sua máquina com Node 26, troque `npx tsx` por `npx jiti`: o
-// carregador CJS do tsx entrega a metadata da libphonenumber-js embrulhada em
-// `{ default }` e TODA chamada de `parseBrazilianMobile` morre com "metadata
-// argument … is not a valid metadata". O jiti resolve o build ESM do pacote,
-// que é o mesmo caminho usado pelo Next e pelos testes. O backfill de WhatsApp
-// não tem essa ressalva porque só fala SQL, sem tocar em telefone.
+// É `jiti`, NÃO `tsx` — e isso não é preciosismo. Sob `npx tsx` o carregador
+// CJS entrega a metadata da libphonenumber-js embrulhada em `{ default }` e
+// TODA chamada de `parseBrazilianMobile` morre com "Cannot read properties of
+// undefined (reading 'hasOwnProperty')". Não é questão de versão do Node:
+// aconteceu igual no Node 26 do Mac e no node:22-slim do contêiner. O jiti
+// resolve o build ESM do pacote, o mesmo caminho que o Next e os testes usam.
+//
+// O backfill de WhatsApp não tem essa ressalva porque só fala SQL. E o
+// worker/whatsapp-worker.ts roda sob tsx sem problema porque só usa
+// phoneToWaId, que é um replace de string e não toca na biblioteca.
 
 config({ path: ".env.local" });
 

@@ -13,6 +13,7 @@
     "worker:whatsapp": "tsx watch worker/whatsapp-worker.ts",
     "worker:sms": "tsx watch worker/sms-worker.ts",
     "seed": "tsx scripts/seed.ts",
+    "backfill:sms": "jiti scripts/backfill-sms-consent.ts",
     "test:whatsapp-webhook": "tsx scripts/test-whatsapp-webhook.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",

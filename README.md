@@ -193,21 +193,35 @@ pessoa do outro. Quem marca opt-in:
   não o executa, senão cada subida reverteria as decisões tomadas depois.
 
   ```
-  docker compose run --rm --no-deps app npx tsx scripts/backfill-sms-consent.ts
+  docker compose run --rm --no-deps app npx jiti scripts/backfill-sms-consent.ts
   ```
+
+  É `jiti`, não `tsx` — veja o aviso abaixo. Rodado em 14/08/2026 na base de
+  produção: 1.071 telefones, 1.035 celulares marcados, 36 fixos deixados de
+  fora.
 
 Quem tira: a pessoa respondendo `PARAR`/`SAIR`/`STOP` (webhook de entrada) ou a
 própria Twilio, pelos erros 21610 (opt-out) e 21614 (número inválido ou fixo).
 Nos dois casos o contato sai do canal na hora e nenhuma campanha futura tenta
 de novo.
 
-> **Atenção com `tsx` no Node 26**: `lib/phone.ts` e `lib/sms/phone.ts` usam a
-> `libphonenumber-js`, e sob `npx tsx` no Node 26 a metadata da biblioteca chega
-> como `{ default: … }` e qualquer chamada quebra com _"Cannot read properties
-> of undefined"_. Produção não é afetada — o contêiner é `node:22-slim` —, e os
-> workers de SMS e de automação não chamam essas funções. Atinge quem roda
-> scripts ou `npm run worker:whatsapp` numa máquina com Node 26: nesses casos
-> use `npx jiti` no lugar de `npx tsx`.
+> **`tsx` quebra a libphonenumber-js — use `jiti` nos scripts de telefone.**
+> Sob `npx tsx`, a metadata da `libphonenumber-js` chega embrulhada em
+> `{ default: … }` e qualquer chamada morre com _"Cannot read properties of
+> undefined (reading 'hasOwnProperty')"_. **Não é problema de versão do Node**:
+> foi reproduzido no Node 26 do Mac e no `node:22-slim` do contêiner de
+> produção. Quem carrega o módulo por outro caminho (Next.js, Vitest, `jiti`)
+> não é afetado.
+>
+> O que decide não é importar `lib/phone.ts`, é **chamar** uma função que usa a
+> biblioteca — `normalizePhone`, `formatPhone`, `firstValidPhone`,
+> `parseBrazilianMobile`. Por isso `worker/whatsapp-worker.ts` roda sob `tsx`
+> em produção sem problema: ele só usa `phoneToWaId`, que é um `replace` de
+> string e não toca na libphonenumber.
+>
+> Regra prática: **script que mexe com telefone roda com `npx jiti`**, não com
+> `npx tsx`. O `scripts/backfill-sms-consent.ts` é o caso vivo disso —
+> `npm run backfill:sms` já usa o carregador certo.
 
 ### O que ainda falta no canal
 
