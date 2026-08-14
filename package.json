@@ -15,7 +15,8 @@
     "seed": "tsx scripts/seed.ts",
     "test:whatsapp-webhook": "tsx scripts/test-whatsapp-webhook.ts",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "lock:prod": "npx -y npm@10.9.8 install --package-lock-only --no-audit --no-fund"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.19",

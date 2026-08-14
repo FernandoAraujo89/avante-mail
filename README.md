@@ -216,6 +216,31 @@ de novo.
 - Passo `send_sms` nas **automações** (o canal só é usado por campanha).
 - Reenvio por falha: hoje `/resend` vale só para o WhatsApp.
 
+## Mexeu em dependência? Regenere o lock com o npm 10
+
+O contêiner de produção é `node:22-slim`, que traz o **npm 10**. Uma máquina
+com Node 24/26 traz o npm 11, e o lock que ele escreve pode ser recusado pelo
+npm 10 no `npm ci` — com a mensagem "can only install packages when your
+package.json and package-lock.json are in sync", listando pacotes que você
+nunca instalou à mão (normalmente binários do `esbuild`).
+
+O sintoma é cruel: `npm install`, `npm test` e `npm run build` continuam
+passando na sua máquina, e **só o deploy quebra**, no `docker compose build`.
+Foi o que segurou as fases 1 e 2 do canal SMS de 11 a 14/08/2026 sem ninguém
+perceber.
+
+Depois de qualquer `npm install`/`npm uninstall`, rode:
+
+```
+npm run lock:prod
+```
+
+Ele regenera só o `package-lock.json` usando o npm 10, sem tocar em
+`node_modules`. Confira que o diff traz apenas entradas novas — se alguma
+versão existente mudar, foi o `npm install` que atualizou dependência, não o
+lock. E rode o deploy até o fim: `deploy.sh` falha ruidosamente, mas a última
+linha que ele imprime antes de morrer é o erro real.
+
 ## Decisões de engenharia
 
 - **BullMQ + Upstash**: o BullMQ fala o protocolo Redis nativo (TCP), não a
