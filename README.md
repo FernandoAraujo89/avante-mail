@@ -159,6 +159,63 @@ Telefone segue o mesmo rigor: `lib/sms/phone.ts` aceita a bagunça que vem de
 planilha (`(37) 99947-2264`, `037 9947-2264`, `+55…`) e recusa fixo, DDD
 inexistente e número de outro país — SMS para fixo é dinheiro jogado fora.
 
+### Como um SMS sai daqui
+
+Mesmo desenho dos outros dois canais: rota de disparo → fila no Redis → worker.
+
+1. `POST /api/campaigns/[id]/send` reconhece `channel = "sms"`, recusa texto
+   vazio ou com emoji, seleciona quem tem **celular + `sms_subscribed`** (lead
+   nunca entra), cria um `campaign_sends` por contato e enfileira em
+   `sms-sends`. Campanha agendada vira job com `delay`.
+2. `worker/sms-worker.ts` consome a fila, revalida o consentimento **no momento
+   do envio** (a campanha pode ter sido agendada semanas antes), translitera o
+   texto e chama a Twilio.
+3. O worker grava `campaign_sends.sms_segments` — a quantidade cobrada. É por
+   isso que ela mora no envio e não é recalculada do texto da campanha: a conta
+   do mês não pode mudar porque alguém duplicou a campanha e editou o texto.
+4. Os dois webhooks fecham o ciclo: `/api/webhooks/twilio/status` atualiza a
+   entrega e `/api/webhooks/twilio/inbound` registra resposta e opt-out.
+
+Rodar o worker: `npm run worker:sms` (local) ou o serviço `sms-worker` do
+`compose.yaml` (produção). Sem `TWILIO_SMS_ENABLED=true` e as envs completas
+ele sobe em **modo ocioso** — loga o que falta e aguarda, sem crash loop e sem
+tocar nos outros canais.
+
+### Consentimento e opt-out
+
+`sms_subscribed` é um aceite separado do WhatsApp: sair de um canal não tira a
+pessoa do outro. Quem marca opt-in:
+
+- cadastro manual e importação de CSV, **só quando o número é celular**;
+- `scripts/backfill-sms-consent.ts`, para a base que já existia. Ele nunca toca
+  em quem tem `sms_opt_out_at` preenchido e deixa fixo de fora, relatando
+  quantos ficaram e por quê. Não tem prefixo `migrate-` de propósito: o deploy
+  não o executa, senão cada subida reverteria as decisões tomadas depois.
+
+  ```
+  docker compose run --rm --no-deps app npx tsx scripts/backfill-sms-consent.ts
+  ```
+
+Quem tira: a pessoa respondendo `PARAR`/`SAIR`/`STOP` (webhook de entrada) ou a
+própria Twilio, pelos erros 21610 (opt-out) e 21614 (número inválido ou fixo).
+Nos dois casos o contato sai do canal na hora e nenhuma campanha futura tenta
+de novo.
+
+> **Atenção com `tsx` no Node 26**: `lib/phone.ts` e `lib/sms/phone.ts` usam a
+> `libphonenumber-js`, e sob `npx tsx` no Node 26 a metadata da biblioteca chega
+> como `{ default: … }` e qualquer chamada quebra com _"Cannot read properties
+> of undefined"_. Produção não é afetada — o contêiner é `node:22-slim` —, e os
+> workers de SMS e de automação não chamam essas funções. Atinge quem roda
+> scripts ou `npm run worker:whatsapp` numa máquina com Node 26: nesses casos
+> use `npx jiti` no lugar de `npx tsx`.
+
+### O que ainda falta no canal
+
+- Aba de SMS no painel geral de **Relatórios** (o relatório por campanha já
+  existe; o painel consolidado ainda só tem e-mail e WhatsApp).
+- Passo `send_sms` nas **automações** (o canal só é usado por campanha).
+- Reenvio por falha: hoje `/resend` vale só para o WhatsApp.
+
 ## Decisões de engenharia
 
 - **BullMQ + Upstash**: o BullMQ fala o protocolo Redis nativo (TCP), não a

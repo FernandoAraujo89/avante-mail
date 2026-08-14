@@ -102,6 +102,9 @@ export async function SendReport({
       errorMessage: campaignSends.errorMessage,
       bounceType: campaignSends.bounceType,
       complainedAt: campaignSends.complainedAt,
+      // Segmentos cobrados de cada SMS: é o que a Twilio fatura, e vem do
+      // envio porque o texto da campanha pode ter mudado desde o disparo.
+      smsSegments: campaignSends.smsSegments,
       // O id vai junto para a linha levar à ficha do contato.
       contactId: campaignSends.contactId,
       contactName: contacts.name,
@@ -115,6 +118,7 @@ export async function SendReport({
     .orderBy(asc(contacts.name));
 
   const isWhatsApp = campaign.channel === "whatsapp";
+  const isSms = campaign.channel === "sms";
   const isNews = campaign.kind === "news";
   // Envios que a Meta segurou por frequência/vazão: dá para reenviar depois.
   const resendable = sends.filter(
@@ -144,7 +148,11 @@ export async function SendReport({
       <PageHeader
         title={campaign.name}
         description={`${
-          isWhatsApp ? "Campanha de WhatsApp" : `Assunto: ${campaign.subject}`
+          isWhatsApp
+            ? "Campanha de WhatsApp"
+            : isSms
+              ? "Campanha de SMS"
+              : `Assunto: ${campaign.subject}`
         } · ${listsLabel(campaignListNames)}${
           campaign.sentAt
             ? ` · Concluída em ${formatDateTime(campaign.sentAt)}`
@@ -154,6 +162,7 @@ export async function SendReport({
         <div className="flex items-center gap-2">
           {isNews ? <Badge variant="info">Avante News</Badge> : null}
           {isWhatsApp ? <Badge variant="info">WhatsApp</Badge> : null}
+          {isSms ? <Badge variant="info">SMS</Badge> : null}
           <CampaignStatusBadge status={campaign.status} />
         </div>
       </PageHeader>
@@ -277,7 +286,103 @@ export async function SendReport({
     );
   }
 
-  // ─── Canal de e-mail ───────────────────────────────────────────────
+  // ─── Canal SMS ──────────────────────────────────────────────────────
+  // Nenhuma métrica de e-mail cabe aqui: SMS não tem abertura, não tem
+  // clique rastreado, não devolve e não tem denúncia de spam. O que existe é
+  // saiu / chegou na operadora / a pessoa respondeu — e quanto custou.
+  if (isSms) {
+    const chargeableSends = sends.filter((s) => s.sentAt !== null);
+    const segments = chargeableSends.reduce(
+      (soma, s) => soma + (s.smsSegments ?? 1),
+      0
+    );
+    const delivered = sends.filter((s) => s.deliveredAt !== null).length;
+    const replied = sends.filter((s) => s.repliedAt !== null).length;
+    // 21610 = pediu para sair; 21614 = número inválido ou fixo. Nos dois casos
+    // o contato já saiu do canal — é higiene da base, não erro técnico.
+    const optedOut = sends.filter(
+      (s) => s.errorCode === "21610" || s.errorCode === "21614"
+    ).length;
+    const cost = campaignCost({
+      channel: "sms",
+      chargeable: chargeableSends.length,
+      smsSegments: segments,
+    });
+
+    return (
+      <>
+        {header}
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Destinatários"
+            value={String(sends.length)}
+            hint={pending > 0 ? `${pending} na fila` : "Fila concluída"}
+            icon={Users}
+          />
+          <MetricCard
+            label="Enviados"
+            value={String(chargeableSends.length)}
+            hint={`${segments} segmento(s) cobrado(s)`}
+            icon={Send}
+          />
+          <MetricCard
+            label="Entregues"
+            value={String(delivered)}
+            hint={
+              delivered > 0
+                ? `Taxa: ${formatPercent(delivered, chargeableSends.length)}`
+                : "Nem toda operadora confirma a entrega"
+            }
+            icon={CheckCheck}
+          />
+          <MetricCard
+            label="Respostas"
+            value={String(replied)}
+            hint={
+              replied > 0 ? "Contatos que responderam" : "Nenhuma resposta ainda"
+            }
+            icon={MessageSquareReply}
+          />
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Saíram do canal"
+            value={String(optedOut)}
+            hint={
+              optedOut > 0
+                ? "Pediram PARAR ou o número não recebe SMS — já descadastrados"
+                : "Ninguém saiu nesta campanha"
+            }
+            icon={ShieldAlert}
+          />
+          <MetricCard
+            label="Falhas de envio"
+            value={String(failed)}
+            hint="Total de envios que falharam (inclui os que saíram do canal)"
+            icon={AlertTriangle}
+          />
+          <MetricCard
+            label="Custo (Twilio)"
+            value={formatUsd(cost.usd)}
+            hint={`≈ ${formatBrl(cost.brl)} · ${segments} segmento(s) em ${chargeableSends.length} envio(s)`}
+            icon={DollarSign}
+          />
+        </div>
+
+        <Card className="mt-6">
+          <SendsTable
+            sends={sends}
+            channel="sms"
+            vazio="Nenhum envio registrado para esta campanha."
+          />
+        </Card>
+      </>
+    );
+  }
+
+  // ─── Canal de e-mail ────────────────────────────────────────────────
   const sent = sends.filter((s) =>
     ["sent", "opened", "clicked"].includes(s.status)
   ).length;
@@ -288,8 +393,8 @@ export async function SendReport({
   const bounced = bouncedHard + bouncedSoft;
   const complained = sends.filter((s) => s.complainedAt !== null).length;
   // SES cobra por e-mail aceito (todo envio com sentAt, inclusive devolvidos).
-  const chargeableEmails = sends.filter((s) => s.sentAt !== null).length;
-  const cost = campaignCost({ channel: "email", chargeable: chargeableEmails });
+  const chargeable = sends.filter((s) => s.sentAt !== null).length;
+  const cost = campaignCost({ channel: "email", chargeable });
 
   return (
     <>
@@ -347,7 +452,7 @@ export async function SendReport({
         <MetricCard
           label="Custo (SES)"
           value={formatUsd(cost.usd)}
-          hint={`≈ ${formatBrl(cost.brl)} · ${chargeableEmails} e-mail(s)`}
+          hint={`≈ ${formatBrl(cost.brl)} · ${cost.chargeable} e-mail(s)`}
           icon={DollarSign}
         />
       </div>

@@ -69,6 +69,34 @@ export function getWhatsAppQueue() {
   return queue;
 }
 
+// ─── Fila do canal SMS ───────────────────────────────────────────
+// Mesma mecânica das outras duas, fila separada por um motivo prático: a
+// vazão do SMS é ordens de grandeza menor (long code entrega ~1 msg/s), e uma
+// campanha de SMS na fila do e-mail seguraria os e-mails atrás dela.
+
+export const SMS_QUEUE_NAME = "sms-sends";
+
+export interface SmsJobData {
+  sendId: string;
+  /** Nulo quando o envio vem de um passo de automação, não de uma campanha. */
+  campaignId: string | null;
+  contactId: string;
+}
+
+function createSmsQueue() {
+  return new Queue<SmsJobData>(SMS_QUEUE_NAME, {
+    connection: createRedisConnection(),
+  });
+}
+
+let cachedSmsQueue: ReturnType<typeof createSmsQueue> | undefined;
+
+export function getSmsQueue() {
+  const queue = cachedSmsQueue ?? createSmsQueue();
+  cachedSmsQueue = queue;
+  return queue;
+}
+
 // ─── Fila das automações ─────────────────────────────────────────
 // Um job = um passo de um contato. A espera ("Aguarde 2 dias") é um job
 // adiado, a mesma mecânica do agendamento de campanha.

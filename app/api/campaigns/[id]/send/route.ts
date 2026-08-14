@@ -19,8 +19,10 @@ import {
   type Campaign,
 } from "@/lib/db";
 import { naoEhLead } from "@/lib/leads";
-import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
+import { getEmailQueue, getSmsQueue, getWhatsAppQueue } from "@/lib/queue";
 import { sessionUserFromRequest } from "@/lib/session";
+import { isSmsEnabled } from "@/lib/sms/config";
+import { countSms, sanitizeGsm7 } from "@/lib/sms/gsm7";
 import { resolveNewsList, resolveTeamList } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
@@ -183,6 +185,145 @@ async function dispatchWhatsApp(
   return NextResponse.json({ queued: sends.length, scheduled: delay > 0 });
 }
 
+// Disparo do canal SMS: valida o canal ligado e o texto (não vazio e inteiro
+// dentro do GSM-7), seleciona contatos com telefone e consentimento de SMS,
+// cria os registros de envio e enfileira em "sms-sends".
+async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
+  if (!isSmsEnabled()) {
+    return NextResponse.json(
+      {
+        error:
+          "Canal SMS ainda não configurado — defina TWILIO_SMS_ENABLED=true e as envs TWILIO_* no servidor.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const texto = campaign.smsBody?.trim();
+  if (!texto) {
+    return NextResponse.json(
+      { error: "Escreva o texto do SMS antes de disparar." },
+      { status: 400 }
+    );
+  }
+
+  // A mesma transliteração que o worker fará. Barrar aqui é o que evita
+  // descobrir o emoji uma mensagem por vez, com a fila já andando.
+  const sanitizado = sanitizeGsm7(texto);
+  if (sanitizado.emojis.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Emoji não cabe em SMS: remova ${sanitizado.emojis.join(" ")} do texto. Um único emoji triplica o custo da campanha inteira.`,
+      },
+      { status: 400 }
+    );
+  }
+  if (sanitizado.foraDoGsm7.length > 0) {
+    return NextResponse.json(
+      {
+        error: `O texto tem caracteres que o SMS não aceita: ${sanitizado.foraDoGsm7.join(" ")}`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // Contatos elegíveis: consentimento de SMS + telefone + listas + tags.
+  const conditions: SQL[] = [
+    eq(contacts.smsSubscribed, true),
+    isNotNull(contacts.phone),
+  ];
+  // TRAVA 2 (docs/plano-webhooks-leads.md, seção 5): campanha é de parceiro,
+  // cliente e colaborador — lead NUNCA entra, sem exceção nem opção.
+  conditions.push(naoEhLead());
+  if (campaign.lists && campaign.lists.length > 0) {
+    conditions.push(
+      inArray(
+        contacts.id,
+        db
+          .select({ id: contactLists.contactId })
+          .from(contactLists)
+          .where(inArray(contactLists.listId, campaign.lists))
+      )
+    );
+  }
+  if (campaign.tagsFilter && campaign.tagsFilter.length > 0) {
+    conditions.push(arrayOverlaps(contacts.tags, campaign.tagsFilter));
+  }
+  // Escolha manual do passo "Destinatários": só restringe, nunca amplia.
+  if (campaign.recipientIds) {
+    if (campaign.recipientIds.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Nenhum destinatário selecionado — escolha ao menos um contato no passo Destinatários.",
+        },
+        { status: 400 }
+      );
+    }
+    conditions.push(inArray(contacts.id, campaign.recipientIds));
+  }
+
+  const eligible = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(and(...conditions));
+
+  if (eligible.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Nenhum destinatário elegível — só contatos com telefone e consentimento de SMS recebem. Leads não entram em campanha: eles são trabalhados em Leads e por automação.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const sends = await db
+    .insert(campaignSends)
+    .values(
+      eligible.map((contact) => ({
+        campaignId: campaign.id,
+        channel: "sms" as const,
+        contactId: contact.id,
+      }))
+    )
+    .returning({ id: campaignSends.id, contactId: campaignSends.contactId });
+
+  const delay = campaign.scheduledAt
+    ? Math.max(campaign.scheduledAt.getTime() - Date.now(), 0)
+    : 0;
+
+  const queue = getSmsQueue();
+  await queue.addBulk(
+    sends.map((send) => ({
+      name: "send-sms",
+      data: {
+        sendId: send.id,
+        campaignId: campaign.id,
+        contactId: send.contactId,
+      },
+      opts: {
+        delay,
+        attempts: 3,
+        backoff: { type: "exponential" as const, delay: 3000 },
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    }))
+  );
+
+  await db
+    .update(campaigns)
+    .set({ status: delay > 0 ? "scheduled" : "sending" })
+    .where(eq(campaigns.id, campaign.id));
+
+  return NextResponse.json({
+    queued: sends.length,
+    scheduled: delay > 0,
+    segments: countSms(sanitizado.texto).segmentos,
+  });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
@@ -219,6 +360,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if (campaign.channel === "whatsapp") {
       return await dispatchWhatsApp(db, campaign);
+    }
+    if (campaign.channel === "sms") {
+      return await dispatchSms(db, campaign);
     }
     // O e-mail vem do design próprio da campanha (mjmlContent). Campanhas
     // antigas ainda podem depender do template de origem (fallback).

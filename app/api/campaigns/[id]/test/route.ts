@@ -11,6 +11,10 @@ import {
 import { buildEmailHtml, buildTestVariables } from "@/lib/email";
 import { normalizePhone, phoneToWaId } from "@/lib/phone";
 import { sendEmail } from "@/lib/ses";
+import { sendSms } from "@/lib/sms/client";
+import { isSmsEnabled } from "@/lib/sms/config";
+import { sanitizeGsm7 } from "@/lib/sms/gsm7";
+import { MOTIVO_LABEL, parseBrazilianMobile } from "@/lib/sms/phone";
 import { EMAIL_REGEX, errorMessage } from "@/lib/utils";
 import {
   isWhatsAppConfigured,
@@ -139,6 +143,98 @@ async function sendWhatsAppTest(
   return NextResponse.json({ sent, failed, recipients: phones });
 }
 
+// Teste do canal SMS: manda a mensagem real (cobrada normalmente, por
+// segmento) para até 3 celulares. Vale mais aqui do que nos outros canais —
+// a transliteração para GSM-7 e a quebra em segmentos só aparecem de verdade
+// no aparelho, e o disparo real não tem volta.
+async function sendSmsTest(campaign: Campaign, body: Record<string, unknown>) {
+  if (!isSmsEnabled()) {
+    return NextResponse.json(
+      {
+        error:
+          "Canal SMS ainda não configurado — defina TWILIO_SMS_ENABLED=true e as envs TWILIO_* no servidor.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const raw: string[] = Array.isArray(body.phones)
+    ? body.phones.map((p: unknown) => String(p))
+    : typeof body.phones === "string"
+      ? body.phones.split(",")
+      : [];
+  const trimmed = [...new Set(raw.map((p) => p.trim()).filter(Boolean))];
+
+  if (trimmed.length === 0) {
+    return NextResponse.json(
+      { error: "Informe ao menos um celular de teste." },
+      { status: 400 }
+    );
+  }
+  if (trimmed.length > MAX_TEST_RECIPIENTS) {
+    return NextResponse.json(
+      { error: `Máximo de ${MAX_TEST_RECIPIENTS} celulares de teste.` },
+      { status: 400 }
+    );
+  }
+
+  // parseBrazilianMobile, e não normalizePhone: fixo não recebe SMS, e o erro
+  // da Twilio (21614) só apareceria depois de a mensagem já ter sido cobrada.
+  const phones: string[] = [];
+  for (const value of trimmed) {
+    const resultado = parseBrazilianMobile(value);
+    if (!resultado.ok) {
+      return NextResponse.json(
+        { error: `${value}: ${MOTIVO_LABEL[resultado.motivo]}` },
+        { status: 400 }
+      );
+    }
+    phones.push(resultado.e164);
+  }
+
+  const texto = campaign.smsBody?.trim();
+  if (!texto) {
+    return NextResponse.json(
+      { error: "Escreva o texto do SMS antes de enviar o teste." },
+      { status: 400 }
+    );
+  }
+  const sanitizado = sanitizeGsm7(texto);
+  if (!sanitizado.ok) {
+    const problemas = [...sanitizado.emojis, ...sanitizado.foraDoGsm7];
+    return NextResponse.json(
+      { error: `O SMS não aceita ${problemas.join(" ")}.` },
+      { status: 400 }
+    );
+  }
+
+  const results = await Promise.allSettled(
+    phones.map((phone) => sendSms({ to: phone, body: sanitizado.texto }))
+  );
+
+  const sent = results.filter((r) => r.status === "fulfilled").length;
+  const failed = results
+    .map((r, i) => ({ r, phone: phones[i] }))
+    .filter((x) => x.r.status === "rejected")
+    .map((x) => x.phone);
+
+  if (sent === 0) {
+    const [first] = results;
+    const reason =
+      first.status === "rejected" ? errorMessage(first.reason) : "";
+    return NextResponse.json(
+      {
+        error: `Falha ao enviar o teste para: ${failed.join(", ")}${
+          reason ? ` — ${reason}` : ""
+        }`,
+      },
+      { status: 502 }
+    );
+  }
+
+  return NextResponse.json({ sent, failed, recipients: phones });
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
@@ -159,6 +255,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     if (target.channel === "whatsapp") {
       return await sendWhatsAppTest(db, target, body);
+    }
+    if (target.channel === "sms") {
+      return await sendSmsTest(target, body);
     }
 
     // Aceita string ("a@x.com, b@y.com") ou array de e-mails.

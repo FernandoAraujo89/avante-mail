@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MOTIVO_LABEL, parseBrazilianMobile } from "@/lib/sms/phone";
 import { cn } from "@/lib/utils";
 
 type ListOption = { id: string; name: string };
@@ -27,11 +28,22 @@ export function ContactForm({ contactId }: { contactId?: string }) {
   // Contato novo já entra com consentimento de WhatsApp; quem não autorizou é
   // que precisa ser desmarcado. Na edição, o valor salvo é quem manda (abaixo).
   const [whatsappSubscribed, setWhatsappSubscribed] = useState(true);
+  // Mesma regra para o SMS, em campo próprio: sair de um canal não tira a
+  // pessoa do outro.
+  const [smsSubscribed, setSmsSubscribed] = useState(true);
   const [availableLists, setAvailableLists] = useState<ListOption[]>([]);
   const [listIds, setListIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(isEditing);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Motivo pelo qual o número digitado não recebe SMS, ou "" quando recebe.
+  // Só avalia número com cara de completo: reclamar a cada tecla, enquanto a
+  // pessoa ainda está digitando o DDD, seria só barulho.
+  const checagemSms =
+    phone.replace(/\D/g, "").length >= 10 ? parseBrazilianMobile(phone) : null;
+  const telefoneNaoRecebeSms =
+    checagemSms && !checagemSms.ok ? MOTIVO_LABEL[checagemSms.motivo] : "";
 
   // Listas disponíveis para associar.
   useEffect(() => {
@@ -59,6 +71,7 @@ export function ContactForm({ contactId }: { contactId?: string }) {
         setTags(Array.isArray(json.tags) ? json.tags.join(", ") : "");
         setSubscribed(json.subscribed !== false);
         setWhatsappSubscribed(json.whatsappSubscribed === true);
+        setSmsSubscribed(json.smsSubscribed === true);
         setListIds(Array.isArray(json.listIds) ? json.listIds : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -94,6 +107,7 @@ export function ContactForm({ contactId }: { contactId?: string }) {
             tags,
             subscribed,
             whatsappSubscribed,
+            smsSubscribed,
             listIds,
           }),
         }
@@ -157,7 +171,7 @@ export function ContactForm({ contactId }: { contactId?: string }) {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="phone">Telefone (WhatsApp)</Label>
+                <Label htmlFor="phone">Telefone (WhatsApp e SMS)</Label>
                 <Input
                   id="phone"
                   type="tel"
@@ -166,7 +180,8 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                   placeholder="(48) 99999-9999"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Com DDD. Usado nas campanhas de WhatsApp.
+                  Com DDD. Usado nas campanhas de WhatsApp e de SMS (SMS só
+                  chega em celular).
                 </p>
               </div>
 
@@ -270,6 +285,37 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                     : "(informe o telefone para habilitar)"}
                 </span>
               </label>
+
+              <label
+                className={
+                  phone.trim()
+                    ? "flex cursor-pointer items-center gap-2 text-sm"
+                    : "flex items-center gap-2 text-sm text-muted-foreground"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={smsSubscribed && Boolean(phone.trim())}
+                  onChange={(e) => setSmsSubscribed(e.target.checked)}
+                  disabled={!phone.trim()}
+                  className="size-4 accent-[#1D50DC]"
+                />
+                Aceita campanhas por SMS
+                <span className="text-xs text-muted-foreground">
+                  {phone.trim()
+                    ? "(consentimento separado do WhatsApp — LGPD)"
+                    : "(informe o telefone para habilitar)"}
+                </span>
+              </label>
+              {/* SMS não chega em fixo. O aviso é aqui e não no salvamento
+                  porque o custo aparece só na primeira campanha: a mensagem é
+                  cobrada, a Twilio devolve 21614 e o contato sai do canal. */}
+              {telefoneNaoRecebeSms ? (
+                <p className="-mt-1 pl-6 text-xs text-amber-700 dark:text-amber-500">
+                  Este número não recebe SMS ({telefoneNaoRecebeSms}). O
+                  WhatsApp funciona normalmente.
+                </p>
+              ) : null}
 
               <div className="flex gap-2 pt-2">
                 <Button type="submit" disabled={saving}>

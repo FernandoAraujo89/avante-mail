@@ -52,7 +52,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const db = getDb();
     const body = await request.json();
 
-    // O estado atual guia as transições de consentimento de WhatsApp.
+    // O estado atual guia as transições de consentimento de WhatsApp e SMS.
     const [existing] = await db
       .select()
       .from(contacts)
@@ -148,13 +148,33 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
     }
 
-    // Sem telefone não há como manter o consentimento de WhatsApp.
+    if (typeof body.smsSubscribed === "boolean") {
+      const phoneAfter = "phone" in updates ? updates.phone : existing.phone;
+      const enable = body.smsSubscribed && Boolean(phoneAfter);
+      if (enable !== existing.smsSubscribed) {
+        updates.smsSubscribed = enable;
+        if (enable) {
+          // Preserva a data do primeiro consentimento (prova LGPD).
+          updates.smsOptInAt = existing.smsOptInAt ?? new Date();
+          updates.smsOptOutAt = null;
+        } else {
+          updates.smsOptOutAt = new Date();
+        }
+      }
+    }
+
+    // Sem telefone não há como manter o consentimento de WhatsApp nem de SMS.
     if ("phone" in updates && updates.phone === null) {
       const wasSubscribed =
         updates.whatsappSubscribed ?? existing.whatsappSubscribed;
       if (wasSubscribed) {
         updates.whatsappSubscribed = false;
         updates.whatsappOptOutAt = new Date();
+      }
+      const wasSmsSubscribed = updates.smsSubscribed ?? existing.smsSubscribed;
+      if (wasSmsSubscribed) {
+        updates.smsSubscribed = false;
+        updates.smsOptOutAt = new Date();
       }
     }
 
@@ -214,6 +234,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     if (updates.whatsappSubscribed === false && existing.whatsappSubscribed) {
       await emitContactEvent("whatsapp_unsubscribed", id);
+    }
+    if (updates.smsSubscribed === false && existing.smsSubscribed) {
+      await emitContactEvent("sms_unsubscribed", id);
     }
 
     return NextResponse.json(contact);

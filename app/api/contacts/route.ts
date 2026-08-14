@@ -22,6 +22,7 @@ import {
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { ehLead, naoEhLead } from "@/lib/leads";
 import { normalizePhone } from "@/lib/phone";
+import { parseBrazilianMobile } from "@/lib/sms/phone";
 import {
   EMAIL_REGEX,
   errorMessage,
@@ -84,6 +85,16 @@ export async function GET(request: NextRequest) {
     if (params.get("whatsappEligible") === "true") {
       conditions.push(
         eq(contacts.whatsappSubscribed, true),
+        isNotNull(contacts.phone)
+      );
+    }
+    // Elegível para SMS: mesma conta do disparo (consentimento próprio do canal
+    // + telefone), para a contagem da tela não prometer um público maior do que
+    // o que sai. Consentimento separado do de WhatsApp: sair de um canal não
+    // tira a pessoa do outro.
+    if (params.get("smsEligible") === "true") {
+      conditions.push(
+        eq(contacts.smsSubscribed, true),
         isNotNull(contacts.phone)
       );
     }
@@ -252,6 +263,18 @@ export async function POST(request: NextRequest) {
     const whatsappSubscribed =
       body.whatsappSubscribed !== false && phone !== null;
 
+    // SMS tem consentimento próprio, com a mesma regra: o telefone é o mesmo,
+    // mas cada canal guarda o seu aceite — a pessoa pode sair do WhatsApp e
+    // continuar recebendo SMS (e vice-versa).
+    //
+    // Uma exigência a mais que o WhatsApp não tem: precisa ser CELULAR. Fixo
+    // aceito aqui não vira erro na hora — vira uma mensagem paga e um 21614 na
+    // primeira campanha, um por contato. Mesma peneira do backfill.
+    const smsSubscribed =
+      body.smsSubscribed !== false &&
+      phone !== null &&
+      parseBrazilianMobile(phone).ok;
+
     const [created] = await db
       .insert(contacts)
       .values({
@@ -263,6 +286,8 @@ export async function POST(request: NextRequest) {
         subscribed: body.subscribed !== false,
         whatsappSubscribed,
         whatsappOptInAt: whatsappSubscribed ? new Date() : null,
+        smsSubscribed,
+        smsOptInAt: smsSubscribed ? new Date() : null,
       })
       .returning();
 

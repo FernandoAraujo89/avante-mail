@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 
-import { campaigns, getDb, templates, whatsappTemplates } from "@/lib/db";
+import {
+  campaigns,
+  getDb,
+  parseCampaignChannel,
+  templates,
+  whatsappTemplates,
+} from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
 import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 import { parseVariableMap } from "@/lib/whatsapp/template-input";
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest) {
 
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const subject = typeof body.subject === "string" ? body.subject.trim() : "";
-    const channel = body.channel === "whatsapp" ? "whatsapp" : "email";
+    const channel = parseCampaignChannel(body.channel);
 
     if (channel === "email" && (!name || !subject)) {
       return NextResponse.json(
@@ -45,7 +51,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (channel === "whatsapp" && !name) {
+    if (channel !== "email" && !name) {
+      // WhatsApp e SMS não têm assunto — só o nome interno da campanha.
       return NextResponse.json(
         { error: "O nome da campanha é obrigatório." },
         { status: 400 }
@@ -106,14 +113,19 @@ export async function POST(request: NextRequest) {
       .insert(campaigns)
       .values({
         name,
-        // subject é NOT NULL no schema; no WhatsApp não existe assunto, então
-        // o nome da campanha preenche a coluna (não aparece na mensagem).
-        subject: channel === "whatsapp" ? name : subject,
+        // subject é NOT NULL no schema; no WhatsApp e no SMS não existe
+        // assunto, então o nome da campanha preenche a coluna (não aparece na
+        // mensagem).
+        subject: channel === "email" ? subject : name,
         channel,
         whatsappTemplateId,
         whatsappVariables:
           channel === "whatsapp"
             ? parseVariableMap(body.whatsappVariables)
+            : null,
+        smsBody:
+          channel === "sms" && typeof body.smsBody === "string" && body.smsBody.trim()
+            ? body.smsBody
             : null,
         preheader:
           typeof body.preheader === "string" && body.preheader.trim()

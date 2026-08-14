@@ -48,6 +48,7 @@ type ContactDto = {
   lists: ListRef[];
   subscribed: boolean;
   whatsappSubscribed: boolean;
+  smsSubscribed: boolean;
   /** Estágio do funil; nulo = não é lead (parceiro/contato comum). */
   stage: string | null;
   sourceChannel: string | null;
@@ -385,6 +386,9 @@ export default function ContactsPage() {
                       )}
                       {contact.whatsappSubscribed ? (
                         <Badge variant="info">WhatsApp</Badge>
+                      ) : null}
+                      {contact.smsSubscribed ? (
+                        <Badge variant="info">SMS</Badge>
                       ) : null}
                     </div>
                   </TableCell>

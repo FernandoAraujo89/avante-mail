@@ -56,20 +56,27 @@ export default async function CampaignsPage() {
   const listNames = (ids: string[] | null) =>
     (ids ?? []).map((id) => listMap.get(id) ?? id);
 
-  // Unidades cobráveis por campanha: e-mails aceitos pelo SES (sentAt) e
-  // mensagens de WhatsApp entregues (deliveredAt). Uma query só.
+  // Unidades cobráveis por campanha: e-mails aceitos pelo SES (sentAt),
+  // mensagens de WhatsApp entregues (deliveredAt) e SEGMENTOS de SMS que saíram
+  // (sentAt — a Twilio cobra ao entregar à operadora). Uma query só.
   const chargeAgg = await db
     .select({
       campaignId: campaignSends.campaignId,
-      emailChargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
+      sentChargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
       waChargeable: sql<number>`count(*) filter (where ${campaignSends.deliveredAt} is not null)`,
+      // Envio antigo, sem segmento gravado, conta como 1 — o piso de qualquer SMS.
+      smsSegments: sql<number>`coalesce(sum(coalesce(${campaignSends.smsSegments}, 1)) filter (where ${campaignSends.sentAt} is not null), 0)`,
     })
     .from(campaignSends)
     .groupBy(campaignSends.campaignId);
   const chargeMap = new Map(
     chargeAgg.map((r) => [
       r.campaignId,
-      { email: Number(r.emailChargeable), wa: Number(r.waChargeable) },
+      {
+        sent: Number(r.sentChargeable),
+        wa: Number(r.waChargeable),
+        smsSegments: Number(r.smsSegments),
+      },
     ])
   );
 
@@ -96,7 +103,11 @@ export default async function CampaignsPage() {
   }
 
   const costFor = (campaign: Campaign) => {
-    const counts = chargeMap.get(campaign.id) ?? { email: 0, wa: 0 };
+    const counts = chargeMap.get(campaign.id) ?? {
+      sent: 0,
+      wa: 0,
+      smsSegments: 0,
+    };
     if (campaign.channel === "whatsapp") {
       return campaignCost({
         channel: "whatsapp",
@@ -106,7 +117,16 @@ export default async function CampaignsPage() {
           : null,
       });
     }
-    return campaignCost({ channel: "email", chargeable: counts.email });
+    if (campaign.channel === "sms") {
+      // Mesma base do e-mail (envios com sentAt), preço em outra ordem de
+      // grandeza: quem multiplica a tarifa são os segmentos, não os envios.
+      return campaignCost({
+        channel: "sms",
+        chargeable: counts.sent,
+        smsSegments: counts.smsSegments,
+      });
+    }
+    return campaignCost({ channel: "email", chargeable: counts.sent });
   };
 
   return (
@@ -157,11 +177,16 @@ export default async function CampaignsPage() {
                         {campaign.channel === "whatsapp" ? (
                           <Badge variant="info">WhatsApp</Badge>
                         ) : null}
+                        {campaign.channel === "sms" ? (
+                          <Badge variant="info">SMS</Badge>
+                        ) : null}
                       </div>
                       <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">
                         {campaign.channel === "whatsapp"
                           ? "Campanha de WhatsApp"
-                          : campaign.subject}
+                          : campaign.channel === "sms"
+                            ? (campaign.smsBody ?? "Campanha de SMS")
+                            : campaign.subject}
                       </p>
                     </TableCell>
                     <TableCell className="text-muted-foreground">

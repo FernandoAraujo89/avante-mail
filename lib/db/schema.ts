@@ -34,6 +34,22 @@ export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 export const CAMPAIGN_CHANNELS = ["email", "whatsapp", "sms"] as const;
 export type CampaignChannel = (typeof CAMPAIGN_CHANNELS)[number];
 
+/**
+ * Canal vindo do corpo de uma requisição. Desconhecido vira "email" — o
+ * padrão histórico e o único canal que sempre existiu.
+ *
+ * Existe como função, e não como o ternário que estava espalhado pelas rotas,
+ * porque o ternário fechado (`x === "whatsapp" ? "whatsapp" : "email"`) tinha
+ * um efeito silencioso e caro: quando o SMS entrou em CAMPAIGN_CHANNELS, uma
+ * campanha de SMS era salva como e-mail sem nenhum aviso. Aqui, um canal novo
+ * na lista acima passa a ser aceito em todas as rotas de uma vez.
+ */
+export function parseCampaignChannel(value: unknown): CampaignChannel {
+  return CAMPAIGN_CHANNELS.includes(value as CampaignChannel)
+    ? (value as CampaignChannel)
+    : "email";
+}
+
 // Tipo do envio. O Avante News é o boletim semanal dos parceiros White Label:
 // usa a mesma máquina de envio das campanhas, mas é registrado e reportado
 // separadamente (nunca aparece junto das campanhas).
@@ -665,7 +681,8 @@ export const campaigns = pgTable("campaigns", {
     onDelete: "set null",
   }),
   // Canal de envio: os campos de e-mail (subject/design/mjmlContent) valem
-  // para "email"; os whatsapp* abaixo valem para "whatsapp".
+  // para "email"; os whatsapp* abaixo valem para "whatsapp"; smsBody vale
+  // para "sms".
   channel: text("channel").$type<CampaignChannel>().notNull().default("email"),
   // "campaign" = campanha comum; "news" = edição do Avante News (sempre
   // e-mail, sempre para a lista de parceiros White Label Ativos).
@@ -679,6 +696,11 @@ export const campaigns = pgTable("campaigns", {
   ),
   // Fonte de cada variável do modelo ({"1": {"source": "name"}}).
   whatsappVariables: jsonb("whatsapp_variables").$type<WhatsAppVariableMap>(),
+  // Texto do SMS, como foi escrito no editor — com acento e tudo. A
+  // transliteração para GSM-7 (sanitizeGsm7) acontece no envio, não aqui: o
+  // que a pessoa escreveu é o que ela relê ao duplicar a campanha, e guardar
+  // já transliterado transformaria "ação" em "acao" para sempre.
+  smsBody: text("sms_body"),
   // Listas-alvo da campanha (IDs de lists). Vazio/nulo = todas as listas de
   // RELACIONAMENTO: a lista de leads nunca entra (ver a trava no /send).
   lists: uuid("lists").array(),
@@ -742,6 +764,14 @@ export const campaignSends = pgTable("campaign_sends", {
   // MessageId retornado pelo provedor de envio (SES). Usado para casar os
   // eventos de devolução/reclamação (SNS) com o envio correspondente.
   providerMessageId: text("provider_message_id"),
+  // Só no canal SMS: segmentos cobrados por ESTE envio, gravados no momento em
+  // que a mensagem saiu. É a quantidade cobrável do canal — a Twilio cobra por
+  // segmento, não por mensagem, e um texto de 200 caracteres custa o dobro de
+  // um de 100. Fica aqui, e não calculado do corpo da campanha, pela mesma
+  // razão do `channel` logo acima: a conta do mês não pode depender de uma
+  // linha que talvez não exista mais, nem mudar de valor porque alguém
+  // duplicou a campanha e editou o texto.
+  smsSegments: integer("sms_segments"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   // Confirmações do WhatsApp (webhook da Cloud API). A ordem dos eventos não
   // é garantida — o status só avança (pending < sent < delivered < read).

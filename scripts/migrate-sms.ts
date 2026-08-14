@@ -1,15 +1,18 @@
 import { config } from "dotenv";
 import { Client } from "pg";
 
-// Migração idempotente: fundação do canal SMS (Twilio).
+// Migração idempotente: canal SMS (Twilio).
 // - contacts: consentimento próprio do canal (sms_subscribed + opt-in/out).
 //   O telefone (E.164) já existe desde a migração do WhatsApp e é
 //   compartilhado; o CONSENTIMENTO não é — LGPD trata cada canal como um
 //   aceite, e o opt-out de um não derruba o outro.
-// - campaign_sends: nada a fazer — channel/delivered_at/error_* já existem
-//   desde o WhatsApp e servem ao SMS do mesmo jeito.
+// - campaigns: sms_body, o texto da mensagem. Os campos de e-mail (subject,
+//   design) e de WhatsApp (whatsapp_template_id) não servem: o SMS não tem
+//   assunto, não tem HTML e não passa por modelo aprovado.
+// - campaign_sends: sms_segments, a quantidade cobrada. channel, delivered_at
+//   e error_* já existem desde o WhatsApp e servem ao SMS do mesmo jeito.
 // Nada aqui altera colunas ou dados dos canais de e-mail e WhatsApp.
-// Rode uma vez: `npx tsx scripts/migrate-sms.ts`
+// Rode de novo sem medo — é idempotente: `npx tsx scripts/migrate-sms.ts`
 
 config({ path: ".env.local" });
 
@@ -37,6 +40,16 @@ async function main() {
   );
   await client.query(
     `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS sms_opt_out_at timestamptz`
+  );
+
+  console.log("[MIGRATE] campaigns: texto do SMS...");
+  await client.query(
+    `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS sms_body text`
+  );
+
+  console.log("[MIGRATE] campaign_sends: segmentos cobrados...");
+  await client.query(
+    `ALTER TABLE campaign_sends ADD COLUMN IF NOT EXISTS sms_segments integer`
   );
 
   console.log("[MIGRATE] Concluído.");

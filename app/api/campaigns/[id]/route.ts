@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { campaigns, getDb, templates, whatsappTemplates } from "@/lib/db";
+import {
+  campaigns,
+  getDb,
+  parseCampaignChannel,
+  templates,
+  whatsappTemplates,
+} from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
 import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 import { parseVariableMap } from "@/lib/whatsapp/template-input";
@@ -149,7 +155,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // Canal: só muda enquanto rascunho (agendada já tem jobs na fila do
     // canal original). O Avante News é sempre e-mail.
     if ("channel" in body && existing.status === "draft" && existing.kind !== "news") {
-      updates.channel = body.channel === "whatsapp" ? "whatsapp" : "email";
+      updates.channel = parseCampaignChannel(body.channel);
     }
     if ("whatsappTemplateId" in body) {
       if (
@@ -173,6 +179,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     if ("whatsappVariables" in body) {
       updates.whatsappVariables = parseVariableMap(body.whatsappVariables);
+    }
+    if ("smsBody" in body) {
+      updates.smsBody =
+        typeof body.smsBody === "string" && body.smsBody.trim()
+          ? body.smsBody
+          : null;
     }
 
     if (Object.keys(updates).length === 0) {

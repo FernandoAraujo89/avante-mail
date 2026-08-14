@@ -70,7 +70,7 @@ export function SendsTable({
   vazio,
 }: {
   sends: SendTableRow[];
-  channel: "email" | "whatsapp";
+  channel: "email" | "whatsapp" | "sms";
   vazio: string;
 }) {
   const [busca, setBusca] = useState("");
@@ -80,9 +80,22 @@ export function SendsTable({
   const [page, setPage] = useState(1);
 
   const isWhats = channel === "whatsapp";
-  /** Coluna de engajamento do canal: e-mail abre, WhatsApp lê. */
+  const isSms = channel === "sms";
+  /** Os dois canais de telefone identificam o contato pelo número. */
+  const porTelefone = channel !== "email";
+  /** Confirmação do provedor: só existe nos canais de telefone. */
+  const mostraEntrega = porTelefone;
+  /**
+   * Engajamento: e-mail abre, WhatsApp lê — e o SMS não tem nenhum dos dois.
+   * A operadora não conta leitura e não há link rastreado, então a coluna
+   * simplesmente não existe no canal.
+   */
+  const mostraEngajamento = !isSms;
   const engajamento = (s: SendTableRow) => (isWhats ? s.readAt : s.openedAt);
   const rotuloEngajamento = isWhats ? "Lida em" : "Aberto em";
+  /** Colunas visíveis, para o colSpan da linha de "nada encontrado". */
+  const colunas =
+    3 + (mostraEntrega ? 1 : 0) + (mostraEngajamento ? 1 : 0) + 1;
 
   // Só os status que existem neste disparo — filtro sem opção morta.
   const statusDisponiveis = useMemo(
@@ -154,7 +167,7 @@ export function SendsTable({
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder={
-              isWhats
+              porTelefone
                 ? "Buscar por nome, telefone ou empresa"
                 : "Buscar por nome, e-mail ou empresa"
             }
@@ -183,9 +196,11 @@ export function SendsTable({
           <SelectContent>
             <SelectItem value="nome-az">Nome (A–Z)</SelectItem>
             <SelectItem value="nome-za">Nome (Z–A)</SelectItem>
-            <SelectItem value="engajamento">
-              {rotuloEngajamento} (mais recente)
-            </SelectItem>
+            {mostraEngajamento ? (
+              <SelectItem value="engajamento">
+                {rotuloEngajamento} (mais recente)
+              </SelectItem>
+            ) : null}
             <SelectItem value="enviado">Enviado em (mais recente)</SelectItem>
             <SelectItem value="status">Status</SelectItem>
           </SelectContent>
@@ -200,9 +215,11 @@ export function SendsTable({
               <TableHead>Contato</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Enviado em</TableHead>
-              {isWhats ? <TableHead>Entregue em</TableHead> : null}
-              <TableHead>{rotuloEngajamento}</TableHead>
-              {isWhats ? (
+              {mostraEntrega ? <TableHead>Entregue em</TableHead> : null}
+              {mostraEngajamento ? (
+                <TableHead>{rotuloEngajamento}</TableHead>
+              ) : null}
+              {porTelefone ? (
                 <TableHead>Respondeu</TableHead>
               ) : (
                 <TableHead>Clicado em</TableHead>
@@ -222,6 +239,11 @@ export function SendsTable({
                 isWhats && send.status === "failed"
                   ? describeWhatsAppError(send.errorCode, send.errorMessage)
                   : null;
+              // 21610 = pediu PARAR; 21614 = número inválido ou fixo. Nos dois
+              // o contato já saiu do canal — vale destacar, porque é a linha
+              // que explica a base encolhendo.
+              const saiuDoCanal =
+                send.errorCode === "21610" || send.errorCode === "21614";
               return (
                 <TableRow key={send.id}>
                   <TableCell>
@@ -232,19 +254,22 @@ export function SendsTable({
                       {send.contactName}
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {isWhats
+                      {porTelefone
                         ? formatPhone(send.contactPhone)
                         : send.contactEmail}
                       {send.contactCompany ? ` · ${send.contactCompany}` : ""}
                     </p>
                   </TableCell>
-                  <TableCell className={isWhats ? "max-w-sm" : undefined}>
+                  <TableCell className={porTelefone ? "max-w-sm" : undefined}>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <SendStatusBadge status={send.status as SendStatus} />
                       {erro ? (
                         <Badge variant={erro.tone}>{erro.label}</Badge>
                       ) : null}
-                      {!isWhats && send.complainedAt ? (
+                      {isSms && saiuDoCanal ? (
+                        <Badge variant="warning">Saiu do canal</Badge>
+                      ) : null}
+                      {channel === "email" && send.complainedAt ? (
                         <Badge variant="warning">Spam</Badge>
                       ) : null}
                     </div>
@@ -259,27 +284,39 @@ export function SendsTable({
                         {outcome.text}
                       </p>
                     ) : null}
+                    {/* No SMS a própria Twilio devolve a razão da falha em
+                        texto; repassar é mais útil que traduzir para um
+                        rótulo genérico. */}
+                    {isSms && send.status === "failed" && send.errorMessage ? (
+                      <p className="mt-1 text-xs text-destructive-hover">
+                        {send.errorMessage}
+                      </p>
+                    ) : null}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDateTime(send.sentAt)}
                   </TableCell>
-                  {isWhats ? (
+                  {mostraEntrega ? (
                     <TableCell className="text-muted-foreground">
                       {formatDateTime(send.deliveredAt)}
                     </TableCell>
                   ) : null}
+                  {mostraEngajamento ? (
+                    <TableCell className="text-muted-foreground">
+                      {formatDateTime(engajamento(send))}
+                    </TableCell>
+                  ) : null}
                   <TableCell className="text-muted-foreground">
-                    {formatDateTime(engajamento(send))}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(isWhats ? send.repliedAt : send.clickedAt)}
+                    {formatDateTime(
+                      porTelefone ? send.repliedAt : send.clickedAt
+                    )}
                   </TableCell>
                 </TableRow>
               );
             })}
             {pagina.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isWhats ? 6 : 5}>
+                <TableCell colSpan={colunas}>
                   <p className="py-8 text-center text-sm text-muted-foreground">
                     Nenhum envio corresponde à busca ou ao filtro.
                   </p>

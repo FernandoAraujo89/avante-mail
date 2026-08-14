@@ -28,7 +28,7 @@ export interface RecipientContact {
 }
 
 interface RecipientPickerProps {
-  channel: "email" | "whatsapp";
+  channel: "email" | "whatsapp" | "sms";
   /** Listas escolhidas no passo. Vazio = todas. */
   lists: string[];
   /** Nomes das listas escolhidas, só para exibição. */
@@ -81,10 +81,11 @@ export function RecipientPicker({
 
     (async () => {
       try {
-        // Mesma elegibilidade do envio: e-mail = inscritos; WhatsApp =
-        // telefone + consentimento do canal.
+        // Mesma elegibilidade do envio: e-mail = inscritos; WhatsApp e SMS =
+        // telefone + consentimento do respectivo canal (aceites separados).
         const params = new URLSearchParams();
         if (channel === "whatsapp") params.set("whatsappEligible", "true");
+        else if (channel === "sms") params.set("smsEligible", "true");
         else params.set("subscribed", "true");
         if (listsKey) params.set("lists", listsKey);
         if (tagsKey) params.set("tags", tagsKey);
@@ -204,7 +205,9 @@ export function RecipientPicker({
           )}
         </p>
         <div className="flex flex-wrap gap-2">
-          {channel === "whatsapp" ? (
+          {/* Colar uma lista de números vale para qualquer canal de telefone —
+              o diálogo só cruza o que já está cadastrado. */}
+          {channel !== "email" ? (
             <NumberFilterDialog
               contacts={contacts}
               onApply={(ids, resultado) => {
@@ -278,7 +281,9 @@ export function RecipientPicker({
         <p className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
           {channel === "whatsapp"
             ? "Nenhum contato elegível — só quem tem telefone e consentimento de WhatsApp aparece aqui."
-            : "Nenhum contato inscrito nas listas escolhidas."}
+            : channel === "sms"
+              ? "Nenhum contato elegível — só quem tem celular e consentimento de SMS aparece aqui."
+              : "Nenhum contato inscrito nas listas escolhidas."}
         </p>
       ) : (
         // Altura limitada: com 100 por página a lista rolaria a tela inteira.
@@ -308,9 +313,9 @@ export function RecipientPicker({
                     {contact.name}
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {channel === "whatsapp"
-                      ? (contact.phone ?? "sem telefone")
-                      : contact.email}
+                    {channel === "email"
+                      ? contact.email
+                      : (contact.phone ?? "sem telefone")}
                     {contact.company ? ` · ${contact.company}` : ""}
                     {contact.lists.length > 0
                       ? ` · ${contact.lists.map((l) => l.name).join(", ")}`

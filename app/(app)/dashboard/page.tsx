@@ -165,8 +165,8 @@ export default async function DashboardPage() {
           </CardTitle>
           <CardDescription>
             AWS SES (campanhas de e-mail e Avante News, separados) + WhatsApp
-            (Meta). Cobrado em US$; R$ convertido ao câmbio de{" "}
-            {formatBrl(consumption.rate)}/US$.
+            (Meta) + SMS (Twilio, cobrado por segmento). Cobrado em US$; R$
+            convertido ao câmbio de {formatBrl(consumption.rate)}/US$.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -183,6 +183,7 @@ export default async function DashboardPage() {
                     <TableHead className="text-right">Campanhas</TableHead>
                     <TableHead className="text-right">Avante News</TableHead>
                     <TableHead className="text-right">WhatsApp</TableHead>
+                    <TableHead className="text-right">SMS</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -200,6 +201,9 @@ export default async function DashboardPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         {costCell(m.whatsappUsd, m.whatsappBrl)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {costCell(m.smsUsd, m.smsBrl)}
                       </TableCell>
                       <TableCell className="text-right">
                         {costCell(m.totalUsd, m.totalBrl, true)}
@@ -227,6 +231,12 @@ export default async function DashboardPage() {
                       {costCell(
                         consumption.whatsappUsd,
                         consumption.whatsappUsd * consumption.rate
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {costCell(
+                        consumption.smsUsd,
+                        consumption.smsUsd * consumption.rate
                       )}
                     </TableCell>
                     <TableCell className="text-right">

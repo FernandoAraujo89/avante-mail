@@ -43,6 +43,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         readAt: campaignSends.readAt,
         repliedAt: campaignSends.repliedAt,
         errorCode: campaignSends.errorCode,
+        smsSegments: campaignSends.smsSegments,
         contactName: contacts.name,
         contactEmail: contacts.email,
         contactPhone: contacts.phone,
@@ -90,6 +91,34 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         channel: "whatsapp",
         chargeable: delivered,
         whatsappCategory,
+      });
+    } else if (campaign.channel === "sms") {
+      const enviados = sends.filter((s) => s.sentAt !== null);
+      metrics = {
+        total: sends.length,
+        sent: enviados.length,
+        // O status callback da Twilio confirma a entrega na operadora. Nem
+        // toda operadora devolve confirmação, então "entregue" é sempre menor
+        // ou igual a "enviado" — e nunca é a base da cobrança.
+        delivered: sends.filter((s) => s.deliveredAt !== null).length,
+        replied: sends.filter((s) => s.repliedAt !== null).length,
+        failed,
+        // 21610 = destinatário pediu para sair; 21614 = número inválido ou
+        // fixo. Os dois já tiraram o contato do canal, então valem como
+        // informação de higiene da base, não como falha técnica.
+        optedOut: sends.filter(
+          (s) => s.errorCode === "21610" || s.errorCode === "21614"
+        ).length,
+        pending,
+        segments: enviados.reduce((soma, s) => soma + (s.smsSegments ?? 0), 0),
+      };
+      // A Twilio cobra ao entregar a mensagem à operadora — conta sentAt, como
+      // o e-mail, e não deliveredAt como o WhatsApp: a mensagem já foi paga
+      // mesmo quando a confirmação de entrega não volta.
+      cost = campaignCost({
+        channel: "sms",
+        chargeable: enviados.length,
+        smsSegments: metrics.segments,
       });
     } else {
       const chargeableEmails = sends.filter((s) => s.sentAt !== null).length;

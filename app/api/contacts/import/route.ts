@@ -5,6 +5,7 @@ import Papa from "papaparse";
 import { contactLists, contacts, getDb, lists, type NewContact } from "@/lib/db";
 import { emitContactEvents } from "@/lib/events";
 import { firstValidPhone } from "@/lib/phone";
+import { parseBrazilianMobile } from "@/lib/sms/phone";
 import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ type ColumnMapping = Partial<Record<ImportField, string>>;
 
 const CHUNK_SIZE = 500;
 
-// Valores aceitos como "sim" na coluna de consentimento de WhatsApp.
+// Valores aceitos como "sim" na coluna de consentimento dos canais de telefone.
 const TRUTHY = new Set(["sim", "s", "yes", "y", "true", "1", "x", "verdadeiro"]);
 
 export async function POST(request: NextRequest) {
@@ -108,16 +109,23 @@ export async function POST(request: NextRequest) {
           else seenPhones.add(phone);
         }
 
-        // Opt-in de WhatsApp: quem tem telefone válido entra com consentimento.
-        // Se a planilha trouxer uma coluna de consentimento, ela é que manda —
-        // inclusive para negar (só "sim/true/1..." mantém o opt-in), que é como
-        // se registra quem não autorizou (LGPD).
-        const whatsappOptIn =
+        // Opt-in dos canais de telefone: quem tem telefone válido entra com
+        // consentimento. Se a planilha trouxer uma coluna de consentimento, ela
+        // é que manda — inclusive para negar (só "sim/true/1..." mantém o
+        // opt-in), que é como se registra quem não autorizou (LGPD).
+        //
+        // A coluna é UMA só e vale para WhatsApp e SMS: quem a preencheu
+        // autorizou o contato PELO TELEFONE, não por um canal técnico. No banco
+        // os campos são separados porque o opt-out não é: responder SAIR no
+        // WhatsApp ou STOP no SMS derruba só o canal em que aconteceu.
+        const telefoneOptIn =
           phone !== null &&
           (!mapping.whatsappOptIn ||
             TRUTHY.has(
               (row[mapping.whatsappOptIn as string] ?? "").trim().toLowerCase()
             ));
+        const smsOptIn =
+          telefoneOptIn && phone !== null && parseBrazilianMobile(phone).ok;
 
         byEmail.set(email, {
           name,
@@ -127,8 +135,13 @@ export async function POST(request: NextRequest) {
             ? (row[mapping.company] ?? "").trim() || null
             : null,
           tags: mapping.tags ? normalizeTags(row[mapping.tags]) : [],
-          whatsappSubscribed: whatsappOptIn,
-          whatsappOptInAt: whatsappOptIn ? new Date() : null,
+          whatsappSubscribed: telefoneOptIn,
+          whatsappOptInAt: telefoneOptIn ? new Date() : null,
+          // O SMS pede uma condição a mais: ser CELULAR. Planilha de base
+          // costuma trazer o fixo do escritório, e cada fixo com opt-in vira
+          // uma mensagem paga e um erro 21614 na primeira campanha.
+          smsSubscribed: smsOptIn,
+          smsOptInAt: smsOptIn ? new Date() : null,
         });
       }
     }
@@ -157,6 +170,8 @@ export async function POST(request: NextRequest) {
           r.phone = null;
           r.whatsappSubscribed = false;
           r.whatsappOptInAt = null;
+          r.smsSubscribed = false;
+          r.smsOptInAt = null;
         }
       }
     }

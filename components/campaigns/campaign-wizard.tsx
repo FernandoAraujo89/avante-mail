@@ -10,6 +10,7 @@ import {
   LayoutTemplate,
   Mail,
   MessageCircle,
+  MessageSquareText,
   Plus,
   RotateCcw,
   Save,
@@ -19,10 +20,12 @@ import {
 
 import { DesignEditor } from "@/components/builder/design-editor";
 import { RecipientPicker } from "@/components/campaigns/recipient-picker";
+import { SmsMessageStep } from "@/components/campaigns/sms-message-step";
 import {
   WhatsAppMessageStep,
   type WaTemplateOption,
 } from "@/components/campaigns/whatsapp-message-step";
+import { SmsPhonePreview } from "@/components/sms/phone-preview";
 import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -44,11 +47,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { CampaignChannel } from "@/lib/db/schema";
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
 import { materializeDesignForEditing } from "@/lib/email-builder/materialize";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EditorType, EmailDesign } from "@/lib/email-builder/types";
-import { listsLabel } from "@/lib/format";
+import { formatBrl, listsLabel } from "@/lib/format";
+import { countSms, estimateSmsCostUsd, sanitizeGsm7 } from "@/lib/sms/gsm7";
 import { cn } from "@/lib/utils";
 import {
   extractVariables,
@@ -69,13 +74,17 @@ type TemplateDto = {
   editorType: EditorType;
 };
 
-type CampaignChannel = "email" | "whatsapp";
-
 type WaConfig = {
   configured: boolean;
   dailyLimit: number | null;
   pricesUsd: Record<string, number>;
   usdBrlRate?: number;
+};
+
+type SmsConfig = {
+  configured: boolean;
+  pricePerSegmentUsd: number;
+  usdBrlRate: number;
 };
 
 type WizardData = {
@@ -91,6 +100,7 @@ type WizardData = {
   channel: CampaignChannel;
   whatsappTemplateId: string;
   whatsappVariables: WhatsAppVariableMap;
+  smsBody: string;
   /** null = todos os elegíveis; array = escolha manual no passo Destinatários. */
   recipientIds: string[] | null;
 };
@@ -108,6 +118,7 @@ const EMPTY_DATA: WizardData = {
   channel: "email",
   whatsappTemplateId: "",
   whatsappVariables: {},
+  smsBody: "",
   recipientIds: null,
 };
 
@@ -159,6 +170,7 @@ export function CampaignWizard({
     null
   );
   const [waConfig, setWaConfig] = useState<WaConfig | null>(null);
+  const [smsConfig, setSmsConfig] = useState<SmsConfig | null>(null);
   const [testPhones, setTestPhones] = useState("");
   const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -210,7 +222,7 @@ export function CampaignWizard({
     })();
   }, []);
 
-  // Modelos de WhatsApp e estado do canal (para o passo Mensagem e o Revisar).
+  // Modelos de WhatsApp e estado dos canais (para o passo Mensagem e o Revisar).
   useEffect(() => {
     (async () => {
       try {
@@ -224,6 +236,12 @@ export function CampaignWizard({
         if (res.ok) setWaConfig(await res.json());
       } catch {
         // silencioso: sem config, o Revisar mostra o aviso de não configurado
+      }
+      try {
+        const res = await fetch("/api/sms/config");
+        if (res.ok) setSmsConfig(await res.json());
+      } catch {
+        // idem — o preço do segmento só serve para estimar o custo na tela
       }
     })();
   }, []);
@@ -264,12 +282,16 @@ export function CampaignWizard({
           tagsFilter: Array.isArray(json.tagsFilter)
             ? json.tagsFilter.join(", ")
             : "",
-          channel: json.channel === "whatsapp" ? "whatsapp" : "email",
+          channel:
+            json.channel === "whatsapp" || json.channel === "sms"
+              ? json.channel
+              : "email",
           whatsappTemplateId: json.whatsappTemplateId ?? "",
           whatsappVariables:
             json.whatsappVariables && typeof json.whatsappVariables === "object"
               ? json.whatsappVariables
               : {},
+          smsBody: json.smsBody ?? "",
           recipientIds: Array.isArray(json.recipientIds)
             ? json.recipientIds
             : null,
@@ -290,6 +312,14 @@ export function CampaignWizard({
   const selectedWaTemplate = useMemo(
     () => waTemplates?.find((t) => t.id === data.whatsappTemplateId) ?? null,
     [waTemplates, data.whatsappTemplateId]
+  );
+
+  // Texto do SMS já transliterado — é ele que sai e é ele que é cobrado, então
+  // é dele que saem a validação, a prévia e a contagem de segmentos.
+  const smsSanitized = useMemo(() => sanitizeGsm7(data.smsBody), [data.smsBody]);
+  const smsCount = useMemo(
+    () => countSms(smsSanitized.texto),
+    [smsSanitized.texto]
   );
 
   // Variáveis do modelo ainda sem fonte definida (bloqueiam o avanço).
@@ -358,19 +388,27 @@ export function CampaignWizard({
     };
   }, [step, data.design, previewVariables]);
 
-  // Contagem de destinatários elegíveis nos passos 3 e 4.
+  // Contagem de destinatários elegíveis nos passos 3 e 4 — e também no passo 2
+  // quando o canal é SMS: lá o custo é segmentos × destinatários, e saber o
+  // tamanho do público enquanto se escreve é o que permite encurtar o texto
+  // antes de ele custar o dobro.
   useEffect(() => {
-    if (step !== 3 && step !== 4) return;
+    if (step !== 3 && step !== 4 && !(step === 2 && data.channel === "sms")) {
+      return;
+    }
     let cancelled = false;
     setRecipientCount(null);
 
     (async () => {
       try {
-        // Elegibilidade por canal: e-mail = inscritos; WhatsApp = telefone +
-        // consentimento do canal.
+        // Elegibilidade por canal: e-mail = inscritos; WhatsApp e SMS =
+        // telefone + consentimento do respectivo canal (são aceites
+        // separados — quem saiu de um pode continuar no outro).
         const params = new URLSearchParams({ count: "true" });
         if (data.channel === "whatsapp") {
           params.set("whatsappEligible", "true");
+        } else if (data.channel === "sms") {
+          params.set("smsEligible", "true");
         } else {
           params.set("subscribed", "true");
         }
@@ -436,10 +474,12 @@ export function CampaignWizard({
 
   function validateStep(current: number): string {
     if (current === 1) {
-      if (data.channel === "whatsapp") {
-        if (!data.name.trim()) return "Preencha o nome da campanha.";
-      } else if (!data.name.trim() || !data.subject.trim()) {
-        return "Preencha ao menos o nome da campanha e o assunto do e-mail.";
+      if (data.channel === "email") {
+        if (!data.name.trim() || !data.subject.trim()) {
+          return "Preencha ao menos o nome da campanha e o assunto do e-mail.";
+        }
+      } else if (!data.name.trim()) {
+        return "Preencha o nome da campanha.";
       }
     }
     if (current === 2) {
@@ -451,6 +491,16 @@ export function CampaignWizard({
           return `Defina o valor das variáveis ${waMissingVariables
             .map((n) => `{{${n}}}`)
             .join(", ")}.`;
+        }
+      } else if (data.channel === "sms") {
+        if (!data.smsBody.trim()) return "Escreva o texto do SMS.";
+        // Mesma checagem que a rota de disparo faz. Barrar aqui poupa a
+        // viagem até o Revisar para descobrir o emoji.
+        if (smsSanitized.emojis.length > 0) {
+          return `Remova ${smsSanitized.emojis.join(" ")} do texto — emoji não existe no alfabeto do SMS e triplica o custo da campanha.`;
+        }
+        if (smsSanitized.foraDoGsm7.length > 0) {
+          return `O SMS não aceita ${smsSanitized.foraDoGsm7.join(" ")}.`;
         }
       } else if (!data.design) {
         return "Monte o e-mail da campanha: escolha um modelo ou comece do zero.";
@@ -482,9 +532,10 @@ export function CampaignWizard({
   function buildPayload() {
     return {
       name: data.name.trim(),
-      // No WhatsApp não há assunto — o nome preenche a coluna (não aparece).
+      // No WhatsApp e no SMS não há assunto — o nome preenche a coluna do
+      // banco (não aparece na mensagem).
       subject:
-        data.channel === "whatsapp" ? data.name.trim() : data.subject.trim(),
+        data.channel === "email" ? data.subject.trim() : data.name.trim(),
       preheader: data.preheader,
       templateId: data.templateId || null,
       design: data.design,
@@ -497,6 +548,9 @@ export function CampaignWizard({
       channel: data.channel,
       whatsappTemplateId: data.whatsappTemplateId || null,
       whatsappVariables: data.whatsappVariables,
+      // Guarda o texto como foi escrito, com acento. A transliteração para
+      // GSM-7 é feita no envio — ver lib/sms/gsm7.ts.
+      smsBody: data.smsBody,
       recipientIds: data.recipientIds,
     };
   }
@@ -629,9 +683,15 @@ export function CampaignWizard({
   async function handleSendTest() {
     setTestMessage("");
 
-    if (data.channel === "whatsapp") {
-      if (!data.whatsappTemplateId) {
+    // Os dois canais de telefone mandam o teste pelo mesmo caminho — muda só
+    // o que precisa estar pronto antes e onde a pessoa vai conferir.
+    if (data.channel === "whatsapp" || data.channel === "sms") {
+      if (data.channel === "whatsapp" && !data.whatsappTemplateId) {
         setTestMessage("Escolha o modelo da mensagem antes de enviar o teste.");
+        return;
+      }
+      if (data.channel === "sms" && !data.smsBody.trim()) {
+        setTestMessage("Escreva o texto do SMS antes de enviar o teste.");
         return;
       }
       if (parsedTestPhones.length === 0) {
@@ -653,10 +713,11 @@ export function CampaignWizard({
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Erro ao enviar o teste.");
         const failed = Array.isArray(json.failed) ? json.failed : [];
+        const onde = data.channel === "sms" ? "as mensagens" : "o WhatsApp";
         setTestMessage(
           failed.length > 0
             ? `Enviado para ${json.sent}. Falhou: ${failed.join(", ")}`
-            : `Mensagem de teste enviada para ${json.recipients.join(", ")}. Confira o WhatsApp.`
+            : `Mensagem de teste enviada para ${json.recipients.join(", ")}. Confira ${onde}.`
         );
       } catch (err) {
         setTestMessage(err instanceof Error ? err.message : String(err));
@@ -723,14 +784,16 @@ export function CampaignWizard({
         description={
           data.channel === "whatsapp"
             ? "Configure, escolha o modelo aprovado da mensagem, selecione os destinatários e revise antes de disparar."
-            : "Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
+            : data.channel === "sms"
+              ? "Configure, escreva o texto da mensagem, selecione os destinatários e revise antes de disparar."
+              : "Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
         }
       />
 
       {/* Stepper */}
       <div className="mb-8 flex flex-wrap items-center gap-2">
         {STEPS.map((raw) =>
-          raw.number === 2 && data.channel === "whatsapp"
+          raw.number === 2 && data.channel !== "email"
             ? { ...raw, title: "Mensagem" }
             : raw
         ).map((s, index) => (
@@ -785,7 +848,7 @@ export function CampaignWizard({
           <CardContent className="grid gap-5 p-6">
             <div className="grid gap-2">
               <Label>Canal de envio</Label>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {(
                   [
                     {
@@ -799,6 +862,12 @@ export function CampaignWizard({
                       label: "WhatsApp",
                       description: "Modelo aprovado pela Meta, via Cloud API",
                       icon: MessageCircle,
+                    },
+                    {
+                      value: "sms",
+                      label: "SMS",
+                      description: "Texto curto, sem link rastreado, via Twilio",
+                      icon: MessageSquareText,
                     },
                   ] as const
                 ).map((option) => {
@@ -850,9 +919,9 @@ export function CampaignWizard({
                 placeholder="Ex.: Lançamento do módulo financeiro"
               />
               <p className="text-xs text-muted-foreground">
-                {data.channel === "whatsapp"
-                  ? "Uso interno — não aparece na mensagem."
-                  : "Uso interno e título do e-mail (aba do navegador / cliente)."}
+                {data.channel === "email"
+                  ? "Uso interno e título do e-mail (aba do navegador / cliente)."
+                  : "Uso interno — não aparece na mensagem."}
               </p>
             </div>
 
@@ -896,10 +965,23 @@ export function CampaignWizard({
             <p className="rounded-lg bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
               {data.channel === "whatsapp"
                 ? "O conteúdo da mensagem é um modelo pré-aprovado pela Meta, escolhido no próximo passo."
-                : "O conteúdo do e-mail (textos, imagens, botões) é montado no próximo passo, no Criador de e-mails."}
+                : data.channel === "sms"
+                  ? "O texto da mensagem é escrito no próximo passo. SMS não tem imagem, formatação nem rastreio de clique — só texto, cobrado por segmento de 160 caracteres."
+                  : "O conteúdo do e-mail (textos, imagens, botões) é montado no próximo passo, no Criador de e-mails."}
             </p>
           </CardContent>
         </Card>
+      ) : null}
+
+      {/* Passo 2 — Mensagem (SMS) */}
+      {step === 2 && data.channel === "sms" ? (
+        <SmsMessageStep
+          value={data.smsBody}
+          onChange={(smsBody) => update({ smsBody })}
+          recipientCount={effectiveRecipients}
+          pricePerSegmentUsd={smsConfig?.pricePerSegmentUsd ?? null}
+          usdBrlRate={smsConfig?.usdBrlRate ?? null}
+        />
       ) : null}
 
       {/* Passo 2 — Mensagem (WhatsApp) */}
@@ -1140,7 +1222,9 @@ export function CampaignWizard({
                     ? "destinatários escolhidos a dedo"
                     : data.channel === "whatsapp"
                       ? "destinatários elegíveis (apenas contatos com telefone e consentimento de WhatsApp)"
-                      : "destinatários elegíveis (contatos descadastrados são excluídos automaticamente)"}
+                      : data.channel === "sms"
+                        ? "destinatários elegíveis (apenas contatos com celular e consentimento de SMS)"
+                        : "destinatários elegíveis (contatos descadastrados são excluídos automaticamente)"}
                 </p>
               </div>
             </CardContent>
@@ -1175,6 +1259,17 @@ export function CampaignWizard({
                               selectedWaTemplate?.category === "UTILITY"
                                 ? "Utilidade"
                                 : "Marketing",
+                          },
+                        ]
+                      : data.channel === "sms"
+                      ? [
+                          {
+                            label: "Caracteres",
+                            value: String(smsCount.caracteres),
+                          },
+                          {
+                            label: "Segmentos por pessoa",
+                            value: String(smsCount.segmentos),
                           },
                         ]
                       : [
@@ -1254,6 +1349,29 @@ export function CampaignWizard({
                       </dd>
                     </div>
                   ) : null}
+                  {data.channel === "sms" ? (
+                    <div className="flex justify-between gap-4">
+                      <dt className="shrink-0 text-muted-foreground">
+                        Custo estimado (Twilio)
+                      </dt>
+                      <dd className="text-right font-medium">
+                        {effectiveRecipients === null || !smsConfig
+                          ? "..."
+                          : (() => {
+                              // Segmentos × destinatários: em SMS o texto longo
+                              // não custa "um pouco mais", custa o dobro.
+                              const usd = estimateSmsCostUsd(
+                                smsCount.segmentos,
+                                effectiveRecipients,
+                                smsConfig.pricePerSegmentUsd
+                              );
+                              return `~US$ ${usd.toFixed(2)} (≈ ${formatBrl(
+                                usd * smsConfig.usdBrlRate
+                              )})`;
+                            })()}
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
               </CardContent>
             </Card>
@@ -1263,6 +1381,14 @@ export function CampaignWizard({
                 O canal WhatsApp ainda não foi configurado no servidor (Fase 0
                 do plano). Salve como rascunho — o disparo fica bloqueado até
                 lá.
+              </div>
+            ) : null}
+
+            {data.channel === "sms" && smsConfig && !smsConfig.configured ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+                O canal SMS ainda não foi configurado no servidor. Salve como
+                rascunho — o disparo fica bloqueado até as variáveis TWILIO_*
+                entrarem no .env.local.
               </div>
             ) : null}
 
@@ -1286,21 +1412,27 @@ export function CampaignWizard({
                 <CardTitle className="flex items-center gap-2 text-base">
                   {data.channel === "whatsapp" ? (
                     <MessageCircle className="size-4 text-primary" />
+                  ) : data.channel === "sms" ? (
+                    <MessageSquareText className="size-4 text-primary" />
                   ) : (
                     <Mail className="size-4 text-primary" />
                   )}
                   {data.channel === "whatsapp"
                     ? "Enviar teste por WhatsApp"
-                    : "Enviar e-mail de teste"}
+                    : data.channel === "sms"
+                      ? "Enviar SMS de teste"
+                      : "Enviar e-mail de teste"}
                 </CardTitle>
                 <CardDescription>
                   {data.channel === "whatsapp"
                     ? `Envia o modelo real (cobrado pela Meta) para até ${MAX_TEST_EMAILS} números, separados por vírgula.`
-                    : `Envie para você antes do disparo real. Até ${MAX_TEST_EMAILS} e-mails, separados por vírgula.`}
+                    : data.channel === "sms"
+                      ? `Envia a mensagem real (cobrada por segmento) para até ${MAX_TEST_EMAILS} celulares. Vale conferir no aparelho antes do disparo.`
+                      : `Envie para você antes do disparo real. Até ${MAX_TEST_EMAILS} e-mails, separados por vírgula.`}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3">
-                {data.channel === "whatsapp" ? (
+                {data.channel === "whatsapp" || data.channel === "sms" ? (
                   <>
                     <Input
                       value={testPhones}
@@ -1320,7 +1452,9 @@ export function CampaignWizard({
                       onClick={handleSendTest}
                       disabled={
                         sendingTest ||
-                        !waConfig?.configured ||
+                        (data.channel === "whatsapp"
+                          ? !waConfig?.configured
+                          : !smsConfig?.configured) ||
                         parsedTestPhones.length === 0 ||
                         parsedTestPhones.length > MAX_TEST_EMAILS
                       }
@@ -1328,9 +1462,14 @@ export function CampaignWizard({
                       <Send />
                       {sendingTest ? "Enviando teste..." : "Enviar teste"}
                     </Button>
-                    {waConfig && !waConfig.configured ? (
+                    {data.channel === "whatsapp" && waConfig && !waConfig.configured ? (
                       <p className="text-xs text-muted-foreground">
                         Disponível depois de configurar o canal (Fase 0).
+                      </p>
+                    ) : null}
+                    {data.channel === "sms" && smsConfig && !smsConfig.configured ? (
+                      <p className="text-xs text-muted-foreground">
+                        Disponível depois de configurar o canal SMS no servidor.
                       </p>
                     ) : null}
                   </>
@@ -1372,7 +1511,20 @@ export function CampaignWizard({
           </div>
 
           <Card className="overflow-hidden">
-            {data.channel === "whatsapp" ? (
+            {data.channel === "sms" ? (
+              smsSanitized.texto.trim() ? (
+                <div className="mx-auto w-full max-w-md p-6">
+                  <SmsPhonePreview
+                    bodyText={smsSanitized.texto}
+                    senderLabel="Avante"
+                  />
+                </div>
+              ) : (
+                <p className="py-24 text-center text-sm text-muted-foreground">
+                  Nenhum texto escrito.
+                </p>
+              )
+            ) : data.channel === "whatsapp" ? (
               selectedWaTemplate ? (
                 <div className="mx-auto w-full max-w-md p-6">
                   <WhatsAppBubblePreview
@@ -1457,7 +1609,10 @@ export function CampaignWizard({
                 effectiveRecipients === 0 ||
                 (data.channel === "whatsapp" &&
                   waConfig !== null &&
-                  !waConfig.configured)
+                  !waConfig.configured) ||
+                (data.channel === "sms" &&
+                  smsConfig !== null &&
+                  !smsConfig.configured)
               }
             >
               <Send />
@@ -1547,7 +1702,11 @@ export function CampaignWizard({
                 : `${
                     data.channel === "whatsapp"
                       ? "A mensagem de WhatsApp será enviada"
-                      : "O e-mail será enviado"
+                      : data.channel === "sms"
+                        ? `O SMS (${smsCount.segmentos} ${
+                            smsCount.segmentos === 1 ? "segmento" : "segmentos"
+                          } por pessoa) será enviado`
+                        : "O e-mail será enviado"
                   } agora para ${
                     effectiveRecipients ?? "—"
                   } contatos. Essa ação não pode ser desfeita.`}
