@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { sendStatusLabel } from "@/lib/send-status";
 import type {
   AutomationStatus,
   CampaignStatus,
@@ -20,35 +21,32 @@ export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
 
-const SEND_STATUS: Record<
+// Só a cor mora aqui; o rótulo vem de lib/send-status.ts, que o filtro do
+// relatório e a exportação em planilha também usam.
+const SEND_STATUS_VARIANT: Record<
   SendStatus,
-  {
-    label: string;
-    variant: "secondary" | "outline" | "success" | "info" | "destructive" | "warning";
-  }
+  "secondary" | "outline" | "success" | "info" | "destructive" | "warning"
 > = {
-  pending: { label: "Pendente", variant: "outline" },
-  sent: { label: "Enviado", variant: "secondary" },
-  failed: { label: "Falhou", variant: "destructive" },
-  opened: { label: "Aberto", variant: "info" },
-  clicked: { label: "Clicado", variant: "success" },
-  bounced: { label: "Devolvido", variant: "destructive" },
+  pending: "outline",
+  sent: "secondary",
+  failed: "destructive",
+  opened: "info",
+  clicked: "success",
+  bounced: "destructive",
   // Canal WhatsApp (confirmações da Cloud API).
-  delivered: { label: "Entregue", variant: "info" },
-  read: { label: "Lida", variant: "success" },
+  delivered: "info",
+  read: "success",
 };
 
-/** Rótulo do status fora do selo (filtros, listas). Mesma fonte do badge. */
-export function sendStatusLabel(status: string): string {
-  return (
-    (SEND_STATUS as Record<string, { label: string } | undefined>)[status]
-      ?.label ?? status
-  );
-}
+/** Rótulo do status fora do selo (filtros, listas, planilha). */
+export { sendStatusLabel };
 
 export function SendStatusBadge({ status }: { status: SendStatus }) {
-  const config = SEND_STATUS[status] ?? SEND_STATUS.pending;
-  return <Badge variant={config.variant}>{config.label}</Badge>;
+  return (
+    <Badge variant={SEND_STATUS_VARIANT[status] ?? "outline"}>
+      {sendStatusLabel(status)}
+    </Badge>
+  );
 }
 
 const AUTOMATION_STATUS: Record<

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
 
 import { SendStatusBadge, sendStatusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,9 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -23,8 +25,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { csvFilename } from "@/lib/csv";
 import { formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
+import { describeSendForExport, sendsToCsv } from "@/lib/send-export";
+import { compareSendStatus } from "@/lib/send-status";
 import {
   describeSendOutcome,
   describeWhatsAppError,
@@ -54,27 +59,45 @@ export interface SendTableRow {
 
 const PAGE_SIZES = [50, 100];
 const TODOS = "todos";
+const POR_STATUS = "status:";
+const POR_MOTIVO = "motivo:";
 
 function tempo(valor: Data): number {
   return valor ? new Date(valor).getTime() : 0;
 }
 
+/** Baixa o conteúdo como arquivo, sem passar pelo servidor. */
+function baixarArquivo(nome: string, conteudo: string, tipo: string) {
+  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = nome;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revogar na hora cancela o download em alguns navegadores.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /**
- * Tabela de envios do relatório: busca, filtro por status, ordenação e
- * paginação, tudo no cliente — os envios de um disparo já vêm todos do
+ * Tabela de envios do relatório: busca, filtro, ordenação, paginação e
+ * exportação, tudo no cliente — os envios de um disparo já vêm todos do
  * servidor, e assim filtrar não custa uma ida ao banco.
  */
 export function SendsTable({
   sends,
   channel,
   vazio,
+  nomeDoDisparo,
 }: {
   sends: SendTableRow[];
   channel: "email" | "whatsapp" | "sms";
   vazio: string;
+  /** Nome da campanha — vira o nome do arquivo exportado. */
+  nomeDoDisparo?: string;
 }) {
   const [busca, setBusca] = useState("");
-  const [status, setStatus] = useState(TODOS);
+  const [filtro, setFiltro] = useState(TODOS);
   const [ordem, setOrdem] = useState("nome-az");
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [page, setPage] = useState(1);
@@ -97,16 +120,42 @@ export function SendsTable({
   const colunas =
     3 + (mostraEntrega ? 1 : 0) + (mostraEngajamento ? 1 : 0) + 1;
 
-  // Só os status que existem neste disparo — filtro sem opção morta.
-  const statusDisponiveis = useMemo(
-    () => [...new Set(sends.map((s) => s.status))].sort(),
-    [sends]
-  );
+  /**
+   * Opções do filtro, só com o que existe neste disparo (nada de opção morta)
+   * e com a contagem à mostra — quem vai reportar precisa do número antes de
+   * exportar. Além do status, entram os MOTIVOS: "Falhou" junta o contato sem
+   * WhatsApp com o que a Meta segurou por frequência, e são conversas
+   * diferentes com o cliente.
+   */
+  const { statusOpcoes, motivoOpcoes } = useMemo(() => {
+    const status = new Map<string, number>();
+    const motivos = new Map<string, number>();
+    for (const s of sends) {
+      status.set(s.status, (status.get(s.status) ?? 0) + 1);
+      // O próprio rótulo do motivo é a chave: serve para WhatsApp, SMS e
+      // e-mail sem o filtro precisar conhecer código de provedor nenhum.
+      const { motivo } = describeSendForExport(s, channel);
+      if (motivo) motivos.set(motivo, (motivos.get(motivo) ?? 0) + 1);
+    }
+    return {
+      statusOpcoes: [...status.entries()]
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => compareSendStatus(a.value, b.value)),
+      motivoOpcoes: [...motivos.entries()]
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
+    };
+  }, [sends, channel]);
 
   const filtradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     return sends.filter((s) => {
-      if (status !== TODOS && s.status !== status) return false;
+      if (filtro.startsWith(POR_STATUS)) {
+        if (s.status !== filtro.slice(POR_STATUS.length)) return false;
+      } else if (filtro.startsWith(POR_MOTIVO)) {
+        const { motivo } = describeSendForExport(s, channel);
+        if (motivo !== filtro.slice(POR_MOTIVO.length)) return false;
+      }
       if (!termo) return true;
       return [
         s.contactName,
@@ -115,7 +164,7 @@ export function SendsTable({
         s.contactCompany ?? "",
       ].some((campo) => campo.toLowerCase().includes(termo));
     });
-  }, [sends, busca, status]);
+  }, [sends, busca, filtro, channel]);
 
   const ordenadas = useMemo(() => {
     const copia = [...filtradas];
@@ -145,7 +194,24 @@ export function SendsTable({
   // Mexer nos filtros volta para a primeira página, senão a lista parece vazia.
   useEffect(() => {
     setPage(1);
-  }, [busca, status, ordem, pageSize]);
+  }, [busca, filtro, ordem, pageSize]);
+
+  /** Rótulo do recorte atual — vai no nome do arquivo exportado. */
+  const rotuloDoFiltro =
+    filtro === TODOS
+      ? "todos"
+      : filtro.startsWith(POR_STATUS)
+        ? sendStatusLabel(filtro.slice(POR_STATUS.length))
+        : filtro.slice(POR_MOTIVO.length);
+
+  function exportarCsv() {
+    // Exporta o recorte inteiro, não só a página à vista.
+    baixarArquivo(
+      csvFilename(nomeDoDisparo ?? "envios", rotuloDoFiltro),
+      sendsToCsv(ordenadas, channel),
+      "text/csv;charset=utf-8;"
+    );
+  }
 
   const totalPages = Math.max(1, Math.ceil(ordenadas.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -175,17 +241,32 @@ export function SendsTable({
           />
         </div>
 
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-44">
+        <Select value={filtro} onValueChange={setFiltro}>
+          <SelectTrigger className="w-60">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={TODOS}>Todos os status</SelectItem>
-            {statusDisponiveis.map((s) => (
-              <SelectItem key={s} value={s}>
-                {sendStatusLabel(s)}
-              </SelectItem>
-            ))}
+            <SelectItem value={TODOS}>
+              Todos os envios ({sends.length})
+            </SelectItem>
+            <SelectGroup>
+              <SelectLabel>Status</SelectLabel>
+              {statusOpcoes.map(({ value, count }) => (
+                <SelectItem key={value} value={`${POR_STATUS}${value}`}>
+                  {sendStatusLabel(value)} ({count})
+                </SelectItem>
+              ))}
+            </SelectGroup>
+            {motivoOpcoes.length > 0 ? (
+              <SelectGroup>
+                <SelectLabel>Motivo</SelectLabel>
+                {motivoOpcoes.map(({ value, count }) => (
+                  <SelectItem key={value} value={`${POR_MOTIVO}${value}`}>
+                    {value} ({count})
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ) : null}
           </SelectContent>
         </Select>
 
@@ -205,6 +286,17 @@ export function SendsTable({
             <SelectItem value="status">Status</SelectItem>
           </SelectContent>
         </Select>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={exportarCsv}
+          disabled={ordenadas.length === 0}
+          title="Baixa a lista filtrada em .csv (abre no Excel e no Sheets)"
+        >
+          <Download />
+          Exportar {ordenadas.length}
+        </Button>
       </div>
 
       {/* Altura limitada: sem isto a página rola sem fim em disparos grandes. */}

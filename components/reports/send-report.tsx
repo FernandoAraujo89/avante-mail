@@ -281,6 +281,7 @@ export async function SendReport({
           <SendsTable
             sends={sends}
             channel="whatsapp"
+            nomeDoDisparo={campaign.name}
             vazio="Nenhum envio registrado para esta campanha."
           />
         </Card>
@@ -393,6 +394,7 @@ export async function SendReport({
           <SendsTable
             sends={sends}
             channel="sms"
+            nomeDoDisparo={campaign.name}
             vazio="Nenhum envio registrado para esta campanha."
           />
         </Card>
@@ -479,6 +481,7 @@ export async function SendReport({
         <SendsTable
           sends={sends}
           channel="email"
+          nomeDoDisparo={campaign.name}
           vazio={
             isNews
               ? "Nenhum envio registrado para esta edição."
