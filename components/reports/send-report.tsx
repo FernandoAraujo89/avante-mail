@@ -105,6 +105,8 @@ export async function SendReport({
       // Segmentos cobrados de cada SMS: é o que a Twilio fatura, e vem do
       // envio porque o texto da campanha pode ter mudado desde o disparo.
       smsSegments: campaignSends.smsSegments,
+      // O que a Twilio cobrou de fato — manda no custo quando existe.
+      smsSegmentsBilled: campaignSends.smsSegmentsBilled,
       // O id vai junto para a linha levar à ficha do contato.
       contactId: campaignSends.contactId,
       contactName: contacts.name,
@@ -293,7 +295,7 @@ export async function SendReport({
   if (isSms) {
     const chargeableSends = sends.filter((s) => s.sentAt !== null);
     const segments = chargeableSends.reduce(
-      (soma, s) => soma + (s.smsSegments ?? 1),
+      (soma, s) => soma + (s.smsSegmentsBilled ?? s.smsSegments ?? 1),
       0
     );
     const delivered = sends.filter((s) => s.deliveredAt !== null).length;
@@ -303,6 +305,18 @@ export async function SendReport({
     const optedOut = sends.filter(
       (s) => s.errorCode === "21610" || s.errorCode === "21614"
     ).length;
+    // Quanto NÓS contamos no envio. Se divergir do que a Twilio cobrou, algo
+    // reescreveu a mensagem depois da nossa contagem — tipicamente Link
+    // Shortening ou Smart Encoding ligados no console. Vale avisar: sem isso,
+    // a diferença só apareceria na fatura, meses depois.
+    const segmentsCounted = chargeableSends.reduce(
+      (soma, s) => soma + (s.smsSegments ?? 1),
+      0
+    );
+    const temDivergencia =
+      chargeableSends.some((s) => s.smsSegmentsBilled !== null) &&
+      segmentsCounted !== segments;
+
     const cost = campaignCost({
       channel: "sms",
       chargeable: chargeableSends.length,
@@ -323,7 +337,11 @@ export async function SendReport({
           <MetricCard
             label="Enviados"
             value={String(chargeableSends.length)}
-            hint={`${segments} segmento(s) cobrado(s)`}
+            hint={
+              temDivergencia
+                ? `${segments} segmento(s) cobrado(s) — contamos ${segmentsCounted}`
+                : `${segments} segmento(s) cobrado(s)`
+            }
             icon={Send}
           />
           <MetricCard

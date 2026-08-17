@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_TWIML,
   isSmsOptOutMessage,
+  parseBilledSegments,
   publicWebhookUrl,
   shouldBlockContact,
   smsStatusPatch,
@@ -257,5 +258,35 @@ describe("EMPTY_TWIML", () => {
     expect(EMPTY_TWIML).toBe(
       '<?xml version="1.0" encoding="UTF-8"?><Response/>'
     );
+  });
+});
+
+describe("parseBilledSegments", () => {
+  it("aceita o NumSegments como a Twilio manda — texto", () => {
+    expect(parseBilledSegments("1")).toBe(1);
+    expect(parseBilledSegments("3")).toBe(3);
+  });
+
+  it("aceita número, caso o parser mude", () => {
+    expect(parseBilledSegments(2)).toBe(2);
+  });
+
+  it("recusa ausente ou vazio em vez de gravar zero", () => {
+    // Gravar 0 seria pior que não gravar: zeraria o custo da campanha.
+    expect(parseBilledSegments(undefined)).toBeNull();
+    expect(parseBilledSegments(null)).toBeNull();
+    expect(parseBilledSegments("")).toBeNull();
+  });
+
+  it("recusa zero, negativo e fracionário — não existe meio segmento", () => {
+    expect(parseBilledSegments("0")).toBeNull();
+    expect(parseBilledSegments("-1")).toBeNull();
+    expect(parseBilledSegments("1.5")).toBeNull();
+  });
+
+  it("recusa lixo sem explodir", () => {
+    expect(parseBilledSegments("abc")).toBeNull();
+    expect(parseBilledSegments({})).toBeNull();
+    expect(parseBilledSegments([])).toBeNull();
   });
 });

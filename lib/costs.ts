@@ -124,7 +124,10 @@ export async function monthlyConsumption(
   const smsRows = await db
     .select({
       month: sentMonth,
-      segments: sql<number>`sum(coalesce(${campaignSends.smsSegments}, 1))`,
+      // Ordem da preferência: o que a Twilio cobrou (NumSegments), depois a
+      // nossa contagem no envio, e 1 como piso para linha antiga sem nenhum
+      // dos dois — nenhum SMS custa menos que um segmento.
+      segments: sql<number>`sum(coalesce(${campaignSends.smsSegmentsBilled}, ${campaignSends.smsSegments}, 1))`,
     })
     .from(campaignSends)
     .where(

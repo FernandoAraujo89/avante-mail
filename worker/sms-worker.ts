@@ -106,11 +106,17 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
     if (!campaign) {
       throw new Error("Campanha não encontrada no banco.");
     }
-    if (!campaign.smsBody?.trim()) {
+    // O .trim() precisa valer para o texto QUE SAI, não só para a checagem de
+    // vazio: a rota de disparo conta os segmentos sobre o texto trimado
+    // (send/route.ts), e mandar daqui com um "\n" sobrando faria a mensagem
+    // custar um segmento a mais do que o editor prometeu — em toda a base, e
+    // sem ninguém entender por quê.
+    const texto = campaign.smsBody?.trim();
+    if (!texto) {
       await failPermanently(null, "Campanha sem texto de SMS definido.");
       return;
     }
-    body = campaign.smsBody;
+    body = texto;
 
     // Primeiro job de uma campanha agendada: marca como "sending".
     if (campaign.status === "scheduled") {

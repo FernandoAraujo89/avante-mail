@@ -6,6 +6,7 @@ import { emitContactEvent } from "@/lib/events";
 import { errorMessage } from "@/lib/utils";
 import {
   formParamsToRecord,
+  parseBilledSegments,
   publicWebhookUrl,
   shouldBlockContact,
   smsStatusPatch,
@@ -102,10 +103,20 @@ async function processStatus(params: Record<string, string>): Promise<void> {
     errorCode,
   });
 
-  if (patch) {
+  // Os segmentos cobrados chegam junto do status e são registrados mesmo
+  // quando o status em si não muda nada (evento atrasado, repetido): é a
+  // única fonte de quanto a Twilio de fato cobrou.
+  const billed = parseBilledSegments(params.NumSegments);
+
+  const updates = {
+    ...(patch ?? {}),
+    ...(billed !== null ? { smsSegmentsBilled: billed } : {}),
+  };
+
+  if (Object.keys(updates).length > 0) {
     await db
       .update(campaignSends)
-      .set(patch)
+      .set(updates)
       .where(eq(campaignSends.id, send.id));
   }
 

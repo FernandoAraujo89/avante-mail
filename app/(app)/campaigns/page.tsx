@@ -65,7 +65,9 @@ export default async function CampaignsPage() {
       sentChargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
       waChargeable: sql<number>`count(*) filter (where ${campaignSends.deliveredAt} is not null)`,
       // Envio antigo, sem segmento gravado, conta como 1 — o piso de qualquer SMS.
-      smsSegments: sql<number>`coalesce(sum(coalesce(${campaignSends.smsSegments}, 1)) filter (where ${campaignSends.sentAt} is not null), 0)`,
+      // Prefere o que a Twilio cobrou; cai na nossa contagem e, por último, no
+      // piso de 1 segmento (linha anterior às colunas).
+      smsSegments: sql<number>`coalesce(sum(coalesce(${campaignSends.smsSegmentsBilled}, ${campaignSends.smsSegments}, 1)) filter (where ${campaignSends.sentAt} is not null), 0)`,
     })
     .from(campaignSends)
     .groupBy(campaignSends.campaignId);

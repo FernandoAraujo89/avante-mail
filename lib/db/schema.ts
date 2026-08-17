@@ -772,6 +772,14 @@ export const campaignSends = pgTable("campaign_sends", {
   // linha que talvez não exista mais, nem mudar de valor porque alguém
   // duplicou a campanha e editou o texto.
   smsSegments: integer("sms_segments"),
+  // Segmentos que a TWILIO diz ter cobrado (NumSegments, vem em todo status
+  // callback). A coluna acima é a nossa contagem no momento do envio; esta é a
+  // do provedor. Existem as duas de propósito: enquanto só houvesse a nossa, o
+  // relatório descreveria o que ACHAMOS que enviamos. Qualquer recurso que
+  // reescreva o corpo depois da nossa contagem (Link Shortening, Smart
+  // Encoding, ligados no console) apareceria como divergência aqui em vez de
+  // sumir na fatura. Na dúvida sobre custo, esta manda.
+  smsSegmentsBilled: integer("sms_segments_billed"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   // Confirmações do WhatsApp (webhook da Cloud API). A ordem dos eventos não
   // é garantida — o status só avança (pending < sent < delivered < read).
@@ -802,6 +810,16 @@ export const campaignSends = pgTable("campaign_sends", {
   uniqueIndex("campaign_sends_automacao_passo_idx")
     .on(t.automationRunId, t.automationStepId)
     .where(sql`${t.automationRunId} is not null`),
+  // Uma campanha manda UMA vez para cada contato. Sem isto, dois cliques em
+  // "Disparar" (ou um disparo de campanha já agendada) criavam a fila inteira
+  // de novo: todo mundo recebia duas vezes e a conta vinha dobrada. O guarda
+  // de status no /send fecha o caminho comum; este índice é a garantia dura,
+  // no banco, que também cobre a corrida entre duas requisições simultâneas.
+  // Parcial porque envio de automação tem campaign_id nulo e é controlado
+  // pelo índice acima.
+  uniqueIndex("campaign_sends_campanha_contato_idx")
+    .on(t.campaignId, t.contactId)
+    .where(sql`${t.campaignId} is not null`),
 ]);
 
 // Configurações do sistema (chave/valor). Hoje guarda qual lista recebe o

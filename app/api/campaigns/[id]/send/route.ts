@@ -32,6 +32,33 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+/**
+ * Enfileira os jobs; se a fila recusar, APAGA os envios recém-criados.
+ *
+ * Sem isso a campanha ficaria presa: os registros de envio já estariam
+ * gravados, nenhum job existiria para processá-los, e a segunda tentativa
+ * bateria no índice único (campanha, contato) — ou seja, ninguém receberia e
+ * não haveria como corrigir pela interface. Desfazer devolve a campanha ao
+ * estado de antes, disparável de novo assim que o Redis voltar.
+ *
+ * Apagar por campanha é seguro porque só se dispara a partir de rascunho: as
+ * únicas linhas existentes são as desta tentativa.
+ */
+async function enfileirarOuDesfazer(
+  db: ReturnType<typeof getDb>,
+  campaignId: string,
+  enfileirar: () => Promise<unknown>
+): Promise<void> {
+  try {
+    await enfileirar();
+  } catch (error) {
+    await db
+      .delete(campaignSends)
+      .where(eq(campaignSends.campaignId, campaignId));
+    throw error;
+  }
+}
+
 // Disparo do canal WhatsApp: valida modelo aprovado + mapeamento de
 // variáveis, seleciona contatos com telefone e consentimento, cria os
 // registros de envio e enfileira em "whatsapp-sends".
@@ -159,22 +186,24 @@ async function dispatchWhatsApp(
     : 0;
 
   const queue = getWhatsAppQueue();
-  await queue.addBulk(
-    sends.map((send) => ({
-      name: "send-whatsapp",
-      data: {
-        sendId: send.id,
-        campaignId: campaign.id,
-        contactId: send.contactId,
-      },
-      opts: {
-        delay,
-        attempts: 3,
-        backoff: { type: "exponential" as const, delay: 3000 },
-        removeOnComplete: true,
-        removeOnFail: true,
-      },
-    }))
+  await enfileirarOuDesfazer(db, campaign.id, () =>
+    queue.addBulk(
+      sends.map((send) => ({
+        name: "send-whatsapp",
+        data: {
+          sendId: send.id,
+          campaignId: campaign.id,
+          contactId: send.contactId,
+        },
+        opts: {
+          delay,
+          attempts: 3,
+          backoff: { type: "exponential" as const, delay: 3000 },
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      }))
+    )
   );
 
   await db
@@ -294,22 +323,24 @@ async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
     : 0;
 
   const queue = getSmsQueue();
-  await queue.addBulk(
-    sends.map((send) => ({
-      name: "send-sms",
-      data: {
-        sendId: send.id,
-        campaignId: campaign.id,
-        contactId: send.contactId,
-      },
-      opts: {
-        delay,
-        attempts: 3,
-        backoff: { type: "exponential" as const, delay: 3000 },
-        removeOnComplete: true,
-        removeOnFail: true,
-      },
-    }))
+  await enfileirarOuDesfazer(db, campaign.id, () =>
+    queue.addBulk(
+      sends.map((send) => ({
+        name: "send-sms",
+        data: {
+          sendId: send.id,
+          campaignId: campaign.id,
+          contactId: send.contactId,
+        },
+        opts: {
+          delay,
+          attempts: 3,
+          backoff: { type: "exponential" as const, delay: 3000 },
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      }))
+    )
   );
 
   await db
@@ -341,11 +372,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { status: 404 }
       );
     }
-    if (campaign.status === "sending" || campaign.status === "sent") {
-      return NextResponse.json(
-        { error: "Esta campanha já foi disparada." },
-        { status: 409 }
-      );
+    // Só rascunho dispara. "scheduled" fica de fora de propósito: a campanha
+    // agendada JÁ tem a fila inteira criada, com os jobs esperando a hora —
+    // disparar de novo duplicava tudo, e cada contato recebia (e era cobrado)
+    // duas vezes. Para mudar a hora, edite a campanha; para cancelar, ela
+    // precisa voltar a rascunho.
+    if (campaign.status !== "draft") {
+      const explicacao =
+        campaign.status === "scheduled"
+          ? "Esta campanha já está agendada — os envios já estão na fila."
+          : "Esta campanha já foi disparada.";
+      return NextResponse.json({ error: explicacao }, { status: 409 });
     }
 
     // Quem disparou fica registrado antes de enfileirar: se algo falhar
@@ -496,22 +533,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
       : 0;
 
     const queue = getEmailQueue();
-    await queue.addBulk(
-      sends.map((send) => ({
-        name: "send-email",
-        data: {
-          sendId: send.id,
-          campaignId: campaign.id,
-          contactId: send.contactId,
-        },
-        opts: {
-          delay,
-          attempts: 3,
-          backoff: { type: "exponential" as const, delay: 3000 },
-          removeOnComplete: true,
-          removeOnFail: true,
-        },
-      }))
+    await enfileirarOuDesfazer(db, campaign.id, () =>
+      queue.addBulk(
+        sends.map((send) => ({
+          name: "send-email",
+          data: {
+            sendId: send.id,
+            campaignId: campaign.id,
+            contactId: send.contactId,
+          },
+          opts: {
+            delay,
+            attempts: 3,
+            backoff: { type: "exponential" as const, delay: 3000 },
+            removeOnComplete: true,
+            removeOnFail: true,
+          },
+        }))
+      )
     );
 
     // 4. Atualiza o status da campanha.
@@ -526,6 +565,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       scheduled: delay > 0,
     });
   } catch (error) {
+    // 23505 = violação de unicidade. Aqui só pode ser o índice
+    // (campaign_id, contact_id): duas requisições de disparo correndo juntas
+    // (clique duplo, aba repetida). A segunda perde a corrida e o INSERT
+    // inteiro é recusado pelo Postgres — nenhuma linha parcial, ninguém
+    // recebe duas vezes. Vira 409 porque é conflito, não falha do servidor.
+    if (
+      error &&
+      typeof error === "object" &&
+      (error as { code?: unknown }).code === "23505"
+    ) {
+      return NextResponse.json(
+        { error: "Esta campanha já está sendo disparada." },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

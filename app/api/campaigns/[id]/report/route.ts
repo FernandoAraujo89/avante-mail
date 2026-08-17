@@ -44,6 +44,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         repliedAt: campaignSends.repliedAt,
         errorCode: campaignSends.errorCode,
         smsSegments: campaignSends.smsSegments,
+        smsSegmentsBilled: campaignSends.smsSegmentsBilled,
         contactName: contacts.name,
         contactEmail: contacts.email,
         contactPhone: contacts.phone,
@@ -110,7 +111,21 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           (s) => s.errorCode === "21610" || s.errorCode === "21614"
         ).length,
         pending,
-        segments: enviados.reduce((soma, s) => soma + (s.smsSegments ?? 0), 0),
+        // Vale o que a Twilio COBROU; sem isso, a nossa contagem; sem as duas,
+        // 1 — o piso de qualquer SMS, nunca 0. Com 0 a soma inteira podia zerar
+        // e `campaignCost` receberia esse zero como legítimo (0 não é nullish):
+        // a campanha apareceria custando R$ 0,00.
+        segments: enviados.reduce(
+          (soma, s) => soma + (s.smsSegmentsBilled ?? s.smsSegments ?? 1),
+          0
+        ),
+        // Quanto NÓS contamos, para a tela poder mostrar a divergência: se os
+        // dois números não baterem, algo reescreveu a mensagem depois da nossa
+        // contagem e o custo real é o de cima.
+        segmentsCounted: enviados.reduce(
+          (soma, s) => soma + (s.smsSegments ?? 1),
+          0
+        ),
       };
       // A Twilio cobra ao entregar a mensagem à operadora — conta sentAt, como
       // o e-mail, e não deliveredAt como o WhatsApp: a mensagem já foi paga

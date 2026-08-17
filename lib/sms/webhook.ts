@@ -105,6 +105,27 @@ export interface SmsSendPatch {
   deliveredAt?: Date;
   errorCode?: string | null;
   errorMessage?: string | null;
+  smsSegmentsBilled?: number;
+}
+
+/**
+ * `NumSegments` do status callback — quantos segmentos a Twilio COBROU.
+ *
+ * Chega como texto ("1", "2") em todo evento da mesma mensagem, sempre com o
+ * mesmo valor, então gravar a cada callback é idempotente. Vale mais que a
+ * nossa contagem local por um motivo prático: recursos ligados no console
+ * (Link Shortening, Smart Encoding) reescrevem o corpo DEPOIS de contarmos, e
+ * sem este número a diferença só apareceria na fatura.
+ *
+ * Devolve null para ausente, não numérico, zero ou negativo — nesses casos o
+ * certo é não escrever nada e manter a contagem local, em vez de gravar um
+ * valor inventado por cima de um que ao menos foi medido.
+ */
+export function parseBilledSegments(valor: unknown): number | null {
+  if (typeof valor !== "string" && typeof valor !== "number") return null;
+  const n = Number(valor);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
 }
 
 /**
