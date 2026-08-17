@@ -1,12 +1,16 @@
+import { getBaseUrl } from "../base-url";
 import type { TemplateMessageComponent } from "./client";
 import {
   extractVariables,
+  isMediaHeader,
+  type WhatsAppHeaderType,
   type WhatsAppVariableExamples,
   type WhatsAppVariableMap,
 } from "./types";
 
-// Resolve os valores das variáveis {{n}} de um envio: cada índice vem do
-// mapeamento da campanha (campo do contato ou texto fixo). Usado pelo worker
+// Monta os componentes de um envio: o cabeçalho de mídia (quando o modelo tem
+// imagem ou PDF) e o corpo com as variáveis {{n}} resolvidas — cada índice vem
+// do mapeamento da campanha (campo do contato ou texto fixo). Usado pelo worker
 // e pelo envio de teste.
 
 export interface VariableContact {
@@ -37,25 +41,71 @@ export function resolveVariables(args: {
   return values;
 }
 
-/** Monta o componente `body` do payload de envio (vazio se não há variáveis). */
-export function buildBodyComponents(args: {
+/** O que um envio precisa saber do modelo aprovado. */
+export interface SendTemplate {
   bodyText: string;
+  variableExamples: WhatsAppVariableExamples | null;
+  headerType: WhatsAppHeaderType;
+  headerMediaUrl: string | null;
+  headerMediaFilename: string | null;
+}
+
+/**
+ * Componentes do payload de envio: cabeçalho de mídia (se houver) e corpo com
+ * as variáveis (vazio quando o modelo não tem nem um nem outro).
+ *
+ * O arquivo do cabeçalho vai como link absoluto — a Meta baixa a mídia a cada
+ * envio, então /uploads precisa estar acessível na NEXT_PUBLIC_BASE_URL.
+ */
+export function buildSendComponents(args: {
+  template: SendTemplate;
   variables: WhatsAppVariableMap | null;
-  examples: WhatsAppVariableExamples | null;
   contact: VariableContact;
 }): TemplateMessageComponent[] {
-  const indexes = extractVariables(args.bodyText);
-  if (indexes.length === 0) return [];
-  const values = resolveVariables(args);
-  return [
-    {
+  const { template } = args;
+  const components: TemplateMessageComponent[] = [];
+
+  if (isMediaHeader(template.headerType) && template.headerMediaUrl) {
+    const link = /^https?:\/\//.test(template.headerMediaUrl)
+      ? template.headerMediaUrl
+      : `${getBaseUrl()}${template.headerMediaUrl}`;
+    components.push({
+      type: "header",
+      parameters: [
+        template.headerType === "image"
+          ? { type: "image", image: { link } }
+          : {
+              type: "document",
+              document: {
+                link,
+                // Nome que aparece no card do PDF na conversa.
+                ...(template.headerMediaFilename
+                  ? { filename: template.headerMediaFilename }
+                  : {}),
+              },
+            },
+      ],
+    });
+  }
+
+  const indexes = extractVariables(template.bodyText);
+  if (indexes.length > 0) {
+    const values = resolveVariables({
+      bodyText: template.bodyText,
+      variables: args.variables,
+      examples: template.variableExamples,
+      contact: args.contact,
+    });
+    components.push({
       type: "body",
       parameters: indexes.map((n) => ({
         type: "text",
         text: values[String(n)],
       })),
-    },
-  ];
+    });
+  }
+
+  return components;
 }
 
 /**

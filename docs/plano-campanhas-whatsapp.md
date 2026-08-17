@@ -110,8 +110,11 @@ CREATE TABLE IF NOT EXISTS whatsapp_templates (
   category text NOT NULL DEFAULT 'MARKETING',
   status text NOT NULL DEFAULT 'draft',  -- draft|pending|approved|rejected|paused|disabled
   meta_template_id text,
-  header_type text NOT NULL DEFAULT 'none',  -- none|text|image
+  header_type text NOT NULL DEFAULT 'none',  -- none|text|image|document
   header_text text,
+  header_media_url text,              -- /uploads/… que a Meta baixa no envio
+  header_media_filename text,         -- nome exibido no card do PDF
+  header_media_handle text,           -- amostra aceita na análise (Resumable Upload)
   body_text text NOT NULL,            -- com {{1}}, {{2}}…
   footer_text text,
   buttons jsonb,                      -- [{type:'QUICK_REPLY',text:'…'}|{type:'URL',…}]
@@ -160,6 +163,11 @@ Decisões: **mesma tabela** `campaign_sends` (relatórios/wizard reaproveitados;
 ### Templates
 
 - Página "Modelos WhatsApp": criar (form: header/body/footer/botões, variáveis, exemplos), enviar à Meta (`POST /{WABA_ID}/message_templates`), acompanhar status (webhook + botão "Sincronizar" fazendo `GET`), excluir. Boa prática embutida por padrão: footer "Responda SAIR para não receber mais" (protege a qualidade do número).
+- **Cabeçalho de imagem ou PDF** (o cabeçalho aceita um só componente: texto **ou** arquivo). São dois momentos distintos:
+  1. **Análise** — o template vai com `format: IMAGE|DOCUMENT` e `example.header_handle`, um handle da Resumable Upload API (`POST /{WHATSAPP_APP_ID}/uploads` → bytes → `h`). É só amostra. O submit do modelo sobe a amostra na hora, a partir do arquivo em `/uploads`, e guarda o handle.
+  2. **Envio** — o componente `header` leva o arquivo de verdade: `{type:'image',image:{link}}` ou `{type:'document',document:{link,filename}}`. A Meta baixa o link a cada envio, então `/uploads` tem de estar público na `NEXT_PUBLIC_BASE_URL` (já está: rota liberada no middleware). O arquivo pode mudar sem nova aprovação.
+- Formatos aceitos no cabeçalho (mais estreitos que na mensagem avulsa): imagem **JPG/PNG até 5 MB**, documento **só PDF, até 100 MB**. Arquivo grande depende também do `client_max_body_size` do nginx no host.
+- Modelo com cabeçalho de mídia criado no Gerenciador da Meta **não é importado** pelo "Sincronizar": a Meta devolve o formato, não o arquivo — entraria sem mídia e o envio falharia. Nesses casos, recrie o modelo aqui.
 
 ---
 

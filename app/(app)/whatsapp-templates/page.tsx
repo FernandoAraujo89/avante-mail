@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Pencil, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
+import {
+  FileText,
+  Image as ImageIcon,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Send,
+  Trash2,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { WhatsAppTemplateStatusBadge } from "@/components/whatsapp/template-status-badge";
@@ -26,7 +34,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/format";
-import type { WhatsAppTemplateStatus } from "@/lib/whatsapp/types";
+import {
+  isMediaHeader,
+  type WhatsAppHeaderType,
+  type WhatsAppTemplateStatus,
+} from "@/lib/whatsapp/types";
 
 type TemplateDto = {
   id: string;
@@ -34,6 +46,8 @@ type TemplateDto = {
   language: string;
   category: string;
   status: WhatsAppTemplateStatus;
+  headerType: WhatsAppHeaderType;
+  headerMediaFilename: string | null;
   bodyText: string;
   qualityScore: string | null;
   rejectionReason: string | null;
@@ -92,7 +106,10 @@ export default function WhatsAppTemplatesPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao sincronizar.");
       setNotice(
-        `Sincronizado com a Meta: ${json.updated} atualizado(s), ${json.imported} importado(s).`
+        `Sincronizado com a Meta: ${json.updated} atualizado(s), ${json.imported} importado(s).` +
+          (json.skipped
+            ? ` ${json.skipped} não importado(s): modelo com cabeçalho de arquivo ou sem corpo de texto tem de ser criado aqui.`
+            : "")
       );
       await load();
     } catch (err) {
@@ -219,6 +236,21 @@ export default function WhatsAppTemplatesPage() {
                       <p className="mt-0.5 max-w-md truncate text-xs text-muted-foreground">
                         {template.bodyText}
                       </p>
+                      {isMediaHeader(template.headerType) ? (
+                        <p className="mt-0.5 flex max-w-md items-center gap-1 text-xs text-muted-foreground">
+                          {template.headerType === "image" ? (
+                            <ImageIcon className="size-3 shrink-0" />
+                          ) : (
+                            <FileText className="size-3 shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {template.headerType === "image"
+                              ? "Imagem no cabeçalho"
+                              : (template.headerMediaFilename ??
+                                "PDF no cabeçalho")}
+                          </span>
+                        </p>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">

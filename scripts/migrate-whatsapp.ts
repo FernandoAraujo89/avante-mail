@@ -8,7 +8,9 @@ import { Client } from "pg";
 // - campaigns: canal (email|whatsapp), modelo e mapa de variáveis;
 // - campaign_sends: confirmações (entregue/lida) e erro do provedor.
 // Nada aqui altera colunas ou dados existentes do canal de e-mail.
-// Rode uma vez: `npx tsx scripts/migrate-whatsapp.ts`
+// Rode: `npx tsx scripts/migrate-whatsapp.ts` — é idempotente, então rodar de
+// novo é o jeito de aplicar as colunas que entraram depois (ex.: o cabeçalho
+// de imagem/PDF dos modelos).
 
 config({ path: ".env.local" });
 
@@ -72,6 +74,17 @@ async function main() {
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `);
+
+  console.log("[MIGRATE] whatsapp_templates: cabeçalho de imagem/PDF...");
+  await client.query(
+    `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_media_url text`
+  );
+  await client.query(
+    `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_media_filename text`
+  );
+  await client.query(
+    `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_media_handle text`
+  );
 
   console.log("[MIGRATE] campaigns: canal e modelo de WhatsApp...");
   await client.query(

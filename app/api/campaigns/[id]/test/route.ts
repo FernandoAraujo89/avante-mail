@@ -20,7 +20,8 @@ import {
   isWhatsAppConfigured,
   sendTemplateMessage,
 } from "@/lib/whatsapp/client";
-import { buildBodyComponents } from "@/lib/whatsapp/variables";
+import { missingHeaderMedia } from "@/lib/whatsapp/types";
+import { buildSendComponents } from "@/lib/whatsapp/variables";
 
 export const dynamic = "force-dynamic";
 
@@ -102,10 +103,18 @@ async function sendWhatsAppTest(
     );
   }
 
-  const components = buildBodyComponents({
-    bodyText: template.bodyText,
+  if (missingHeaderMedia(template)) {
+    return NextResponse.json(
+      {
+        error: `O modelo "${template.name}" tem cabeçalho de arquivo sem a mídia — reenvie o arquivo no modelo.`,
+      },
+      { status: 400 }
+    );
+  }
+
+  const components = buildSendComponents({
+    template,
     variables: campaign.whatsappVariables,
-    examples: template.variableExamples,
     contact: { name: "Parceiro Teste", company: "Empresa Exemplo" },
   });
 

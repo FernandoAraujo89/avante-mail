@@ -88,9 +88,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
+    // O handle da amostra vale para o arquivo que a Meta analisou: se a mídia
+    // do cabeçalho mudou (ou deixou de existir), ele é descartado e o submit
+    // sobe outra amostra.
+    const headerMediaHandle =
+      parsed.data.headerMediaUrl &&
+      parsed.data.headerMediaUrl === template.headerMediaUrl
+        ? template.headerMediaHandle
+        : null;
+
     const [updated] = await db
       .update(whatsappTemplates)
-      .set({ ...parsed.data, updatedAt: new Date() })
+      .set({ ...parsed.data, headerMediaHandle, updatedAt: new Date() })
       .where(eq(whatsappTemplates.id, id))
       .returning();
 

@@ -22,8 +22,11 @@ import {
   isPermanentSendError,
   sendTemplateMessage,
 } from "../lib/whatsapp/client";
-import type { WhatsAppVariableMap } from "../lib/whatsapp/types";
-import { buildBodyComponents } from "../lib/whatsapp/variables";
+import {
+  missingHeaderMedia,
+  type WhatsAppVariableMap,
+} from "../lib/whatsapp/types";
+import { buildSendComponents } from "../lib/whatsapp/variables";
 import { errorMessage } from "../lib/utils";
 
 // Worker do canal WhatsApp — espelho do worker/email-worker.ts, consumindo a
@@ -169,11 +172,20 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     return;
   }
 
+  if (missingHeaderMedia(template)) {
+    // Só acontece com modelo mexido por fora; a Cloud API recusaria o envio
+    // por falta do parâmetro do cabeçalho, e reenviar não resolveria.
+    await failPermanently(
+      null,
+      `Modelo "${template.name}" tem cabeçalho de arquivo sem a mídia — reenvie o arquivo no modelo.`
+    );
+    return;
+  }
+
   try {
-    const components = buildBodyComponents({
-      bodyText: template.bodyText,
+    const components = buildSendComponents({
+      template,
       variables,
-      examples: template.variableExamples,
       contact,
     });
 

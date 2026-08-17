@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { FileText, Plus, Upload, X } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
@@ -22,8 +22,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   extractVariables,
   fillVariables,
+  isMediaHeader,
+  parseHeaderType,
   WHATSAPP_LIMITS,
+  WHATSAPP_MEDIA_HEADERS,
   type WhatsAppButton,
+  type WhatsAppHeaderType,
 } from "@/lib/whatsapp/types";
 
 // Rodapé sugerido por padrão: instrução de descadastro protege a qualidade
@@ -38,8 +42,10 @@ interface TemplateDto {
   language: string;
   category: "MARKETING" | "UTILITY" | "AUTHENTICATION";
   status: string;
-  headerType: "none" | "text";
+  headerType: WhatsAppHeaderType;
   headerText: string | null;
+  headerMediaUrl: string | null;
+  headerMediaFilename: string | null;
   bodyText: string;
   footerText: string | null;
   buttons: WhatsAppButton[] | null;
@@ -59,6 +65,7 @@ function slugifyName(value: string): string {
 export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
   const router = useRouter();
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const mediaRef = useRef<HTMLInputElement>(null);
   const isEditing = Boolean(templateId);
 
   // Depois de criar (POST), passa a editar (PATCH) sem trocar de rota.
@@ -66,8 +73,14 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("pt_BR");
   const [category, setCategory] = useState<"MARKETING" | "UTILITY">("MARKETING");
-  const [headerType, setHeaderType] = useState<"none" | "text">("none");
+  const [headerType, setHeaderType] = useState<WhatsAppHeaderType>("none");
   const [headerText, setHeaderText] = useState("");
+  // Arquivo do cabeçalho já hospedado (a Meta baixa por esta URL no envio).
+  const [headerMedia, setHeaderMedia] = useState<{
+    url: string;
+    filename: string;
+  } | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [bodyText, setBodyText] = useState("");
   const [footerText, setFooterText] = useState(DEFAULT_FOOTER);
   const [buttons, setButtons] = useState<ButtonRow[]>([]);
@@ -80,6 +93,9 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
 
   const readOnly = status !== "draft" && status !== "rejected";
   const variables = extractVariables(bodyText);
+  const mediaSpec = isMediaHeader(headerType)
+    ? WHATSAPP_MEDIA_HEADERS[headerType]
+    : null;
 
   useEffect(() => {
     if (!templateId) return;
@@ -95,8 +111,16 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
         setName(json.name);
         setLanguage(json.language);
         setCategory(json.category === "UTILITY" ? "UTILITY" : "MARKETING");
-        setHeaderType(json.headerType === "text" ? "text" : "none");
+        setHeaderType(parseHeaderType(json.headerType));
         setHeaderText(json.headerText ?? "");
+        setHeaderMedia(
+          json.headerMediaUrl
+            ? {
+                url: json.headerMediaUrl,
+                filename: json.headerMediaFilename ?? "arquivo",
+              }
+            : null
+        );
         setBodyText(json.bodyText);
         setFooterText(json.footerText ?? "");
         setButtons(
@@ -134,6 +158,38 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
     }
   }
 
+  async function handleMediaFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // permite reenviar o mesmo arquivo
+    if (!file || !isMediaHeader(headerType)) return;
+
+    setError("");
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("kind", headerType);
+      form.append("file", file);
+      const res = await fetch("/api/whatsapp-templates/media", {
+        method: "POST",
+        body: form,
+      });
+      // Arquivo grande pode ser barrado pelo proxy antes de chegar na rota —
+      // aí a resposta não é JSON e só o status conta.
+      const json = await res.json().catch(() => ({}) as { error?: string });
+      if (!res.ok) {
+        throw new Error(
+          json.error ??
+            `O servidor recusou o arquivo (HTTP ${res.status}). Se o arquivo for grande, o limite pode estar no servidor web.`
+        );
+      }
+      setHeaderMedia({ url: json.url, filename: json.filename });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function updateButton(index: number, patch: Partial<ButtonRow>) {
     setButtons((current) =>
       current.map((b, i) => (i === index ? { ...b, ...patch } : b))
@@ -144,12 +200,26 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
     setSaving(true);
     setError("");
     try {
+      if (isMediaHeader(headerType) && !headerMedia) {
+        throw new Error(
+          headerType === "image"
+            ? "Envie a imagem do cabeçalho (ou troque o cabeçalho para texto)."
+            : "Envie o PDF do cabeçalho (ou troque o cabeçalho para texto)."
+        );
+      }
+
       const payload = {
         name,
         language,
         category,
         headerType,
         headerText: headerType === "text" ? headerText : null,
+        headerMediaUrl: isMediaHeader(headerType)
+          ? (headerMedia?.url ?? null)
+          : null,
+        headerMediaFilename: isMediaHeader(headerType)
+          ? (headerMedia?.filename ?? null)
+          : null,
         bodyText,
         footerText,
         buttons: buttons.map((b) =>
@@ -296,9 +366,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                     <Label>Cabeçalho</Label>
                     <Select
                       value={headerType}
-                      onValueChange={(v) =>
-                        setHeaderType(v === "text" ? "text" : "none")
-                      }
+                      onValueChange={(v) => setHeaderType(parseHeaderType(v))}
                       disabled={readOnly}
                     >
                       <SelectTrigger>
@@ -307,6 +375,12 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       <SelectContent>
                         <SelectItem value="none">Sem cabeçalho</SelectItem>
                         <SelectItem value="text">Texto</SelectItem>
+                        <SelectItem value="image">
+                          Imagem (JPG ou PNG)
+                        </SelectItem>
+                        <SelectItem value="document">
+                          Documento (PDF)
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -323,6 +397,77 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       placeholder="Novidade para sua empresa"
                       disabled={readOnly}
                     />
+                  </div>
+                ) : null}
+
+                {mediaSpec ? (
+                  <div className="grid gap-2">
+                    <Label>
+                      {headerType === "image"
+                        ? "Imagem do cabeçalho *"
+                        : "PDF do cabeçalho *"}
+                    </Label>
+                    <input
+                      ref={mediaRef}
+                      type="file"
+                      accept={mediaSpec.accept}
+                      className="hidden"
+                      onChange={handleMediaFile}
+                    />
+                    {headerMedia ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                        <FileText className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          {headerMedia.filename}
+                        </span>
+                        {!readOnly ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => mediaRef.current?.click()}
+                              disabled={uploading}
+                            >
+                              {uploading ? "Enviando..." : "Trocar"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setHeaderMedia(null)}
+                              aria-label="Remover arquivo"
+                              disabled={uploading}
+                            >
+                              <X className="text-muted-foreground" />
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="justify-self-start"
+                        onClick={() => mediaRef.current?.click()}
+                        disabled={readOnly || uploading}
+                      >
+                        <Upload />
+                        {uploading
+                          ? "Enviando..."
+                          : headerType === "image"
+                            ? "Enviar imagem"
+                            : "Enviar PDF"}
+                      </Button>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {headerType === "image"
+                        ? "JPG ou PNG"
+                        : "PDF (o nome do arquivo aparece no card da conversa)"}
+                      , até {Math.round(mediaSpec.maxBytes / (1024 * 1024))}MB.
+                      O arquivo fica hospedado aqui e a Meta baixa em cada
+                      envio.
+                    </p>
                   </div>
                 ) : null}
 
@@ -526,6 +671,11 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
             </p>
             <WhatsAppBubblePreview
               headerText={headerType === "text" ? headerText : null}
+              headerMedia={
+                isMediaHeader(headerType) && headerMedia
+                  ? { kind: headerType, ...headerMedia }
+                  : null
+              }
               bodyText={previewBody || "O corpo da mensagem aparece aqui…"}
               footerText={footerText}
               buttons={buttons}

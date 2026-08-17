@@ -26,7 +26,10 @@ import {
   type WaTemplateOption,
 } from "@/components/campaigns/whatsapp-message-step";
 import { SmsPhonePreview } from "@/components/sms/phone-preview";
-import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
+import {
+  headerMediaOf,
+  WhatsAppBubblePreview,
+} from "@/components/whatsapp/bubble-preview";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1533,6 +1536,7 @@ export function CampaignWizard({
                         ? selectedWaTemplate.headerText
                         : null
                     }
+                    headerMedia={headerMediaOf(selectedWaTemplate)}
                     bodyText={fillVariables(
                       selectedWaTemplate.bodyText,
                       waPreviewValues

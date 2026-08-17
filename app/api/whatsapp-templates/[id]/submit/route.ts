@@ -2,15 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
 import { getDb, whatsappTemplates } from "@/lib/db";
+import { readUpload } from "@/lib/uploads";
 import { errorMessage } from "@/lib/utils";
 import {
   buildTemplateComponents,
   createTemplate,
   mapMetaTemplateStatus,
   updateTemplate,
+  uploadHeaderSample,
   WhatsAppApiError,
 } from "@/lib/whatsapp/client";
 import { missingExamples } from "@/lib/whatsapp/template-input";
+import { isMediaHeader } from "@/lib/whatsapp/types";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +55,45 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       );
     }
 
-    const components = buildTemplateComponents(template);
+    // Cabeçalho de imagem/PDF: a análise exige uma AMOSTRA do arquivo. Sobe
+    // uma vez por arquivo (o handle fica guardado para reenvios do modelo).
+    let headerMediaHandle = template.headerMediaHandle;
+    if (isMediaHeader(template.headerType)) {
+      const mediaUrl = template.headerMediaUrl?.trim();
+      if (!mediaUrl) {
+        return NextResponse.json(
+          {
+            error:
+              "Envie o arquivo do cabeçalho antes de mandar o modelo para análise.",
+          },
+          { status: 400 }
+        );
+      }
+      if (!headerMediaHandle) {
+        let file: Awaited<ReturnType<typeof readUpload>>;
+        try {
+          file = await readUpload(mediaUrl);
+        } catch {
+          return NextResponse.json(
+            {
+              error:
+                "O arquivo do cabeçalho não está mais no servidor — envie o arquivo novamente.",
+            },
+            { status: 400 }
+          );
+        }
+        const sample = await uploadHeaderSample({
+          bytes: file.bytes,
+          mimeType: file.mimeType,
+        });
+        headerMediaHandle = sample.handle;
+      }
+    }
+
+    const components = buildTemplateComponents({
+      ...template,
+      headerMediaHandle,
+    });
 
     let metaTemplateId = template.metaTemplateId;
     let status: "pending" | ReturnType<typeof mapMetaTemplateStatus> = "pending";
@@ -77,6 +118,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       .update(whatsappTemplates)
       .set({
         metaTemplateId,
+        headerMediaHandle,
         status,
         rejectionReason: null,
         updatedAt: new Date(),

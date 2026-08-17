@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { MessageCircle, RotateCcw } from "lucide-react";
 
-import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
+import {
+  headerMediaOf,
+  WhatsAppBubblePreview,
+} from "@/components/whatsapp/bubble-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +23,7 @@ import {
   extractVariables,
   fillVariables,
   type WhatsAppButton,
+  type WhatsAppHeaderType,
   type WhatsAppVariableExamples,
   type WhatsAppVariableMap,
 } from "@/lib/whatsapp/types";
@@ -34,8 +38,10 @@ export type WaTemplateOption = {
   category: string;
   language: string;
   status: string;
-  headerType: "none" | "text";
+  headerType: WhatsAppHeaderType;
   headerText: string | null;
+  headerMediaUrl: string | null;
+  headerMediaFilename: string | null;
   bodyText: string;
   footerText: string | null;
   buttons: WhatsAppButton[] | null;
@@ -254,6 +260,7 @@ export function WhatsAppMessageStep({
         </p>
         <WhatsAppBubblePreview
           headerText={selected.headerType === "text" ? selected.headerText : null}
+          headerMedia={headerMediaOf(selected)}
           bodyText={fillVariables(selected.bodyText, previewValues)}
           footerText={selected.footerText}
           buttons={selected.buttons ?? []}

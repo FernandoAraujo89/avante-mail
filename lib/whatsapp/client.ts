@@ -1,5 +1,7 @@
 import {
   extractVariables,
+  isMediaHeader,
+  WHATSAPP_MEDIA_HEADERS,
   type WhatsAppButton,
   type WhatsAppHeaderType,
   type WhatsAppTemplateStatus,
@@ -17,6 +19,8 @@ import {
  *                             whatsapp_business_messaging e _management
  *  - WHATSAPP_PHONE_NUMBER_ID id do número remetente (envio de mensagens)
  *  - WHATSAPP_WABA_ID         id da conta WhatsApp Business (templates)
+ *  - WHATSAPP_APP_ID          id do app Meta; só para subir a amostra da mídia
+ *                             do cabeçalho (Resumable Upload)
  *  - WHATSAPP_API_VERSION     opcional; padrão v23.0
  */
 
@@ -101,10 +105,15 @@ async function graphRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ─── Envio de mensagens ──────────────────────────────────────────
 
-export interface TemplateParameter {
-  type: "text";
-  text: string;
-}
+/**
+ * Parâmetro de um componente no envio. No cabeçalho de mídia vai o arquivo em
+ * si: `link` público (a Meta baixa na hora) e, no documento, o `filename` que
+ * aparece no card — sem ele o WhatsApp mostra um nome genérico.
+ */
+export type TemplateParameter =
+  | { type: "text"; text: string }
+  | { type: "image"; image: { link: string } }
+  | { type: "document"; document: { link: string; filename?: string } };
 
 export interface TemplateMessageComponent {
   type: "header" | "body";
@@ -177,6 +186,66 @@ export async function sendTextMessage(args: {
   return { wamid };
 }
 
+// ─── Amostra da mídia do cabeçalho ───────────────────────────────
+
+/**
+ * Sobe o arquivo de amostra do cabeçalho e devolve o handle que a análise da
+ * Meta exige (`example.header_handle` na criação do template).
+ *
+ * São duas etapas da Resumable Upload API — abrir a sessão e mandar os bytes —
+ * e ela vive no APP do Meta, não na WABA nem no número: daí o WHATSAPP_APP_ID.
+ * O handle serve só para a análise; o arquivo que o contato recebe é o do link
+ * informado em cada envio.
+ */
+export async function uploadHeaderSample(args: {
+  bytes: Uint8Array;
+  mimeType: string;
+}): Promise<{ handle: string }> {
+  const params = new URLSearchParams({
+    file_length: String(args.bytes.byteLength),
+    file_type: args.mimeType,
+  });
+  const session = await graphRequest<{ id?: string }>(
+    `${requireEnv("WHATSAPP_APP_ID")}/uploads?${params.toString()}`,
+    { method: "POST" }
+  );
+  if (!session.id) {
+    throw new Error("Resposta da Resumable Upload sem o id da sessão.");
+  }
+
+  // Envio em uma tacada: OAuth (não Bearer) e file_offset 0 — sem retomada.
+  const res = await fetch(`${GRAPH_BASE}/${apiVersion()}/${session.id}`, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${requireEnv("WHATSAPP_ACCESS_TOKEN")}`,
+      file_offset: "0",
+      "Content-Type": "application/octet-stream",
+    },
+    // Cópia com ArrayBuffer próprio: o Buffer devolvido pelo fs pode ser fatia
+    // de um pool, e o corpo do fetch exige um buffer exclusivo.
+    body: new Uint8Array(args.bytes),
+    cache: "no-store",
+  });
+  const json = (await res.json().catch(() => ({}))) as { h?: string } &
+    GraphErrorShape;
+
+  if (!res.ok || !json.h) {
+    const err = json.error;
+    throw new WhatsAppApiError(
+      err?.error_user_msg ??
+        err?.message ??
+        `A Meta não aceitou o arquivo do cabeçalho (HTTP ${res.status}).`,
+      {
+        code: err?.code ?? null,
+        subcode: err?.error_subcode ?? null,
+        httpStatus: res.status,
+        details: err?.error_data?.details ?? null,
+      }
+    );
+  }
+  return { handle: json.h };
+}
+
 // ─── Gestão de templates ─────────────────────────────────────────
 
 /** Componente no formato de criação/leitura de template da Meta. */
@@ -184,7 +253,7 @@ export interface MetaTemplateComponent {
   type: "HEADER" | "BODY" | "FOOTER" | "BUTTONS";
   format?: string;
   text?: string;
-  example?: { body_text?: string[][] };
+  example?: { body_text?: string[][]; header_handle?: string[] };
   buttons?: { type: string; text?: string; url?: string }[];
 }
 
@@ -192,6 +261,7 @@ export interface MetaTemplateComponent {
 export function buildTemplateComponents(template: {
   headerType: WhatsAppHeaderType;
   headerText: string | null;
+  headerMediaHandle: string | null;
   bodyText: string;
   footerText: string | null;
   buttons: WhatsAppButton[] | null;
@@ -201,6 +271,19 @@ export function buildTemplateComponents(template: {
 
   if (template.headerType === "text" && template.headerText) {
     components.push({ type: "HEADER", format: "TEXT", text: template.headerText });
+  } else if (isMediaHeader(template.headerType)) {
+    // Na criação vai só a AMOSTRA (o handle do Resumable Upload); o arquivo
+    // real é informado em cada envio, e pode até ser outro.
+    if (!template.headerMediaHandle) {
+      throw new Error(
+        "A amostra do arquivo do cabeçalho não foi enviada à Meta — envie o arquivo novamente no modelo."
+      );
+    }
+    components.push({
+      type: "HEADER",
+      format: WHATSAPP_MEDIA_HEADERS[template.headerType].metaFormat,
+      example: { header_handle: [template.headerMediaHandle] },
+    });
   }
 
   const body: MetaTemplateComponent = { type: "BODY", text: template.bodyText };

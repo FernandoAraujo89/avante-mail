@@ -1,7 +1,11 @@
+import { uploadNameFromUrl } from "../uploads";
 import {
   extractVariables,
+  isMediaHeader,
+  parseHeaderType,
   variablesAreSequential,
   WHATSAPP_LIMITS,
+  WHATSAPP_MEDIA_HEADERS,
   WHATSAPP_TEMPLATE_NAME_REGEX,
   type WhatsAppButton,
   type WhatsAppHeaderType,
@@ -19,6 +23,8 @@ export interface WhatsAppTemplateInput {
   category: WhatsAppTemplateCategory;
   headerType: WhatsAppHeaderType;
   headerText: string | null;
+  headerMediaUrl: string | null;
+  headerMediaFilename: string | null;
   bodyText: string;
   footerText: string | null;
   buttons: WhatsAppButton[] | null;
@@ -64,9 +70,11 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
     return fail("Categoria inválida. Use MARKETING ou UTILITY.");
   }
 
-  const headerType: WhatsAppHeaderType =
-    data.headerType === "text" ? "text" : "none";
+  const headerType: WhatsAppHeaderType = parseHeaderType(data.headerType);
   let headerText: string | null = null;
+  let headerMediaUrl: string | null = null;
+  let headerMediaFilename: string | null = null;
+
   if (headerType === "text") {
     headerText =
       typeof data.headerText === "string" ? data.headerText.trim() : "";
@@ -81,6 +89,36 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
     if (HAS_VARIABLE_REGEX.test(headerText)) {
       return fail("Variáveis no cabeçalho não são suportadas.");
     }
+  } else if (isMediaHeader(headerType)) {
+    const rawUrl =
+      typeof data.headerMediaUrl === "string" ? data.headerMediaUrl.trim() : "";
+    if (!rawUrl) {
+      return fail(
+        headerType === "image"
+          ? "Envie a imagem do cabeçalho (ou remova o cabeçalho)."
+          : "Envie o PDF do cabeçalho (ou remova o cabeçalho)."
+      );
+    }
+    // Só arquivos que passaram pelo nosso upload: é deles que sai a amostra
+    // mandada à análise da Meta, com os mesmos bytes que ela baixa no envio.
+    const uploadName = uploadNameFromUrl(rawUrl);
+    if (!uploadName) {
+      return fail("Arquivo do cabeçalho inválido — envie o arquivo novamente.");
+    }
+    const ext = uploadName.split(".").pop()!.toLowerCase();
+    if (!WHATSAPP_MEDIA_HEADERS[headerType].types[ext]) {
+      return fail(
+        headerType === "image"
+          ? "No cabeçalho de imagem a Meta aceita só JPG ou PNG."
+          : "No cabeçalho de documento a Meta aceita só PDF."
+      );
+    }
+    headerMediaUrl = rawUrl;
+    headerMediaFilename =
+      typeof data.headerMediaFilename === "string" &&
+      data.headerMediaFilename.trim()
+        ? data.headerMediaFilename.trim().slice(0, 120)
+        : uploadName;
   }
 
   const bodyText =
@@ -175,6 +213,8 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
       category,
       headerType,
       headerText,
+      headerMediaUrl,
+      headerMediaFilename,
       bodyText,
       footerText,
       buttons,

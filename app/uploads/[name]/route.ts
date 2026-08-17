@@ -3,16 +3,20 @@ import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  ALLOWED_UPLOAD_TYPES,
   getUploadsDir,
   sanitizeUploadName,
+  SERVED_UPLOAD_TYPES,
 } from "@/lib/uploads";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ name: string }> };
 
-/** Serve as imagens hospedadas (usadas dentro dos e-mails). */
+/**
+ * Serve os arquivos hospedados: imagens dos e-mails e a mídia do cabeçalho dos
+ * modelos de WhatsApp. Rota pública (ver PUBLIC_PREFIXES no middleware) porque
+ * quem baixa é o cliente de e-mail ou a própria Meta.
+ */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const { name } = await context.params;
   const safe = sanitizeUploadName(name);
@@ -29,7 +33,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   const ext = safe.split(".").pop()!.toLowerCase();
   const headers: Record<string, string> = {
-    "Content-Type": ALLOWED_UPLOAD_TYPES[ext],
+    "Content-Type": SERVED_UPLOAD_TYPES[ext],
     "Content-Length": String(data.length),
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",

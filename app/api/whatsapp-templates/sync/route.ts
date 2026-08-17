@@ -31,6 +31,12 @@ function fromMetaTemplate(t: MetaTemplate): NewWhatsAppTemplate | null {
   const footer = t.components?.find((c) => c.type === "FOOTER");
   const buttonsComp = t.components?.find((c) => c.type === "BUTTONS");
 
+  // Cabeçalho de mídia (imagem/PDF/vídeo/localização) não é importável: a Meta
+  // devolve o formato, não o arquivo. Importar como "sem cabeçalho" criaria um
+  // modelo que a Cloud API recusa no envio, por falta do parâmetro do
+  // cabeçalho — modelo com arquivo tem de ser criado aqui, com o upload.
+  if (header?.format && header.format !== "TEXT") return null;
+
   const buttons: WhatsAppButton[] = [];
   for (const b of buttonsComp?.buttons ?? []) {
     if (b.type === "QUICK_REPLY" && b.text) {
@@ -106,16 +112,22 @@ export async function POST() {
     }
 
     let imported = 0;
+    let skipped = 0;
     for (const meta of metaTemplates) {
       if (localNames.has(meta.name)) continue;
       const row = fromMetaTemplate(meta);
-      if (!row) continue; // sem corpo de texto — não representável no editor
+      if (!row) {
+        // Sem corpo de texto ou com cabeçalho de mídia: o editor não
+        // representa, então fica de fora em vez de entrar quebrado.
+        skipped++;
+        continue;
+      }
       await db.insert(whatsappTemplates).values(row).onConflictDoNothing();
       localNames.add(meta.name);
       imported++;
     }
 
-    return NextResponse.json({ updated, imported, missing });
+    return NextResponse.json({ updated, imported, missing, skipped });
   } catch (error) {
     if (error instanceof WhatsAppApiError) {
       return NextResponse.json(

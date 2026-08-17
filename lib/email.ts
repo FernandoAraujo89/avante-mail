@@ -1,14 +1,11 @@
+import { getBaseUrl } from "./base-url";
 import type { Campaign, Contact } from "./db/schema";
 import { signUnsubscribeToken } from "./jwt";
 import { compileEmailContent } from "./mjml";
 import { renderVariables, textToHtml, type TemplateVariables } from "./render";
 
-export function getBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ??
-    "http://localhost:3000"
-  );
-}
+// Reexportado: as rotas que já importavam getBaseUrl daqui seguem funcionando.
+export { getBaseUrl };
 
 /** Cabeçalho e textos do e-mail, venha ele de uma campanha ou de um passo. */
 export interface SendContent {

@@ -21,8 +21,85 @@ export const WHATSAPP_TEMPLATE_CATEGORIES = [
 export type WhatsAppTemplateCategory =
   (typeof WHATSAPP_TEMPLATE_CATEGORIES)[number];
 
-export const WHATSAPP_HEADER_TYPES = ["none", "text"] as const;
+// O cabeçalho aceita UM componente: texto OU um arquivo. Vídeo e localização
+// existem na Meta, mas o editor não oferece.
+export const WHATSAPP_HEADER_TYPES = [
+  "none",
+  "text",
+  "image",
+  "document",
+] as const;
 export type WhatsAppHeaderType = (typeof WHATSAPP_HEADER_TYPES)[number];
+
+/** Cabeçalhos que carregam arquivo em vez de texto. */
+export type WhatsAppMediaHeaderType = Extract<
+  WhatsAppHeaderType,
+  "image" | "document"
+>;
+
+/**
+ * Lê o tipo de cabeçalho vindo de fora (corpo da requisição, JSON do banco).
+ * Existe para não repetir ternário fechado — o mesmo erro que já trocou o
+ * canal de campanhas de SMS para e-mail (ver parseCampaignChannel).
+ */
+export function parseHeaderType(value: unknown): WhatsAppHeaderType {
+  return WHATSAPP_HEADER_TYPES.includes(value as WhatsAppHeaderType)
+    ? (value as WhatsAppHeaderType)
+    : "none";
+}
+
+export function isMediaHeader(
+  type: WhatsAppHeaderType
+): type is WhatsAppMediaHeaderType {
+  return type === "image" || type === "document";
+}
+
+export interface WhatsAppMediaHeaderSpec {
+  /** Nome do formato na interface. */
+  label: string;
+  maxBytes: number;
+  /** Extensões aceitas → content-type. */
+  types: Record<string, string>;
+  /** Valor do accept do seletor de arquivo. */
+  accept: string;
+  /** Formato correspondente no template da Meta. */
+  metaFormat: "IMAGE" | "DOCUMENT";
+}
+
+/**
+ * Formatos aceitos pela Meta NO CABEÇALHO DE TEMPLATE — mais estreitos que os
+ * da mensagem avulsa: imagem só JPEG/PNG (sem GIF, sem SVG) e documento só PDF.
+ */
+export const WHATSAPP_MEDIA_HEADERS: Record<
+  WhatsAppMediaHeaderType,
+  WhatsAppMediaHeaderSpec
+> = {
+  image: {
+    label: "Imagem",
+    maxBytes: 5 * 1024 * 1024,
+    types: { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" },
+    accept: "image/png,image/jpeg",
+    metaFormat: "IMAGE",
+  },
+  document: {
+    label: "Documento (PDF)",
+    maxBytes: 100 * 1024 * 1024,
+    types: { pdf: "application/pdf" },
+    accept: "application/pdf",
+    metaFormat: "DOCUMENT",
+  },
+};
+
+/**
+ * Cabeçalho de mídia sem arquivo: o envio seria recusado pela Meta (falta o
+ * parâmetro do cabeçalho). Barrado antes do disparo, com mensagem clara.
+ */
+export function missingHeaderMedia(template: {
+  headerType: WhatsAppHeaderType;
+  headerMediaUrl: string | null;
+}): boolean {
+  return isMediaHeader(template.headerType) && !template.headerMediaUrl?.trim();
+}
 
 export type WhatsAppButton =
   | { type: "QUICK_REPLY"; text: string }

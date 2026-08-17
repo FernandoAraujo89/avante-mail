@@ -646,6 +646,12 @@ export const whatsappTemplates = pgTable("whatsapp_templates", {
     .notNull()
     .default("none"),
   headerText: text("header_text"),
+  // Cabeçalho de mídia (imagem/PDF): o caminho servido em /uploads que a Meta
+  // baixa a cada envio, o nome exibido no card do documento e o handle da
+  // amostra aceita na análise (devolvido pela Resumable Upload API).
+  headerMediaUrl: text("header_media_url"),
+  headerMediaFilename: text("header_media_filename"),
+  headerMediaHandle: text("header_media_handle"),
   bodyText: text("body_text").notNull(),
   footerText: text("footer_text"),
   buttons: jsonb("buttons").$type<WhatsAppButton[]>(),
