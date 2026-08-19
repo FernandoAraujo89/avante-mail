@@ -107,27 +107,51 @@ export function StepPanel({
       ) : null}
 
       {step.type === "wait" ? (
-        <div className="grid grid-cols-2 gap-2 @xs:grid-cols-3">
-          {(
-            [
-              ["days", "Dias"],
-              ["hours", "Horas"],
-              ["minutes", "Minutos"],
-            ] as const
-          ).map(([chave, rotulo]) => (
-            <div key={chave} className="grid gap-1.5">
-              <Label htmlFor={`wait-${chave}`}>{rotulo}</Label>
-              <Input
-                id={`wait-${chave}`}
-                type="number"
-                min={0}
-                value={String(c[chave] ?? 0)}
-                onChange={(e) =>
-                  set({ [chave]: Math.max(0, Number(e.target.value) || 0) })
-                }
-              />
-            </div>
-          ))}
+        <div className="grid gap-2">
+          <div className="grid grid-cols-2 gap-2 @xs:grid-cols-3">
+            {(
+              [
+                // Teto por unidade: um "9999 dias" digitado sem querer viraria
+                // uma automação parada por 27 anos, sem nenhum erro.
+                ["days", "Dias", 90],
+                ["hours", "Horas", 23],
+                ["minutes", "Minutos", 59],
+              ] as const
+            ).map(([chave, rotulo, teto]) => (
+              <div key={chave} className="grid gap-1.5">
+                <Label htmlFor={`wait-${chave}`}>{rotulo}</Label>
+                <Input
+                  id={`wait-${chave}`}
+                  type="number"
+                  min={0}
+                  max={teto}
+                  value={String(c[chave] ?? 0)}
+                  onChange={(e) =>
+                    set({
+                      [chave]: Math.min(
+                        teto,
+                        Math.max(0, Number(e.target.value) || 0)
+                      ),
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {(() => {
+              const partes = [
+                [Number(c.days ?? 0), "dia", "dias"],
+                [Number(c.hours ?? 0), "hora", "horas"],
+                [Number(c.minutes ?? 0), "minuto", "minutos"],
+              ]
+                .filter(([n]) => Number(n) > 0)
+                .map(([n, um, muitos]) => `${n} ${n === 1 ? um : muitos}`);
+              return partes.length === 0
+                ? "Sem espera: o próximo passo roda imediatamente."
+                : `O contato espera ${partes.join(" e ")} antes do próximo passo. Máximo: 90 dias.`;
+            })()}
+          </p>
         </div>
       ) : null}
 

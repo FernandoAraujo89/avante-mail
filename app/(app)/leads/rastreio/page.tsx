@@ -16,6 +16,14 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -98,7 +106,12 @@ export default function RastreioPage() {
   const [dados, setDados] = useState<Dados | null>(null);
   const [erro, setErro] = useState("");
   const [copiado, setCopiado] = useState(false);
+  const [copiaFalhou, setCopiaFalhou] = useState(false);
   const [salvando, setSalvando] = useState(false);
+
+  // Confirmação antes de apagar uma regra de página.
+  const [removerRegra, setRemoverRegra] = useState<RegraDeSite | null>(null);
+  const [removendo, setRemovendo] = useState(false);
 
   const [evento, setEvento] = useState("");
   const [valor, setValor] = useState("");
@@ -125,9 +138,12 @@ export default function RastreioPage() {
     try {
       await navigator.clipboard.writeText(dados.tag);
       setCopiado(true);
+      setCopiaFalhou(false);
       setTimeout(() => setCopiado(false), 2500);
     } catch {
-      // sem permissão: a tag está à vista para seleção manual
+      // Sem permissão de área de transferência: avisa, em vez de deixar o
+      // clique sem efeito nenhum.
+      setCopiaFalhou(true);
     }
   }
 
@@ -172,11 +188,21 @@ export default function RastreioPage() {
   }
 
   async function remover(id: string) {
+    setRemovendo(true);
     try {
-      await fetch(`/api/leads/rastreio/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/leads/rastreio/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? "Erro ao remover a regra.");
+      }
       await carregar();
     } catch (err) {
       setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRemovendo(false);
+      setRemoverRegra(null);
     }
   }
 
@@ -393,6 +419,7 @@ export default function RastreioPage() {
                 size="icon"
                 onClick={copiarTag}
                 aria-label="Copiar a tag"
+                title="Copiar a tag"
               >
                 {copiado ? (
                   <Check className="text-success-dark" />
@@ -401,6 +428,12 @@ export default function RastreioPage() {
                 )}
               </Button>
             </div>
+            {copiaFalhou ? (
+              <p className="text-xs text-destructive-hover">
+                Não foi possível copiar automaticamente — selecione o texto
+                acima e copie manualmente.
+              </p>
+            ) : null}
 
             <div className="rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2 text-xs text-warning-dark">
               <p className="font-medium">2. Ligue ao banner de cookies</p>
@@ -489,8 +522,9 @@ export default function RastreioPage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => remover(r.id)}
+                    onClick={() => setRemoverRegra(r)}
                     aria-label={`Remover a regra de ${r.valor}`}
+                    title={`Remover a regra de ${r.valor}`}
                   >
                     <Trash2 className="text-muted-foreground" />
                   </Button>
@@ -584,6 +618,40 @@ export default function RastreioPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Dialog
+        open={removerRegra !== null}
+        onOpenChange={(open) => {
+          if (!open && !removendo) setRemoverRegra(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover regra de página</DialogTitle>
+            <DialogDescription>
+              {removerRegra
+                ? `Visitas a "${removerRegra.valor}" deixam de virar o evento "${removerRegra.evento}" — e a pontuação que depende dele para de contar novas visitas.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRemoverRegra(null)}
+              disabled={removendo}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => removerRegra && remover(removerRegra.id)}
+              disabled={removendo}
+            >
+              {removendo ? "Removendo..." : "Remover"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

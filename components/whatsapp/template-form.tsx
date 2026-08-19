@@ -9,6 +9,14 @@ import { PageHeader } from "@/components/page-header";
 import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -90,6 +98,8 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Enviar à Meta trava o modelo para sempre — confirmação obrigatória.
+  const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
 
   const readOnly = status !== "draft" && status !== "rejected";
   const variables = extractVariables(bodyText);
@@ -200,6 +210,14 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
     setSaving(true);
     setError("");
     try {
+      // Validação no cliente: os `required` dos inputs não disparam porque o
+      // formulário não é um <form> — sem isto, o vazio só falha no servidor.
+      if (!name.trim()) {
+        throw new Error("Dê um nome ao modelo (regra da Meta: minúsculas, números e _).");
+      }
+      if (!bodyText.trim()) {
+        throw new Error("Escreva o corpo da mensagem antes de salvar.");
+      }
       if (isMediaHeader(headerType) && !headerMedia) {
         throw new Error(
           headerType === "image"
@@ -648,7 +666,19 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       </Button>
                       <Button
                         type="button"
-                        onClick={() => save(true)}
+                        onClick={() => {
+                          // Depois do envio o modelo trava para sempre — a
+                          // confirmação existe por causa dessa irreversibilidade.
+                          if (!name.trim() || !bodyText.trim()) {
+                            setError(
+                              !name.trim()
+                                ? "Dê um nome ao modelo antes de enviar para análise."
+                                : "Escreva o corpo da mensagem antes de enviar para análise."
+                            );
+                            return;
+                          }
+                          setConfirmSubmitOpen(true);
+                        }}
                         disabled={saving}
                       >
                         {saving
@@ -683,6 +713,56 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
           </div>
         </div>
       )}
+
+      {/* Dialog: confirmar envio para análise da Meta (irreversível) */}
+      <Dialog open={confirmSubmitOpen} onOpenChange={setConfirmSubmitOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enviar para análise da Meta</DialogTitle>
+            <DialogDescription>
+              Depois do envio, o modelo{" "}
+              <span className="font-medium">não pode mais ser editado</span> —
+              para mudar qualquer coisa será preciso criar um novo. Confira:
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid gap-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">Nome</dt>
+              <dd className="font-medium">{name || "—"}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">Categoria</dt>
+              <dd className="font-medium">
+                {category === "UTILITY" ? "Utilidade" : "Marketing"}
+              </dd>
+            </div>
+            <div className="grid gap-1">
+              <dt className="text-muted-foreground">Corpo</dt>
+              <dd className="max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+                {bodyText || "—"}
+              </dd>
+            </div>
+          </dl>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmSubmitOpen(false)}
+              disabled={saving}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmSubmitOpen(false);
+                save(true);
+              }}
+              disabled={saving}
+            >
+              {saving ? "Enviando..." : "Confirmar envio à Meta"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

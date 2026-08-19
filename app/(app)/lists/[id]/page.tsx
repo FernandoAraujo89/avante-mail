@@ -20,6 +20,8 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -57,9 +59,14 @@ export default function ListDetailPage() {
   // Diálogo "adicionar contatos existentes".
   const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [options, setOptions] = useState<ContactOption[]>([]);
+  // null = ainda buscando — evita afirmar "nenhum contato" antes da resposta.
+  const [options, setOptions] = useState<ContactOption[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+
+  // Confirmação antes de tirar alguém da lista (mesmo padrão das outras telas).
+  const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -84,6 +91,7 @@ export default function ListDetailPage() {
   useEffect(() => {
     if (!addOpen) return;
     let cancelled = false;
+    setOptions(null);
     const timer = setTimeout(async () => {
       try {
         const params = new URLSearchParams();
@@ -139,6 +147,7 @@ export default function ListDetailPage() {
   }
 
   async function removeFromList(contactId: string) {
+    setRemoving(true);
     try {
       const res = await fetch(`/api/lists/${id}/contacts`, {
         method: "DELETE",
@@ -147,9 +156,13 @@ export default function ListDetailPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao remover da lista.");
+      setRemoveTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setRemoveTarget(null);
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -209,7 +222,7 @@ export default function ListDetailPage() {
               <TableRow>
                 <TableHead>Contato</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -234,18 +247,18 @@ export default function ListDetailPage() {
                       <Badge variant="destructive">Descadastrado</Badge>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableActionsCell>
                     <div className="flex justify-end">
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => removeFromList(contact.id)}
+                        onClick={() => setRemoveTarget(contact)}
                       >
                         <X />
                         Remover da lista
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -289,7 +302,11 @@ export default function ListDetailPage() {
           </div>
 
           <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
-            {options.length === 0 ? (
+            {options === null ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Buscando contatos...
+              </p>
+            ) : options.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 Nenhum contato disponível para adicionar.
               </p>
@@ -329,6 +346,40 @@ export default function ListDetailPage() {
               {adding
                 ? "Adicionando..."
                 : `Adicionar${picked.size > 0 ? ` (${picked.size})` : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !removing) setRemoveTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover da lista</DialogTitle>
+            <DialogDescription>
+              {removeTarget
+                ? `Remover "${removeTarget.name}" desta lista? O contato continua cadastrado no sistema — ele só deixa de receber os envios segmentados por ela.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRemoveTarget(null)}
+              disabled={removing}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => removeTarget && removeFromList(removeTarget.id)}
+              disabled={removing}
+            >
+              {removing ? "Removendo..." : "Remover"}
             </Button>
           </DialogFooter>
         </DialogContent>

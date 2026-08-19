@@ -164,6 +164,10 @@ export function CampaignWizard({
   const router = useRouter();
 
   const [step, setStep] = useState(1);
+  // Id da campanha já persistida. Enquanto não enviada há UM rascunho só:
+  // o primeiro save cria, os seguintes sobrescrevem (PATCH) — salvar, testar
+  // e disparar nunca acumulam cópias na lista.
+  const [savedId, setSavedId] = useState<string | null>(editId ?? null);
   const [data, setData] = useState<WizardData>(EMPTY_DATA);
   const [initializing, setInitializing] = useState(
     Boolean(editId || duplicateId)
@@ -179,6 +183,8 @@ export function CampaignWizard({
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [confirmModelSwitch, setConfirmModelSwitch] = useState(false);
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -187,6 +193,8 @@ export function CampaignWizard({
   const [testEmails, setTestEmails] = useState("");
   const [sendingTest, setSendingTest] = useState(false);
   const [testMessage, setTestMessage] = useState("");
+  // Falha e sucesso do teste precisam ter cara diferente na tela.
+  const [testFailed, setTestFailed] = useState(false);
 
   // "Salvar como novo modelo"
   const [saveModelOpen, setSaveModelOpen] = useState(false);
@@ -379,7 +387,18 @@ export function CampaignWizard({
           }),
         });
         const json = await res.json();
-        if (!cancelled && res.ok) setPreviewHtml(json.html);
+        if (!cancelled) {
+          if (res.ok) {
+            setPreviewHtml(json.html);
+            setPreviewError("");
+          } else {
+            setPreviewError(json.error ?? "Erro ao gerar a pré-visualização.");
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setPreviewError("Erro de conexão ao gerar a pré-visualização.");
+        }
       } finally {
         if (!cancelled) setPreviewLoading(false);
       }
@@ -473,6 +492,7 @@ export function CampaignWizard({
   function changeModel() {
     update({ design: null, templateId: "" });
     setError("");
+    setConfirmModelSwitch(false);
   }
 
   function validateStep(current: number): string {
@@ -483,6 +503,14 @@ export function CampaignWizard({
         }
       } else if (!data.name.trim()) {
         return "Preencha o nome da campanha.";
+      }
+      // Agendamento no passado dispararia IMEDIATAMENTE — barrar aqui evita
+      // o envio que o usuário achava que tinha agendado.
+      if (
+        data.scheduledAt &&
+        new Date(data.scheduledAt).getTime() <= Date.now()
+      ) {
+        return "A data de agendamento já passou — escolha uma data futura ou deixe o campo vazio para disparar imediatamente.";
       }
     }
     if (current === 2) {
@@ -560,15 +588,21 @@ export function CampaignWizard({
 
   async function persist(): Promise<{ id: string }> {
     const res = await fetch(
-      editId ? `/api/campaigns/${editId}` : "/api/campaigns",
+      savedId ? `/api/campaigns/${savedId}` : "/api/campaigns",
       {
-        method: editId ? "PATCH" : "POST",
+        method: savedId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildPayload()),
       }
     );
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? "Erro ao salvar a campanha.");
+    if (!savedId) {
+      setSavedId(json.id);
+      // A URL passa a apontar para o rascunho criado: um F5 (ou voltar depois)
+      // continua editando a MESMA campanha em vez de gerar outra cópia.
+      window.history.replaceState(null, "", `/campaigns/new?id=${json.id}`);
+    }
     return json;
   }
 
@@ -625,7 +659,14 @@ export function CampaignWizard({
         }),
       });
       const json = await res.json();
-      if (res.ok) setPreviewHtml(json.html);
+      if (res.ok) {
+        setPreviewHtml(json.html);
+        setPreviewError("");
+      } else {
+        setPreviewError(json.error ?? "Erro ao gerar a pré-visualização.");
+      }
+    } catch {
+      setPreviewError("Erro de conexão ao gerar a pré-visualização.");
     } finally {
       setPreviewLoading(false);
     }
@@ -685,23 +726,28 @@ export function CampaignWizard({
 
   async function handleSendTest() {
     setTestMessage("");
+    setTestFailed(false);
 
     // Os dois canais de telefone mandam o teste pelo mesmo caminho — muda só
     // o que precisa estar pronto antes e onde a pessoa vai conferir.
     if (data.channel === "whatsapp" || data.channel === "sms") {
       if (data.channel === "whatsapp" && !data.whatsappTemplateId) {
+        setTestFailed(true);
         setTestMessage("Escolha o modelo da mensagem antes de enviar o teste.");
         return;
       }
       if (data.channel === "sms" && !data.smsBody.trim()) {
+        setTestFailed(true);
         setTestMessage("Escreva o texto do SMS antes de enviar o teste.");
         return;
       }
       if (parsedTestPhones.length === 0) {
+        setTestFailed(true);
         setTestMessage("Informe ao menos um telefone de teste.");
         return;
       }
       if (parsedTestPhones.length > MAX_TEST_EMAILS) {
+        setTestFailed(true);
         setTestMessage(`Máximo de ${MAX_TEST_EMAILS} telefones de teste.`);
         return;
       }
@@ -717,12 +763,14 @@ export function CampaignWizard({
         if (!res.ok) throw new Error(json.error ?? "Erro ao enviar o teste.");
         const failed = Array.isArray(json.failed) ? json.failed : [];
         const onde = data.channel === "sms" ? "as mensagens" : "o WhatsApp";
+        setTestFailed(failed.length > 0);
         setTestMessage(
           failed.length > 0
             ? `Enviado para ${json.sent}. Falhou: ${failed.join(", ")}`
             : `Mensagem de teste enviada para ${json.recipients.join(", ")}. Confira ${onde}.`
         );
       } catch (err) {
+        setTestFailed(true);
         setTestMessage(err instanceof Error ? err.message : String(err));
       } finally {
         setSendingTest(false);
@@ -731,14 +779,17 @@ export function CampaignWizard({
     }
 
     if (!data.design) {
+      setTestFailed(true);
       setTestMessage("Monte o e-mail da campanha antes de enviar o teste.");
       return;
     }
     if (parsedTestEmails.length === 0) {
+      setTestFailed(true);
       setTestMessage("Informe ao menos um e-mail de teste.");
       return;
     }
     if (parsedTestEmails.length > MAX_TEST_EMAILS) {
+      setTestFailed(true);
       setTestMessage(`Máximo de ${MAX_TEST_EMAILS} e-mails de teste.`);
       return;
     }
@@ -754,12 +805,14 @@ export function CampaignWizard({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao enviar o teste.");
       const failed = Array.isArray(json.failed) ? json.failed : [];
+      setTestFailed(failed.length > 0);
       setTestMessage(
         failed.length > 0
           ? `Enviado para ${json.sent}. Falhou: ${failed.join(", ")}`
           : `E-mail de teste enviado para ${json.recipients.join(", ")}. Confira a caixa de entrada.`
       );
     } catch (err) {
+      setTestFailed(true);
       setTestMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setSendingTest(false);
@@ -803,6 +856,8 @@ export function CampaignWizard({
           <div key={s.number} className="flex items-center gap-2">
             <button
               type="button"
+              disabled={s.number > step}
+              aria-current={step === s.number ? "step" : undefined}
               onClick={() => {
                 if (s.number < step) {
                   setError("");
@@ -958,6 +1013,7 @@ export function CampaignWizard({
                 id="campaign-scheduled"
                 type="datetime-local"
                 value={data.scheduledAt}
+                min={toLocalInputValue(new Date().toISOString())}
                 onChange={(e) => update({ scheduledAt: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
@@ -1094,7 +1150,11 @@ export function CampaignWizard({
                   <Save />
                   Salvar como novo modelo
                 </Button>
-                <Button variant="ghost" size="sm" onClick={changeModel}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmModelSwitch(true)}
+                >
                   <RotateCcw />
                   Trocar modelo
                 </Button>
@@ -1507,7 +1567,16 @@ export function CampaignWizard({
                   </>
                 )}
                 {testMessage ? (
-                  <p className="text-xs text-muted-foreground">{testMessage}</p>
+                  <p
+                    className={cn(
+                      "text-xs",
+                      testFailed
+                        ? "text-destructive-hover"
+                        : "text-success-dark"
+                    )}
+                  >
+                    {testMessage}
+                  </p>
                 ) : null}
               </CardContent>
             </Card>
@@ -1553,6 +1622,10 @@ export function CampaignWizard({
             ) : !data.design ? (
               <p className="py-24 text-center text-sm text-muted-foreground">
                 Nenhum e-mail montado.
+              </p>
+            ) : previewError ? (
+              <p className="px-6 py-24 text-center text-sm text-destructive-hover">
+                {previewError}
               </p>
             ) : previewLoading && !previewHtml ? (
               <p className="py-24 text-center text-sm text-muted-foreground">
@@ -1601,7 +1674,10 @@ export function CampaignWizard({
           ) : (
             <Button
               onClick={() => {
-                const message = validateStep(2);
+                // Revalida tudo antes do disparo — inclusive o agendamento,
+                // que pode ter ficado no passado desde o passo 1.
+                const message =
+                  validateStep(1) || validateStep(2) || validateStep(3);
                 if (message) {
                   setError(message);
                   return;
@@ -1640,6 +1716,10 @@ export function CampaignWizard({
             <p className="py-16 text-center text-sm text-muted-foreground">
               Gerando pré-visualização...
             </p>
+          ) : previewError ? (
+            <p className="py-16 text-center text-sm text-destructive-hover">
+              {previewError}
+            </p>
           ) : (
             <iframe
               srcDoc={previewHtml}
@@ -1648,6 +1728,31 @@ export function CampaignWizard({
               className="h-[70vh] w-full rounded-lg border border-border bg-white"
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: confirmar troca de modelo (descarta o e-mail montado) */}
+      <Dialog open={confirmModelSwitch} onOpenChange={setConfirmModelSwitch}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Trocar de modelo</DialogTitle>
+            <DialogDescription>
+              O e-mail montado nesta campanha será descartado e você volta à
+              galeria de modelos. Para não perder este layout, use antes
+              &quot;Salvar como novo modelo&quot;.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmModelSwitch(false)}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={changeModel}>
+              Descartar e trocar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

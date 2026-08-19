@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -162,7 +164,7 @@ export default async function CampaignsPage() {
                 <TableHead>Custo</TableHead>
                 <TableHead>Enviada por</TableHead>
                 <TableHead>Criada em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -218,7 +220,7 @@ export default async function CampaignsPage() {
                     <TableCell className="text-muted-foreground">
                       {formatDateTime(campaign.createdAt)}
                     </TableCell>
-                    <TableCell>
+                    <TableActionsCell>
                       <div className="flex justify-end gap-1">
                         {editable ? (
                           <Button variant="ghost" size="sm" asChild>
@@ -255,7 +257,7 @@ export default async function CampaignsPage() {
                           iconOnly
                         />
                       </div>
-                    </TableCell>
+                    </TableActionsCell>
                   </TableRow>
                 );
               })}

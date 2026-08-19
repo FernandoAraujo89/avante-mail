@@ -31,23 +31,40 @@ export default function ErrorBoundary({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-            <p className="mb-2 font-medium text-foreground">
-              Se este é o primeiro acesso, confira:
+          {/* O passo a passo de setup é conversa de desenvolvedor — em
+              produção, quem vê esta tela é o time de marketing. */}
+          {process.env.NODE_ENV !== "production" ? (
+            <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+              <p className="mb-2 font-medium text-foreground">
+                Se este é o primeiro acesso, confira:
+              </p>
+              <ol className="list-inside list-decimal space-y-1">
+                <li>
+                  Copie o <code className="text-primary">.env.local.example</code>{" "}
+                  para <code className="text-primary">.env.local</code> e preencha
+                </li>
+                <li>
+                  Crie as tabelas: <code className="text-primary">npx drizzle-kit push</code>
+                </li>
+                <li>
+                  Popule os dados: <code className="text-primary">npx tsx scripts/seed.ts</code>
+                </li>
+              </ol>
+            </div>
+          ) : (
+            <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+              Tente de novo em alguns instantes. Se o erro continuar, avise
+              quem cuida do sistema informando o horário em que aconteceu
+              {error.digest ? (
+                <>
+                  {" "}
+                  e o código{" "}
+                  <code className="text-foreground">{error.digest}</code>
+                </>
+              ) : null}
+              .
             </p>
-            <ol className="list-inside list-decimal space-y-1">
-              <li>
-                Copie o <code className="text-primary">.env.local.example</code>{" "}
-                para <code className="text-primary">.env.local</code> e preencha
-              </li>
-              <li>
-                Crie as tabelas: <code className="text-primary">npx drizzle-kit push</code>
-              </li>
-              <li>
-                Popule os dados: <code className="text-primary">npx tsx scripts/seed.ts</code>
-              </li>
-            </ol>
-          </div>
+          )}
           <Button onClick={reset}>Tentar novamente</Button>
         </CardContent>
       </Card>

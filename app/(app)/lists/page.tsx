@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -168,7 +170,7 @@ export default function ListsPage() {
                 <TableHead>Lista</TableHead>
                 <TableHead>Contatos</TableHead>
                 <TableHead>Criada em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -203,13 +205,14 @@ export default function ListsPage() {
                   <TableCell className="text-muted-foreground">
                     {formatDate(list.createdAt)}
                   </TableCell>
-                  <TableCell>
+                  <TableActionsCell>
                     <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => openEdit(list)}
                         aria-label={`Editar ${list.name}`}
+                        title={`Editar ${list.name}`}
                       >
                         <Pencil className="text-muted-foreground" />
                       </Button>
@@ -218,11 +221,12 @@ export default function ListsPage() {
                         size="icon"
                         onClick={() => setDeleteTarget(list)}
                         aria-label={`Remover ${list.name}`}
+                        title={`Remover ${list.name}`}
                       >
                         <Trash2 className="text-muted-foreground" />
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>

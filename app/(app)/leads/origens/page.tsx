@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -184,7 +186,7 @@ export default function OrigensPage() {
                 <TableHead>Origem</TableHead>
                 <TableHead>Situação</TableHead>
                 <TableHead>Recebeu</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -214,7 +216,7 @@ export default function OrigensPage() {
                         : "nunca chamada"}
                     </p>
                   </TableCell>
-                  <TableCell>
+                  <TableActionsCell>
                     <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost"
@@ -224,6 +226,7 @@ export default function OrigensPage() {
                           setFormAberto(true);
                         }}
                         aria-label={`Configurar ${o.name}`}
+                        title={`Configurar ${o.name}`}
                       >
                         <Settings2 className="text-muted-foreground" />
                       </Button>
@@ -232,6 +235,7 @@ export default function OrigensPage() {
                         size="icon"
                         onClick={() => setGirarAlvo(o)}
                         aria-label={`Gerar novo token de ${o.name}`}
+                        title={`Gerar novo token de ${o.name}`}
                       >
                         <KeyRound className="text-muted-foreground" />
                       </Button>
@@ -240,11 +244,12 @@ export default function OrigensPage() {
                         size="icon"
                         onClick={() => setApagarAlvo(o)}
                         aria-label={`Remover ${o.name}`}
+                        title={`Remover ${o.name}`}
                       >
                         <Trash2 className="text-muted-foreground" />
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>

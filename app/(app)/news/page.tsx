@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -98,7 +100,7 @@ export default async function NewsPage() {
                 <TableHead>Custo</TableHead>
                 <TableHead>Enviada por</TableHead>
                 <TableHead>Enviada em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -143,7 +145,7 @@ export default async function NewsPage() {
                         ? formatDateTime(campaign.sentAt)
                         : formatDateTime(campaign.scheduledAt)}
                     </TableCell>
-                    <TableCell>
+                    <TableActionsCell>
                       <div className="flex justify-end gap-1">
                         {editable ? (
                           <Button variant="ghost" size="sm" asChild>
@@ -178,7 +180,7 @@ export default async function NewsPage() {
                           iconOnly
                         />
                       </div>
-                    </TableCell>
+                    </TableActionsCell>
                   </TableRow>
                 );
               })}

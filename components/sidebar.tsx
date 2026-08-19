@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -83,6 +83,31 @@ export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [me, setMe] = useState<{ name: string; email: string } | null>(null);
+  // No mobile o drawer fechado fica no DOM (deslocado): `inert` tira os ~15
+  // links dele da ordem de tabulação. No desktop (md+) a sidebar é fixa.
+  const [isMobile, setIsMobile] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  // ESC fecha o drawer e devolve o foco ao botão que o abriu.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   useEffect(() => {
     (async () => {
@@ -120,9 +145,11 @@ export function Sidebar() {
       {/* Top bar — só no mobile */}
       <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-4 md:hidden">
         <button
+          ref={menuButtonRef}
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Abrir menu"
+          aria-expanded={open}
           className="-ml-1 flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <Menu className="size-5" />
@@ -141,6 +168,7 @@ export function Sidebar() {
 
       {/* Sidebar / drawer */}
       <aside
+        inert={isMobile && !open ? true : undefined}
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-card transition-transform duration-200 ease-out md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
@@ -150,7 +178,10 @@ export function Sidebar() {
           <Brand />
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              setOpen(false);
+              menuButtonRef.current?.focus();
+            }}
             aria-label="Fechar menu"
             className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
           >

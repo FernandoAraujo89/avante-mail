@@ -106,6 +106,10 @@ export function NewsWizard({
   const router = useRouter();
 
   const [step, setStep] = useState(1);
+  // Id da edição já persistida. Enquanto não enviada há UM rascunho só:
+  // o primeiro save cria, os seguintes sobrescrevem (PATCH) — salvar, testar
+  // e enviar nunca acumulam cópias na lista.
+  const [savedId, setSavedId] = useState<string | null>(editId ?? null);
   const [data, setData] = useState<WizardData>(EMPTY_DATA);
   const [initializing, setInitializing] = useState(
     Boolean(editId || duplicateId)
@@ -114,6 +118,8 @@ export function NewsWizard({
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [confirmModelSwitch, setConfirmModelSwitch] = useState(false);
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -122,6 +128,8 @@ export function NewsWizard({
   const [testEmails, setTestEmails] = useState("");
   const [sendingTest, setSendingTest] = useState(false);
   const [testMessage, setTestMessage] = useState("");
+  // Falha e sucesso do teste precisam ter cara diferente na tela.
+  const [testFailed, setTestFailed] = useState(false);
 
   // "Salvar como novo modelo"
   const [saveModelOpen, setSaveModelOpen] = useState(false);
@@ -221,7 +229,18 @@ export function NewsWizard({
           }),
         });
         const json = await res.json();
-        if (!cancelled && res.ok) setPreviewHtml(json.html);
+        if (!cancelled) {
+          if (res.ok) {
+            setPreviewHtml(json.html);
+            setPreviewError("");
+          } else {
+            setPreviewError(json.error ?? "Erro ao gerar a pré-visualização.");
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setPreviewError("Erro de conexão ao gerar a pré-visualização.");
+        }
       } finally {
         if (!cancelled) setPreviewLoading(false);
       }
@@ -286,11 +305,22 @@ export function NewsWizard({
   function changeModel() {
     update({ design: null, templateId: "" });
     setError("");
+    setConfirmModelSwitch(false);
   }
 
   function validateStep(current: number): string {
-    if (current === 1 && (!data.name.trim() || !data.subject.trim())) {
-      return "Preencha o nome da edição e o assunto do e-mail.";
+    if (current === 1) {
+      if (!data.name.trim() || !data.subject.trim()) {
+        return "Preencha o nome da edição e o assunto do e-mail.";
+      }
+      // Agendamento no passado enviaria IMEDIATAMENTE — barrar aqui evita o
+      // envio que o usuário achava que tinha agendado.
+      if (
+        data.scheduledAt &&
+        new Date(data.scheduledAt).getTime() <= Date.now()
+      ) {
+        return "A data de agendamento já passou — escolha uma data futura ou deixe o campo vazio para enviar imediatamente.";
+      }
     }
     if (current === 2 && !data.design) {
       return "Monte o e-mail da edição: escolha um modelo salvo ou comece do zero.";
@@ -330,13 +360,22 @@ export function NewsWizard({
   async function persist(): Promise<{ id: string }> {
     // Criação passa por /api/news (marca kind = news e fixa a lista);
     // edição usa a rota comum de campanhas, que preserva ambos.
-    const res = await fetch(editId ? `/api/campaigns/${editId}` : "/api/news", {
-      method: editId ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
-    });
+    const res = await fetch(
+      savedId ? `/api/campaigns/${savedId}` : "/api/news",
+      {
+        method: savedId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload()),
+      }
+    );
     const json = await res.json();
     if (!res.ok) throw new Error(json.error ?? "Erro ao salvar a edição.");
+    if (!savedId) {
+      setSavedId(json.id);
+      // A URL passa a apontar para o rascunho criado: um F5 (ou voltar depois)
+      // continua editando a MESMA edição em vez de gerar outra cópia.
+      window.history.replaceState(null, "", `/news/new?id=${json.id}`);
+    }
     return json;
   }
 
@@ -391,7 +430,14 @@ export function NewsWizard({
         }),
       });
       const json = await res.json();
-      if (res.ok) setPreviewHtml(json.html);
+      if (res.ok) {
+        setPreviewHtml(json.html);
+        setPreviewError("");
+      } else {
+        setPreviewError(json.error ?? "Erro ao gerar a pré-visualização.");
+      }
+    } catch {
+      setPreviewError("Erro de conexão ao gerar a pré-visualização.");
     } finally {
       setPreviewLoading(false);
     }
@@ -437,15 +483,19 @@ export function NewsWizard({
 
   async function handleSendTest() {
     setTestMessage("");
+    setTestFailed(false);
     if (!data.design) {
+      setTestFailed(true);
       setTestMessage("Monte o e-mail da edição antes de enviar o teste.");
       return;
     }
     if (parsedTestEmails.length === 0) {
+      setTestFailed(true);
       setTestMessage("Informe ao menos um e-mail de teste.");
       return;
     }
     if (parsedTestEmails.length > MAX_TEST_EMAILS) {
+      setTestFailed(true);
       setTestMessage(`Máximo de ${MAX_TEST_EMAILS} e-mails de teste.`);
       return;
     }
@@ -461,12 +511,14 @@ export function NewsWizard({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao enviar o teste.");
       const failed = Array.isArray(json.failed) ? json.failed : [];
+      setTestFailed(failed.length > 0);
       setTestMessage(
         failed.length > 0
           ? `Enviado para ${json.sent}. Falhou: ${failed.join(", ")}`
           : `E-mail de teste enviado para ${json.recipients.join(", ")}. Confira a caixa de entrada.`
       );
     } catch (err) {
+      setTestFailed(true);
       setTestMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setSendingTest(false);
@@ -506,6 +558,8 @@ export function NewsWizard({
             <div key={s.number} className="flex items-center gap-2">
               <button
                 type="button"
+                disabled={s.number > step}
+                aria-current={step === s.number ? "step" : undefined}
                 onClick={() => {
                   if (s.number < step) {
                     setError("");
@@ -591,6 +645,7 @@ export function NewsWizard({
                   id="news-scheduled"
                   type="datetime-local"
                   value={data.scheduledAt}
+                  min={toLocalInputValue(new Date().toISOString())}
                   onChange={(e) => update({ scheduledAt: e.target.value })}
                 />
                 <p className="text-xs text-muted-foreground">
@@ -736,7 +791,11 @@ export function NewsWizard({
                     <Save />
                     Salvar como novo modelo
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={changeModel}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmModelSwitch(true)}
+                  >
                     <RotateCcw />
                     Trocar modelo
                   </Button>
@@ -859,18 +918,37 @@ export function NewsWizard({
                     {sendingTest ? "Enviando teste..." : "Enviar teste"}
                   </Button>
                   {testMessage ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p
+                      className={cn(
+                        "text-xs",
+                        testFailed
+                          ? "text-destructive-hover"
+                          : "text-success-dark"
+                      )}
+                    >
                       {testMessage}
                     </p>
                   ) : null}
                 </CardContent>
               </Card>
+
+              {recipientCount === 0 ? (
+                <div className="rounded-lg border border-warning-dark/30 bg-warning-light/20 px-4 py-3 text-sm text-warning-dark">
+                  Nenhum contato inscrito em {destinoLabel} — por isso o envio
+                  está bloqueado. Adicione contatos à lista (ou confira os
+                  descadastros) e volte aqui.
+                </div>
+              ) : null}
             </div>
 
             <Card className="overflow-hidden">
               {!data.design ? (
                 <p className="py-24 text-center text-sm text-muted-foreground">
                   Nenhum e-mail montado.
+                </p>
+              ) : previewError ? (
+                <p className="px-6 py-24 text-center text-sm text-destructive-hover">
+                  {previewError}
                 </p>
               ) : previewLoading && !previewHtml ? (
                 <p className="py-24 text-center text-sm text-muted-foreground">
@@ -916,7 +994,9 @@ export function NewsWizard({
           ) : (
             <Button
               onClick={() => {
-                const message = validateStep(2);
+                // Revalida tudo antes do envio — inclusive o agendamento,
+                // que pode ter ficado no passado desde o passo 1.
+                const message = validateStep(1) || validateStep(2);
                 if (message) {
                   setError(message);
                   return;
@@ -946,6 +1026,10 @@ export function NewsWizard({
             <p className="py-16 text-center text-sm text-muted-foreground">
               Gerando pré-visualização...
             </p>
+          ) : previewError ? (
+            <p className="py-16 text-center text-sm text-destructive-hover">
+              {previewError}
+            </p>
           ) : (
             <iframe
               srcDoc={previewHtml}
@@ -954,6 +1038,31 @@ export function NewsWizard({
               className="h-[70vh] w-full rounded-lg border border-border bg-white"
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: confirmar troca de modelo (descarta o e-mail montado) */}
+      <Dialog open={confirmModelSwitch} onOpenChange={setConfirmModelSwitch}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Trocar de modelo</DialogTitle>
+            <DialogDescription>
+              O e-mail montado nesta edição será descartado e você volta à
+              galeria de modelos. Para não perder este layout, use antes
+              &quot;Salvar como novo modelo&quot;.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmModelSwitch(false)}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={changeModel}>
+              Descartar e trocar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

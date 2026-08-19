@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Plus } from "lucide-react";
 
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -51,6 +53,9 @@ export default function UsersPage() {
   // Redefinir senha
   const [passwordTarget, setPasswordTarget] = useState<UserDto | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  // Confirmação visível de que a redefinição aconteceu (o dialog só fechar
+  // é indistinguível de "nada aconteceu").
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -88,6 +93,7 @@ export default function UsersPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao criar usuário.");
       setCreateOpen(false);
+      setNotice(`Usuário "${name}" criado.`);
       setName("");
       setEmail("");
       setPassword("");
@@ -112,6 +118,9 @@ export default function UsersPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao redefinir a senha.");
+      setNotice(
+        `Senha de ${passwordTarget.name} redefinida — avise a pessoa do novo acesso.`
+      );
       setPasswordTarget(null);
       setNewPassword("");
     } catch (err) {
@@ -127,7 +136,13 @@ export default function UsersPage() {
         title="Usuários"
         description="Quem pode acessar o sistema — cada pessoa com seu próprio login."
       >
-        <Button onClick={() => setCreateOpen(true)}>
+        <Button
+          onClick={() => {
+            setFormError("");
+            setNotice("");
+            setCreateOpen(true);
+          }}
+        >
           <Plus />
           Novo usuário
         </Button>
@@ -136,6 +151,12 @@ export default function UsersPage() {
       {error ? (
         <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
           {error}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="mb-4 rounded-lg border border-success-dark/30 bg-success-light/20 px-4 py-3 text-sm text-success-dark">
+          {notice}
         </div>
       ) : null}
 
@@ -154,7 +175,7 @@ export default function UsersPage() {
               <TableRow>
                 <TableHead>Usuário</TableHead>
                 <TableHead>Criado em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -176,7 +197,7 @@ export default function UsersPage() {
                   <TableCell className="text-muted-foreground">
                     {formatDate(user.createdAt)}
                   </TableCell>
-                  <TableCell>
+                  <TableActionsCell>
                     <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost"
@@ -199,7 +220,7 @@ export default function UsersPage() {
                         />
                       ) : null}
                     </div>
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>

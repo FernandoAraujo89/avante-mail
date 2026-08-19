@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/select";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -310,7 +312,7 @@ export default function ContactsPage() {
                 <TableHead>Tags</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Criado em</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -320,6 +322,7 @@ export default function ContactsPage() {
                     <input
                       type="checkbox"
                       aria-label={`Selecionar ${contact.name}`}
+                      title={`Selecionar ${contact.name}`}
                       className="size-4 cursor-pointer accent-primary align-middle"
                       checked={selected.has(contact.id)}
                       onChange={() => toggleOne(contact.id)}
@@ -395,12 +398,13 @@ export default function ContactsPage() {
                   <TableCell className="text-muted-foreground">
                     {formatDate(contact.createdAt)}
                   </TableCell>
-                  <TableCell>
+                  <TableActionsCell>
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="icon" asChild>
                         <Link
                           href={`/contacts/${contact.id}`}
                           aria-label={`Ver histórico de ${contact.name}`}
+                          title={`Ver histórico de ${contact.name}`}
                         >
                           <History className="text-muted-foreground" />
                         </Link>
@@ -409,6 +413,7 @@ export default function ContactsPage() {
                         <Link
                           href={`/contacts/${contact.id}/edit`}
                           aria-label={`Editar ${contact.name}`}
+                          title={`Editar ${contact.name}`}
                         >
                           <Pencil className="text-muted-foreground" />
                         </Link>
@@ -418,11 +423,12 @@ export default function ContactsPage() {
                         size="icon"
                         onClick={() => setDeleteTarget(contact)}
                         aria-label={`Remover ${contact.name}`}
+                        title={`Remover ${contact.name}`}
                       >
                         <Trash2 className="text-muted-foreground" />
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>

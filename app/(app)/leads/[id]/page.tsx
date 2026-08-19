@@ -28,6 +28,16 @@ import { formatPhone } from "@/lib/phone";
 export const dynamic = "force-dynamic";
 
 /** O que cada evento quer dizer na linha do tempo do lead. */
+// Situação do lead dentro de um fluxo de automação, em português — o valor
+// cru do banco (running, waiting...) não é conversa para a UI.
+const FLUXO_STATUS_LABELS: Record<string, string> = {
+  running: "Em andamento",
+  waiting: "Aguardando",
+  done: "Concluído",
+  stopped: "Interrompido",
+  failed: "Falhou",
+};
+
 const EVENTO_LABEL: Record<string, string> = {
   contact_created: "Entrou como lead",
   tag_added: "Tag adicionada",
@@ -328,7 +338,9 @@ export default async function LeadPage({
                     >
                       {f.nome}
                     </Link>
-                    <Badge variant="secondary">{f.status}</Badge>
+                    <Badge variant="secondary">
+                      {FLUXO_STATUS_LABELS[f.status] ?? f.status}
+                    </Badge>
                   </div>
                 ))}
               </CardContent>

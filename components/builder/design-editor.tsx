@@ -81,6 +81,10 @@ export function DesignEditor({
 }) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [modules, setModules] = useState<SavedModule[]>([]);
+  const [moduleToDelete, setModuleToDelete] = useState<SavedModule | null>(
+    null
+  );
+  const [deletingModule, setDeletingModule] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
 
   const [alvoDoCodigo, setAlvoDoCodigo] = useState<AlvoDoCodigo | null>(null);
@@ -215,12 +219,29 @@ export function DesignEditor({
     setSelection({ rowId: row.id });
   }
 
-  async function handleDeleteModule(id: string) {
+  // Excluir módulo salvo é definitivo e some para todo mundo — confirma antes,
+  // e uma falha no DELETE aparece na tela em vez de ser engolida.
+  function handleDeleteModule(id: string) {
+    setModuleToDelete(modules.find((m) => m.id === id) ?? null);
+  }
+
+  async function confirmDeleteModule() {
+    if (!moduleToDelete) return;
+    setDeletingModule(true);
     try {
-      const res = await fetch(`/api/modules/${id}`, { method: "DELETE" });
-      if (res.ok) setModules((m) => m.filter((mod) => mod.id !== id));
-    } catch {
-      // mantém a lista como está
+      const res = await fetch(`/api/modules/${moduleToDelete.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? "Erro ao excluir o módulo.");
+      }
+      setModules((m) => m.filter((mod) => mod.id !== moduleToDelete.id));
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingModule(false);
+      setModuleToDelete(null);
     }
   }
 
@@ -607,6 +628,41 @@ export function DesignEditor({
               disabled={savingModule || !moduleName.trim()}
             >
               {savingModule ? "Salvando..." : "Salvar módulo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: confirmar exclusão de módulo salvo */}
+      <Dialog
+        open={moduleToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingModule) setModuleToDelete(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir módulo</DialogTitle>
+            <DialogDescription>
+              {moduleToDelete
+                ? `O módulo "${moduleToDelete.name}" será excluído para todos os e-mails futuros. Os e-mails que já o usam não mudam. Esta ação não pode ser desfeita.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setModuleToDelete(null)}
+              disabled={deletingModule}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteModule}
+              disabled={deletingModule}
+            >
+              {deletingModule ? "Excluindo..." : "Excluir módulo"}
             </Button>
           </DialogFooter>
         </DialogContent>

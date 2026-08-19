@@ -39,7 +39,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b border-border transition-colors hover:bg-muted/70 data-[state=selected]:bg-accent",
+        "group/row border-b border-border transition-colors hover:bg-muted/70 data-[state=selected]:bg-accent",
         className
       )}
       {...props}
@@ -70,6 +70,37 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   );
 }
 
+/**
+ * Cabeçalho e célula da coluna de ações, fixos à direita: quando a tabela
+ * rola na horizontal, as ações continuam sempre visíveis por cima do
+ * conteúdo. O fundo é opaco e acompanha o hover/seleção da linha.
+ */
+function TableActionsHead({ className, ...props }: React.ComponentProps<"th">) {
+  return (
+    <TableHead
+      className={cn(
+        "sticky right-0 z-10 bg-card text-right shadow-[-8px_0_8px_-8px_rgba(40,46,63,0.12)]",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
+function TableActionsCell({ className, ...props }: React.ComponentProps<"td">) {
+  return (
+    <TableCell
+      className={cn(
+        "sticky right-0 z-10 bg-card shadow-[-8px_0_8px_-8px_rgba(40,46,63,0.12)] transition-colors",
+        "group-hover/row:bg-[color-mix(in_srgb,var(--color-muted)_70%,var(--color-card))]",
+        "group-data-[state=selected]/row:bg-accent",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
 function TableCaption({ className, ...props }: React.ComponentProps<"caption">) {
   return (
     <caption
@@ -87,5 +118,7 @@ export {
   TableRow,
   TableHead,
   TableCell,
+  TableActionsHead,
+  TableActionsCell,
   TableCaption,
 };

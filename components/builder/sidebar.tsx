@@ -224,6 +224,10 @@ function ImageUploadControl({
   const [error, setError] = useState("");
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [gallery, setGallery] = useState<UploadedImage[] | null>(null);
+  // Nome da imagem aguardando confirmação de exclusão (apaga do servidor).
+  const [confirmDeleteName, setConfirmDeleteName] = useState<string | null>(
+    null
+  );
 
   async function loadGallery() {
     try {
@@ -264,13 +268,17 @@ function ImageUploadControl({
   }
 
   async function handleDelete(name: string) {
+    setConfirmDeleteName(null);
+    setError("");
     try {
       const res = await fetch(`/api/uploads/${name}`, { method: "DELETE" });
-      if (res.ok) {
-        setGallery((g) => (g ?? []).filter((img) => img.name !== name));
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? "Erro ao excluir a imagem.");
       }
-    } catch {
-      // mantém a galeria como está
+      setGallery((g) => (g ?? []).filter((img) => img.name !== name));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -343,11 +351,14 @@ function ImageUploadControl({
                     className="h-14 w-full object-contain"
                   />
                 </button>
+                {/* opacity (e não display:none): o botão continua alcançável
+                    por teclado e visível ao receber foco. */}
                 <button
                   type="button"
-                  onClick={() => handleDelete(img.name)}
+                  onClick={() => setConfirmDeleteName(img.name)}
                   aria-label={`Excluir ${img.name}`}
-                  className="absolute right-0.5 top-0.5 hidden rounded bg-card/90 p-0.5 text-muted-foreground shadow-sm hover:text-destructive group-hover:block"
+                  title={`Excluir ${img.name}`}
+                  className="absolute right-0.5 top-0.5 rounded bg-card/90 p-0.5 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="size-3" />
                 </button>
@@ -355,6 +366,31 @@ function ImageUploadControl({
             ))}
           </div>
         )
+      ) : null}
+      {confirmDeleteName ? (
+        <div className="grid gap-1.5 rounded border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs">
+          <p className="text-destructive-hover">
+            Excluir <span className="font-medium">{confirmDeleteName}</span> do
+            servidor? E-mails já enviados que usam esta imagem deixam de
+            exibi-la.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleDelete(confirmDeleteName)}
+              className="rounded bg-destructive px-2 py-1 font-medium text-destructive-foreground hover:bg-destructive-hover"
+            >
+              Excluir
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteName(null)}
+              className="rounded border border-border px-2 py-1 font-medium hover:bg-muted"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

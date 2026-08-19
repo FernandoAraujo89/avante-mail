@@ -8,10 +8,20 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -32,6 +42,11 @@ export default function EtapasPage() {
 
   const [nova, setNova] = useState("");
   const [novaPara, setNovaPara] = useState(false);
+
+  // Confirmação de remoção + aviso do que de fato aconteceu (apagada ×
+  // desativada — a regra fica no rodapé, mas o resultado precisa ser dito).
+  const [removerAlvo, setRemoverAlvo] = useState<EtapaDto | null>(null);
+  const [aviso, setAviso] = useState("");
 
   const carregar = useCallback(async () => {
     try {
@@ -56,6 +71,7 @@ export default function EtapasPage() {
   ) {
     setSalvando(true);
     setErro("");
+    setAviso("");
     try {
       const url =
         metodo === "DELETE"
@@ -92,6 +108,21 @@ export default function EtapasPage() {
     }
   }
 
+  async function confirmarRemocao() {
+    if (!removerAlvo) return;
+    const alvo = removerAlvo;
+    const emUso = dados?.uso[alvo.slug] ?? 0;
+    const ok = await chamar("DELETE", { id: alvo.id });
+    if (ok) {
+      setAviso(
+        emUso > 0
+          ? `"${alvo.label}" tinha ${emUso} lead${emUso === 1 ? "" : "s"} e foi desativada em vez de apagada — os leads continuam contados no funil.`
+          : `Etapa "${alvo.label}" removida.`
+      );
+    }
+    setRemoverAlvo(null);
+  }
+
   const etapas = dados?.etapas ?? [];
 
   return (
@@ -111,6 +142,12 @@ export default function EtapasPage() {
       {erro ? (
         <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
           {erro}
+        </div>
+      ) : null}
+
+      {aviso ? (
+        <div className="mb-4 rounded-lg border border-success-dark/30 bg-success-light/20 px-4 py-3 text-sm text-success-dark">
+          {aviso}
         </div>
       ) : null}
 
@@ -187,7 +224,7 @@ export default function EtapasPage() {
                 <TableHead>Identificador</TableHead>
                 <TableHead>Leads</TableHead>
                 <TableHead>Encerra a nutrição</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -224,14 +261,15 @@ export default function EtapasPage() {
                       {e.stopsNurturing ? "Sim" : "Não"}
                     </label>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableActionsCell className="text-right">
                     {e.active ? (
                       <Button
                         variant="ghost"
                         size="icon"
                         disabled={salvando}
                         aria-label={`Remover ${e.label}`}
-                        onClick={() => chamar("DELETE", { id: e.id })}
+                        title={`Remover ${e.label}`}
+                        onClick={() => setRemoverAlvo(e)}
                       >
                         <Trash2 className="text-muted-foreground" />
                       </Button>
@@ -247,7 +285,7 @@ export default function EtapasPage() {
                         Reativar
                       </Button>
                     )}
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -260,6 +298,46 @@ export default function EtapasPage() {
         esses contatos apontando para um identificador que não existe mais, e
         eles sumiriam de toda contagem do funil sem erro nenhum.
       </p>
+
+      <Dialog
+        open={removerAlvo !== null}
+        onOpenChange={(open) => {
+          if (!open && !salvando) setRemoverAlvo(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover etapa</DialogTitle>
+            <DialogDescription>
+              {removerAlvo
+                ? (dados?.uso[removerAlvo.slug] ?? 0) > 0
+                  ? `"${removerAlvo.label}" tem ${dados?.uso[removerAlvo.slug]} lead${(dados?.uso[removerAlvo.slug] ?? 0) === 1 ? "" : "s"} dentro, então será apenas desativada — os leads continuam contados no funil e a etapa pode ser reativada depois.`
+                  : `Remover a etapa "${removerAlvo.label}"? O webhook do agente deixa de reconhecer este nome.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRemoverAlvo(null)}
+              disabled={salvando}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmarRemocao}
+              disabled={salvando}
+            >
+              {salvando
+                ? "Removendo..."
+                : (dados?.uso[removerAlvo?.slug ?? ""] ?? 0) > 0
+                  ? "Desativar etapa"
+                  : "Remover etapa"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

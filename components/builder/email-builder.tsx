@@ -41,6 +41,7 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
 
   // Carrega o template em edição.
   useEffect(() => {
@@ -77,7 +78,16 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
         body: JSON.stringify({ mjml: compileDesignToMjml(design) }),
       });
       const json = await res.json();
-      if (res.ok) setPreviewHtml(json.html);
+      if (res.ok) {
+        setPreviewHtml(json.html);
+        setPreviewError("");
+      } else {
+        // Sem isto, a falha de compilação abre o dialog com um iframe em
+        // branco — indistinguível de "e-mail vazio".
+        setPreviewError(json.error ?? "Erro ao gerar a pré-visualização.");
+      }
+    } catch {
+      setPreviewError("Erro de conexão ao gerar a pré-visualização.");
     } finally {
       setPreviewLoading(false);
     }
@@ -183,6 +193,10 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
           {previewLoading ? (
             <p className="py-16 text-center text-sm text-muted-foreground">
               Gerando pré-visualização...
+            </p>
+          ) : previewError ? (
+            <p className="py-16 text-center text-sm text-destructive-hover">
+              {previewError}
             </p>
           ) : (
             <iframe

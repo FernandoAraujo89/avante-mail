@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/dialog";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -75,6 +77,8 @@ export default function WhatsAppTemplatesPage() {
   const [notice, setNotice] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  // Enviar à Meta trava o modelo para sempre — confirma antes.
+  const [submitTarget, setSubmitTarget] = useState<TemplateDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TemplateDto | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -120,6 +124,7 @@ export default function WhatsAppTemplatesPage() {
   }
 
   async function handleSubmit(template: TemplateDto) {
+    setSubmitTarget(null);
     setSubmittingId(template.id);
     setError("");
     setNotice("");
@@ -215,7 +220,7 @@ export default function WhatsAppTemplatesPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Qualidade</TableHead>
                 <TableHead>Atualizado</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -275,13 +280,13 @@ export default function WhatsAppTemplatesPage() {
                     <TableCell className="text-muted-foreground">
                       {formatDate(template.updatedAt)}
                     </TableCell>
-                    <TableCell>
+                    <TableActionsCell>
                       <div className="flex justify-end gap-1">
                         {editable ? (
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleSubmit(template)}
+                            onClick={() => setSubmitTarget(template)}
                             disabled={submittingId === template.id}
                             title="Enviar para análise da Meta"
                             aria-label={`Enviar ${template.name} para análise`}
@@ -306,7 +311,7 @@ export default function WhatsAppTemplatesPage() {
                           <Trash2 className="text-muted-foreground" />
                         </Button>
                       </div>
-                    </TableCell>
+                    </TableActionsCell>
                   </TableRow>
                 );
               })}
@@ -314,6 +319,42 @@ export default function WhatsAppTemplatesPage() {
           </Table>
         )}
       </Card>
+
+      <Dialog
+        open={submitTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setSubmitTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enviar para análise da Meta</DialogTitle>
+            <DialogDescription>
+              Depois do envio,{" "}
+              <span className="font-medium text-foreground">
+                {submitTarget?.name}
+              </span>{" "}
+              não pode mais ser editado — para mudar qualquer coisa será
+              preciso criar um novo modelo.
+            </DialogDescription>
+          </DialogHeader>
+          {submitTarget ? (
+            <p className="max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+              {submitTarget.bodyText}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSubmitTarget(null)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => submitTarget && handleSubmit(submitTarget)}
+            >
+              Confirmar envio à Meta
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={deleteTarget !== null}

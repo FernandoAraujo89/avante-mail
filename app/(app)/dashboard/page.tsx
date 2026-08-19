@@ -251,14 +251,27 @@ export default async function DashboardPage() {
       </Card>
 
       <Card className="mt-6">
-        <CardHeader>
+        <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Últimas campanhas</CardTitle>
+          {recentCampaigns.length > 0 ? (
+            <Link
+              href="/campaigns"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Ver todas
+            </Link>
+          ) : null}
         </CardHeader>
         <CardContent>
           {recentCampaigns.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              Nenhuma campanha criada ainda. Comece criando a primeira.
-            </p>
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                Nenhuma campanha criada ainda.
+              </p>
+              <Button asChild variant="outline">
+                <Link href="/campaigns/new">Criar a primeira campanha</Link>
+              </Button>
+            </div>
           ) : (
             <ul className="divide-y divide-border">
               {recentCampaigns.map((campaign) => (

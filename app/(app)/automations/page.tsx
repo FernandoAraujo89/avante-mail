@@ -23,6 +23,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Table,
+  TableActionsCell,
+  TableActionsHead,
   TableBody,
   TableCell,
   TableHead,
@@ -31,6 +33,7 @@ import {
 } from "@/components/ui/table";
 import { resumoDoGatilho } from "@/components/automations/labels";
 import type { TriggerDraft } from "@/lib/automations/arvore";
+import { cn } from "@/lib/utils";
 import type { AutomationStatus } from "@/lib/db/schema";
 import { formatDate } from "@/lib/format";
 
@@ -60,6 +63,9 @@ export default function AutomationsPage() {
   const [criando, setCriando] = useState(false);
 
   const [removendo, setRemovendo] = useState<AutomationRow | null>(null);
+  const [removendoEmCurso, setRemovendoEmCurso] = useState(false);
+  // Linha com pausar/ativar em andamento — trava o botão e mostra progresso.
+  const [mudandoStatusId, setMudandoStatusId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +113,7 @@ export default function AutomationsPage() {
 
   async function mudarStatus(row: AutomationRow, status: AutomationStatus) {
     setError("");
+    setMudandoStatusId(row.id);
     try {
       const res = await fetch(`/api/automations/${row.id}`, {
         method: "PATCH",
@@ -118,11 +125,14 @@ export default function AutomationsPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMudandoStatusId(null);
     }
   }
 
   async function confirmarRemocao() {
     if (!removendo) return;
+    setRemovendoEmCurso(true);
     try {
       const res = await fetch(`/api/automations/${removendo.id}`, {
         method: "DELETE",
@@ -134,6 +144,8 @@ export default function AutomationsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setRemovendo(null);
+    } finally {
+      setRemovendoEmCurso(false);
     }
   }
 
@@ -185,7 +197,7 @@ export default function AutomationsPage() {
                 <TableHead>Passos</TableHead>
                 <TableHead>Contatos</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -224,13 +236,14 @@ export default function AutomationsPage() {
                   <TableCell>
                     <AutomationStatusBadge status={row.status} />
                   </TableCell>
-                  <TableCell>
+                  <TableActionsCell>
                     <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
                         asChild
                         aria-label={`Relatório de ${row.name}`}
+                        title={`Relatório de ${row.name}`}
                       >
                         <Link href={`/automations/${row.id}/report`}>
                           <BarChart3 className="text-muted-foreground" />
@@ -241,18 +254,32 @@ export default function AutomationsPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => mudarStatus(row, "paused")}
+                          disabled={mudandoStatusId === row.id}
                           aria-label={`Pausar ${row.name}`}
+                          title={`Pausar ${row.name}`}
                         >
-                          <Pause className="text-muted-foreground" />
+                          <Pause
+                            className={cn(
+                              "text-muted-foreground",
+                              mudandoStatusId === row.id && "animate-pulse"
+                            )}
+                          />
                         </Button>
                       ) : (
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => mudarStatus(row, "active")}
+                          disabled={mudandoStatusId === row.id}
                           aria-label={`Ativar ${row.name}`}
+                          title={`Ativar ${row.name}`}
                         >
-                          <Play className="text-muted-foreground" />
+                          <Play
+                            className={cn(
+                              "text-muted-foreground",
+                              mudandoStatusId === row.id && "animate-pulse"
+                            )}
+                          />
                         </Button>
                       )}
                       <Button
@@ -260,11 +287,12 @@ export default function AutomationsPage() {
                         size="icon"
                         onClick={() => setRemovendo(row)}
                         aria-label={`Remover ${row.name}`}
+                        title={`Remover ${row.name}`}
                       >
                         <Trash2 className="text-muted-foreground" />
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableActionsCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -335,11 +363,19 @@ export default function AutomationsPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRemovendo(null)}>
+            <Button
+              variant="outline"
+              onClick={() => setRemovendo(null)}
+              disabled={removendoEmCurso}
+            >
               Cancelar
             </Button>
-            <Button variant="destructive" onClick={confirmarRemocao}>
-              Remover automação
+            <Button
+              variant="destructive"
+              onClick={confirmarRemocao}
+              disabled={removendoEmCurso}
+            >
+              {removendoEmCurso ? "Removendo..." : "Remover automação"}
             </Button>
           </DialogFooter>
         </DialogContent>

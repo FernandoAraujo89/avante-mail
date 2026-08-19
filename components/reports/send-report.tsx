@@ -18,6 +18,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { RefreshButton } from "@/components/reports/refresh-button";
 import { ResendButton } from "@/components/reports/resend-button";
 import { SendsTable } from "@/components/reports/sends-table";
 import { CampaignStatusBadge } from "@/components/status-badge";
@@ -166,6 +167,7 @@ export async function SendReport({
           {isWhatsApp ? <Badge variant="info">WhatsApp</Badge> : null}
           {isSms ? <Badge variant="info">SMS</Badge> : null}
           <CampaignStatusBadge status={campaign.status} />
+          <RefreshButton autoRefresh={campaign.status === "sending"} />
         </div>
       </PageHeader>
     </div>
