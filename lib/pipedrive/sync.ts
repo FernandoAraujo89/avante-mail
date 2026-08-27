@@ -54,6 +54,30 @@ export interface ResultadoDaSincronizacao {
 // repetiria "sem token" a cada 10 segundos no log.
 let avisouSemToken = false;
 let avisouConfig: string | null = null;
+let avisouTelefone = false;
+
+/**
+ * `firstValidPhone` protegido: o libphonenumber-js MORRE sob tsx — que é como
+ * os workers rodam no contêiner — com "Cannot read properties of undefined
+ * (reading 'hasOwnProperty')" na carga dos metadados (gotcha conhecido do
+ * projeto; os scripts de telefone usam jiti por isso). Aqui o telefone é só o
+ * segundo critério de casamento, então a falha degrada para "casar só por
+ * e-mail" com um aviso, em vez de derrubar a passada inteira.
+ */
+function telefoneSeguro(textos: string[]): string | null {
+  if (textos.length === 0) return null;
+  try {
+    return firstValidPhone(textos.join(" / "));
+  } catch {
+    if (!avisouTelefone) {
+      avisouTelefone = true;
+      console.error(
+        "[PIPEDRIVE] telefone indisponível neste runtime (libphonenumber sob tsx) — casando leads só por e-mail."
+      );
+    }
+    return null;
+  }
+}
 
 function normalizado(texto: string): string {
   return texto.trim().toLowerCase();
@@ -112,6 +136,12 @@ export async function sincronizarPipedrive(args?: {
     }
   }
 
+  // A passada se marca ANTES de trabalhar: uma falha no meio (API fora, token
+  // errado) espera o intervalo como uma passada boa, em vez de martelar a API
+  // a cada ciclo de 10 segundos do worker. A marca-d'água dos deals é outra
+  // coisa — ela só avança no fim, então nada processado se perde.
+  await setSetting(CHAVE_ULTIMA, agora.toISOString());
+
   const nomeDoFunil = process.env.PIPEDRIVE_PIPELINE ?? "White Label - Inbound";
   const nomeDoCampo =
     process.env.PIPEDRIVE_CAMPO_QUALIFICACAO ?? "Lead qualificado";
@@ -121,9 +151,6 @@ export async function sincronizarPipedrive(args?: {
     (p) => normalizado(p.name) === normalizado(nomeDoFunil)
   );
   if (!funil) {
-    // Marca a passada mesmo assim: sem isto, a cada ciclo de 10s uma chamada
-    // iria à API para redescobrir o mesmo problema.
-    await setSetting(CHAVE_ULTIMA, agora.toISOString());
     const aviso = `funil "${nomeDoFunil}" não encontrado no Pipedrive`;
     if (avisouConfig !== aviso) {
       avisouConfig = aviso;
@@ -177,7 +204,7 @@ export async function sincronizarPipedrive(args?: {
     const telefones = new Set<string>();
     for (const pessoa of pessoas.values()) {
       for (const e of pessoa.emails) emails.add(e.toLowerCase());
-      const tel = firstValidPhone(pessoa.phones.join(" / "));
+      const tel = telefoneSeguro(pessoa.phones);
       if (tel) telefones.add(tel);
     }
 
@@ -227,7 +254,7 @@ export async function sincronizarPipedrive(args?: {
           .map((e) => porEmail.get(e.toLowerCase()))
           .find(Boolean) ?? null;
       if (!contato) {
-        const tel = firstValidPhone(pessoa.phones.join(" / "));
+        const tel = telefoneSeguro(pessoa.phones);
         contato = (tel ? mapaTelefone.get(tel) : null) ?? null;
       }
       if (!contato) {
@@ -295,7 +322,6 @@ export async function sincronizarPipedrive(args?: {
   }
 
   if (maiorUpdate) await setSetting(CHAVE_DESDE, maiorUpdate);
-  await setSetting(CHAVE_ULTIMA, agora.toISOString());
 
   return {
     rodou: true,
