@@ -6,8 +6,13 @@ import { asc, count, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { LeadAcoes } from "@/components/leads/lead-acoes";
 import { LeadQualificacao } from "@/components/leads/lead-qualificacao";
 import { LeadScoreCard } from "@/components/leads/lead-score-card";
-import { qualificacaoInfo } from "@/components/leads/qualificacoes";
+import {
+  qualificacaoInfo,
+  varianteDaQualificacao,
+  type QualificacaoDto,
+} from "@/components/leads/qualificacoes";
 import { etapaPorSlug, listarEtapas } from "@/lib/leads/etapas";
+import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +64,8 @@ const EVENTO_LABEL: Record<string, string> = {
 function detalheDoEvento(
   tipo: string,
   payload: Record<string, unknown> | null,
-  rotulos: Record<string, string>
+  rotulos: Record<string, string>,
+  qualificacoes: QualificacaoDto[]
 ): string | null {
   const rotuloDaEtapa = (slug: string | null) =>
     slug ? rotulos[slug] ?? slug : "—";
@@ -70,8 +76,12 @@ function detalheDoEvento(
     return `${de} → ${para}`;
   }
   if (tipo === "lead_qualified") {
-    const q = qualificacaoInfo((payload.qualificacao as string) ?? null);
-    return q ? `${q.rotulo} · potencial ${q.potencial.toLowerCase()}` : null;
+    const slug = (payload.qualificacao as string) ?? null;
+    const q = qualificacaoInfo(qualificacoes, slug);
+    if (!q) return slug;
+    return q.potential
+      ? `${q.label} · potencial ${q.potential.toLowerCase()}`
+      : q.label;
   }
   if (tipo === "lead_score_changed") {
     return `${payload.de ?? "—"} → ${payload.para} (${payload.score} pontos)`;
@@ -136,6 +146,7 @@ export default async function LeadPage({
     listasDestino,
     etapas,
     etapaAtual,
+    qualificacoes,
     [totalEventos],
     [totalEnvios],
   ] = await Promise.all([
@@ -193,6 +204,9 @@ export default async function LeadPage({
       // sem a tradução ela mostraria "apresentacao-de-produto" para o operador.
       listarEtapas(true),
       etapaPorSlug(lead.stage),
+      // As qualificações também: a ficha e a linha do tempo guardam o slug, e
+      // o texto do playbook mora na tabela desde que a lista virou dado.
+      listarQualificacoes(true),
       // Contagens REAIS do que a exclusão apaga. As listas acima são cortadas
       // em 50 e 20 para a linha do tempo caber na tela; usar o tamanho delas
       // faria a janela dizer "50 eventos" para quem tem 200.
@@ -208,6 +222,11 @@ export default async function LeadPage({
 
   const rotulosDasEtapas = Object.fromEntries(
     etapas.map((e) => [e.slug, e.label])
+  );
+
+  const qualificacaoDoLead = qualificacaoInfo(
+    qualificacoes,
+    lead.qualification
   );
 
   const origem: { rotulo: string; valor: string | null }[] = [
@@ -243,9 +262,9 @@ export default async function LeadPage({
             lead.createdAt
           )}`}
         >
-          {qualificacaoInfo(lead.qualification) ? (
-            <Badge variant={qualificacaoInfo(lead.qualification)!.variante}>
-              {qualificacaoInfo(lead.qualification)!.rotulo}
+          {qualificacaoDoLead ? (
+            <Badge variant={varianteDaQualificacao(qualificacaoDoLead)}>
+              {qualificacaoDoLead.label}
             </Badge>
           ) : null}
           <Badge variant="secondary">{etapaAtual?.label ?? lead.stage}</Badge>
@@ -268,7 +287,7 @@ export default async function LeadPage({
           <LeadScoreCard leadId={lead.id} />
 
           <LeadQualificacao
-            qualificacao={lead.qualification}
+            info={qualificacaoDoLead}
             qualificadoEm={lead.qualifiedAt}
             etapa={etapaAtual?.label ?? lead.stage}
             etapaDesde={lead.stageChangedAt}
@@ -363,7 +382,8 @@ export default async function LeadPage({
                   const detalhe = detalheDoEvento(
                     e.type,
                     e.payload as Record<string, unknown> | null,
-                    rotulosDasEtapas
+                    rotulosDasEtapas,
+                    qualificacoes
                   );
                   return (
                     <li

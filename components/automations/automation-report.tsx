@@ -33,6 +33,7 @@ import {
 } from "@/lib/automations/relatorio";
 import { automations, getDb, lists, templates, whatsappTemplates } from "@/lib/db";
 import { listarEtapas } from "@/lib/leads/etapas";
+import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -92,6 +93,7 @@ export async function AutomationReport({ id }: { id: string }) {
       .select({ id: whatsappTemplates.id, name: whatsappTemplates.name })
       .from(whatsappTemplates),
     etapas: await listarEtapas(true),
+    qualificacoes: await listarQualificacoes(true),
   };
 
   const { resumo, passos } = relatorio;

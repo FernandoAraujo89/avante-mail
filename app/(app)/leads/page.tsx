@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  BadgeCheck,
   Gauge,
   ListChecks,
   Magnet,
@@ -48,8 +49,9 @@ import {
   type LeadDto,
 } from "@/components/leads/estagios";
 import {
-  QUALIFICACOES,
   qualificacaoInfo,
+  varianteDaQualificacao,
+  type QualificacaoDto,
 } from "@/components/leads/qualificacoes";
 import { formatDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -57,6 +59,8 @@ import { formatPhone } from "@/lib/phone";
 interface Resposta {
   leads: LeadDto[];
   etapas: EtapaDto[];
+  /** A lista cadastrada — espelho do campo do Pipedrive, vinda da tabela. */
+  qualificacoesLista: QualificacaoDto[];
   funil: Record<string, number>;
   qualificacoes: Record<string, number>;
   faixas: Record<string, number>;
@@ -105,6 +109,7 @@ export default function LeadsPage() {
       setDados({
         leads: [],
         etapas: [],
+        qualificacoesLista: [],
         funil: {},
         qualificacoes: {},
         faixas: {},
@@ -206,6 +211,12 @@ export default function LeadsPage() {
           </Link>
         </Button>
         <Button variant="outline" asChild>
+          <Link href="/leads/qualificacoes">
+            <BadgeCheck />
+            Qualificações
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
           <Link href="/leads/origens">
             <Webhook />
             Origens (webhook)
@@ -289,11 +300,17 @@ export default function LeadsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="todas">Todas as qualificações</SelectItem>
-            {QUALIFICACOES.map((q) => (
-              <SelectItem key={q.valor} value={q.valor}>
-                {q.rotulo} ({dados?.qualificacoes?.[q.valor] ?? 0})
-              </SelectItem>
-            ))}
+            {(dados?.qualificacoesLista ?? [])
+              // Desativada só aparece se ainda tiver alguém dentro — mesma
+              // regra do painel de etapas logo acima.
+              .filter(
+                (q) => q.active || (dados?.qualificacoes?.[q.slug] ?? 0) > 0
+              )
+              .map((q) => (
+                <SelectItem key={q.slug} value={q.slug}>
+                  {q.label} ({dados?.qualificacoes?.[q.slug] ?? 0})
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
         <Select value={canal} onValueChange={setCanal}>
@@ -440,17 +457,21 @@ export default function LeadsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    {qualificacaoInfo(lead.qualification) ? (
-                      <Badge
-                        variant={qualificacaoInfo(lead.qualification)!.variante}
-                      >
-                        {qualificacaoInfo(lead.qualification)!.rotulo}
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        sem qualificação
-                      </span>
-                    )}
+                    {(() => {
+                      const q = qualificacaoInfo(
+                        dados?.qualificacoesLista ?? [],
+                        lead.qualification
+                      );
+                      return q ? (
+                        <Badge variant={varianteDaQualificacao(q)}>
+                          {q.label}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          sem qualificação
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>
                     <span className="text-sm">

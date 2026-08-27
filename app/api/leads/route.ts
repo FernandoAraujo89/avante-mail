@@ -15,13 +15,12 @@ import {
 import {
   contacts,
   getDb,
-  LEAD_QUALIFICATIONS,
   LEAD_SCORE_BANDS,
-  type LeadQualification,
   type LeadScoreBand,
 } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
 import { listarEtapas } from "@/lib/leads/etapas";
+import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { lerConfiguracao } from "@/lib/leads/score";
 import { errorMessage, normalizeIds } from "@/lib/utils";
 
@@ -46,9 +45,13 @@ export async function GET(request: NextRequest) {
     const faixa = params.get("faixa")?.trim();
     const qualificacao = params.get("qualificacao")?.trim();
 
-    // As etapas válidas vêm da tabela, não de uma constante: elas espelham o
-    // funil do Pipedrive e mudam sem passar por deploy.
-    const etapas = await listarEtapas(true);
+    // Etapas e qualificações válidas vêm de tabela, não de constante: elas
+    // espelham o Pipedrive (funil e campo "Lead qualificado") e mudam sem
+    // passar por deploy.
+    const [etapas, qualificacoesLista] = await Promise.all([
+      listarEtapas(true),
+      listarQualificacoes(true),
+    ]);
 
     // Ser lead é a condição de base — nunca opcional nesta rota.
     const condicoes: SQL[] = [ehLead()];
@@ -68,11 +71,9 @@ export async function GET(request: NextRequest) {
     }
     if (
       qualificacao &&
-      LEAD_QUALIFICATIONS.includes(qualificacao as LeadQualification)
+      qualificacoesLista.some((q) => q.slug === qualificacao)
     ) {
-      condicoes.push(
-        eq(contacts.qualification, qualificacao as LeadQualification)
-      );
+      condicoes.push(eq(contacts.qualification, qualificacao));
     }
     if (canal) condicoes.push(eq(contacts.sourceChannel, canal));
     if (faixa && LEAD_SCORE_BANDS.includes(faixa as LeadScoreBand)) {
@@ -154,6 +155,7 @@ export async function GET(request: NextRequest) {
       leads,
       config,
       etapas,
+      qualificacoesLista,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
       qualificacoes: Object.fromEntries(
         porQualificacao

@@ -88,19 +88,13 @@ export type BounceType = (typeof BOUNCE_TYPES)[number];
  */
 
 /**
- * Quem o lead é, segundo a qualificação do agente. Vem do playbook do SDR e
- * chega no mesmo webhook de entrada.
- *
- * Diferente da etapa, isto é definição NOSSA e estável — muda quando o
- * playbook muda, não quando o comercial mexe no funil.
+ * A QUALIFICAÇÃO seguia o mesmo destino que as etapas: começou como constante
+ * de código ("vocabulário nosso, do playbook") até o campo "Lead qualificado"
+ * do Pipedrive ganhar opções que o código não conhecia — e toda entrega do
+ * agente com elas era recusada. Hoje ela espelha aquele campo e vive na tabela
+ * `lead_qualifications`, editável em /leads/qualificacoes, pela mesma razão
+ * das etapas: a lista é do comercial, e não pode depender de deploy nosso.
  */
-export const LEAD_QUALIFICATIONS = [
-  "experiente",
-  "intermediario",
-  "iniciante",
-  "alto_potencial",
-] as const;
-export type LeadQualification = (typeof LEAD_QUALIFICATIONS)[number];
 
 // Natureza da lista. Nulo = lista comum (parceiros). "leads" marca a lista de
 // leads, e é o que as travas contra disparo acidental consultam — o nome
@@ -232,8 +226,9 @@ export const contacts = pgTable("contacts", {
   /** Quando a etapa mudou pela última vez. */
   stageChangedAt: timestamp("stage_changed_at", { withTimezone: true }),
 
-  /** Qualificação dada pelo agente (playbook do SDR). */
-  qualification: text("qualification").$type<LeadQualification>(),
+  // Qualificação dada pelo agente. Slug de `lead_qualifications` — dado, não
+  // constante, pelo mesmo motivo do `stage` logo acima.
+  qualification: text("qualification"),
   qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
 
   // Origem do PRIMEIRO contato. Gravada uma vez e NÃO sobrescrita: quem chegou
@@ -543,6 +538,47 @@ export const leadStages = pgTable("lead_stages", {
     .defaultNow(),
 });
 export type LeadStageRow = typeof leadStages.$inferSelect;
+
+/**
+ * As qualificações do lead — espelho do campo "Lead qualificado" do Pipedrive.
+ *
+ * Mesma história das etapas: era constante de código (o playbook do SDR, com
+ * quatro valores) até o Pipedrive ter opções que o código não conhecia, e cada
+ * uma delas ser recusada pelo webhook. A lista é do comercial; vive em tabela
+ * e se edita em /leads/qualificacoes, sem deploy.
+ *
+ * Os PONTOS de cada qualificação não moram aqui: são regras de
+ * `lead_score_rules` (event_type `lead_qualified`, condition por slug), como
+ * sempre foram — a tela de qualificações as edita, mas o mecanismo é um só.
+ */
+export const leadQualifications = pgTable("lead_qualifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** O que `contacts.qualification` guarda e o webhook resolve. */
+  slug: text("slug").notNull().unique(),
+  /** O nome exato da opção no Pipedrive ("Sim: Experiente"). */
+  label: text("label").notNull(),
+  /** Ordem de apresentação — segue a ordem das opções no Pipedrive. */
+  position: integer("position").notNull().default(0),
+  /** Leitura rápida do playbook ("Alto", "Médio a alto"). Livre. */
+  potential: text("potential"),
+  /** Variante do Badge na tela (destructive/warning/info/success/secondary). */
+  variant: text("variant").notNull().default("secondary"),
+  // O texto do playbook do SDR, por seção. É o que separa uma etiqueta de uma
+  // informação: quem escreve a nutrição precisa saber o que o rótulo quer
+  // dizer no momento em que decide o que mandar.
+  quemSao: text("quem_sao"),
+  perfil: text("perfil"),
+  motivacoes: text("motivacoes"),
+  dores: text("dores"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+export type LeadQualificationRow = typeof leadQualifications.$inferSelect;
 
 export const webhookSources = pgTable(
   "webhook_sources",

@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { QUALIFICACOES } from "@/components/leads/qualificacoes";
 import type { TriggerDraft } from "@/lib/automations/arvore";
 import type { AutomationTriggerType } from "@/lib/db/schema";
 
@@ -134,11 +133,13 @@ export function TriggerEditor({
                   <SelectItem value="qualquer">
                     Qualquer qualificação
                   </SelectItem>
-                  {QUALIFICACOES.map((q) => (
-                    <SelectItem key={q.valor} value={q.valor}>
-                      {q.rotulo}
-                    </SelectItem>
-                  ))}
+                  {catalogo.qualificacoes
+                    .filter((q) => q.active)
+                    .map((q) => (
+                      <SelectItem key={q.slug} value={q.slug}>
+                        {q.label}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

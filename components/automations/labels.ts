@@ -5,7 +5,10 @@ import type {
 } from "@/lib/db/schema";
 import type { StepDraft, TriggerDraft } from "@/lib/automations/arvore";
 import type { EtapaDto } from "@/components/leads/estagios";
-import { qualificacaoLabel } from "@/components/leads/qualificacoes";
+import {
+  qualificacaoLabel,
+  type QualificacaoDto,
+} from "@/components/leads/qualificacoes";
 
 // Rótulos e resumos em português da tela de automações. Um lugar só: o cartão
 // do passo, o painel lateral e a lista mostram o mesmo texto.
@@ -114,6 +117,8 @@ export interface Catalogo {
   waTemplates: { id: string; name: string; bodyText?: string }[];
   /** Etapas do funil — vêm da tabela, não de constante (espelham o Pipedrive). */
   etapas: EtapaDto[];
+  /** Qualificações — idem: espelham o campo "Lead qualificado" do Pipedrive. */
+  qualificacoes: QualificacaoDto[];
 }
 
 const VAZIO: Catalogo = {
@@ -121,6 +126,7 @@ const VAZIO: Catalogo = {
   templates: [],
   waTemplates: [],
   etapas: [],
+  qualificacoes: [],
 };
 
 function nome(itens: { id: string; name: string }[], id: unknown): string {
@@ -305,7 +311,7 @@ export function resumoDoGatilho(
     case "lead_qualified": {
       const q = texto(c.qualificacao);
       return q
-        ? `Lead qualificado como "${qualificacaoLabel(q)}"`
+        ? `Lead qualificado como "${qualificacaoLabel(catalogo.qualificacoes, q)}"`
         : `${rotulo}: qualquer qualificação`;
     }
     default:

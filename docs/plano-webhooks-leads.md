@@ -67,11 +67,11 @@ webhook. Depois ele acompanha o lead no **Pipedrive** e avisa de novo quando o
 lead anda no funil. Não existe ponte de "entregar ao comercial": o lead já
 nasce lá.
 
-Duas informações, com donos diferentes:
+Duas informações, com o mesmo dono desde 27/08/2026:
 
 | | Quem define | Onde mora | Por quê |
 |---|---|---|---|
-| **Qualificação** | playbook do SDR (nosso) | código (`components/leads/qualificacoes.ts`) | vocabulário nosso, estável; muda quando o playbook muda |
+| **Qualificação** | campo "Lead qualificado" do Pipedrive | tabela `lead_qualifications`, editável em `/leads/qualificacoes` | era constante de código ("playbook nosso, estável") até o campo do Pipedrive ganhar opções que o código não conhecia — "Promissor: Baixo potencial", "Não", "Não identificado" — e toda entrega com elas ser recusada. Migração: `scripts/migrate-qualificacoes.ts`; os 4 slugs antigos foram preservados (é o que `contacts.qualification`, as regras de pontos e os gatilhos carregam) e o texto do playbook foi junto para a tabela |
 | **Etapa** | funil do Pipedrive (deles) | tabela `lead_stages`, editável em `/leads/etapas` | muda quando o comercial quiser; como constante, cada etapa nova virava um deploy nosso — e até lá o webhook seria recusado |
 
 **Os dois entram pela MESMA porta** (`/api/webhooks/entrada/{slug}`), com
@@ -131,7 +131,10 @@ contato: sem isso, a exclusão pareceria ter falhado.
 
 **A qualificação pontua.** Quatro regras semeadas em `lead_score_rules`, com
 `condition` por qualificação — Experiente 30, Alto Potencial 25, Intermediário
-15, Iniciante 8. Editáveis em `/leads/pontuacao` como qualquer outra regra.
+15, Iniciante 8. Editáveis em `/leads/pontuacao` como qualquer outra regra — e
+também pela coluna Pontos de `/leads/qualificacoes`, que edita (ou cria) a
+mesma regra e recalcula a base na hora. Qualificação nova entra sem pontos até
+o time decidir o peso.
 
 **Só as etapas que o usuário nomeou foram semeadas** (`qualificado`,
 `apresentacao-de-produto`, `comprou`). O resto do funil se cadastra na tela:
@@ -167,6 +170,7 @@ separados é o que impede tratar lead como parceiro.
 | `/leads` | funil por ETAPA, busca, filtros por qualificação, faixa e canal |
 | `/leads/[id]` | ficha: qualificação (com o texto do playbook), etapa, origem completa, linha do tempo, automações; converte em parceiro |
 | `/leads/etapas` | cadastro das etapas do funil do Pipedrive |
+| `/leads/qualificacoes` | cadastro das qualificações (espelho do campo "Lead qualificado" do Pipedrive), com pontos do Lead Score e texto do playbook |
 | Exclusão | na ficha (um) e por seleção na listagem (vários) |
 | `/leads/origens` | cadastro das origens de webhook, sem script |
 

@@ -1,6 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { qualificacaoInfo } from "@/components/leads/qualificacoes";
+import {
+  varianteDaQualificacao,
+  type QualificacaoDto,
+} from "@/components/leads/qualificacoes";
 import { formatDate } from "@/lib/format";
 
 /**
@@ -11,20 +14,19 @@ import { formatDate } from "@/lib/format";
  * está decidindo o que mandar. Sem isso, a etiqueta é só uma palavra bonita.
  */
 export function LeadQualificacao({
-  qualificacao,
+  info,
   qualificadoEm,
   etapa,
   etapaDesde,
   encerraNutricao,
 }: {
-  qualificacao: string | null;
+  /** A qualificação do lead, já resolvida na tabela — null quando não tem. */
+  info: QualificacaoDto | null;
   qualificadoEm: Date | null;
   etapa: string | null;
   etapaDesde: Date | null;
   encerraNutricao: boolean;
 }) {
-  const info = qualificacaoInfo(qualificacao);
-
   const blocos = info
     ? [
         { rotulo: "Quem são", texto: info.quemSao },
@@ -47,10 +49,16 @@ export function LeadQualificacao({
           {info ? (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={info.variante}>{info.rotulo}</Badge>
+                <Badge variant={varianteDaQualificacao(info)}>
+                  {info.label}
+                </Badge>
                 <span className="text-xs text-muted-foreground">
-                  potencial {info.potencial.toLowerCase()}
-                  {qualificadoEm ? ` · em ${formatDate(qualificadoEm)}` : ""}
+                  {info.potential
+                    ? `potencial ${info.potential.toLowerCase()}`
+                    : ""}
+                  {qualificadoEm
+                    ? `${info.potential ? " · " : ""}em ${formatDate(qualificadoEm)}`
+                    : ""}
                 </span>
               </div>
               <dl className="mt-1 grid gap-2 text-xs">
@@ -65,7 +73,8 @@ export function LeadQualificacao({
           ) : (
             <p className="text-sm text-muted-foreground">
               Sem qualificação. O agente a envia junto com o lead — se está
-              faltando, confira o mapeamento da origem.
+              faltando, confira o mapeamento da origem e se a opção do
+              Pipedrive está cadastrada em Qualificações.
             </p>
           )}
         </div>

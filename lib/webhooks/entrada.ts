@@ -8,8 +8,6 @@ import {
   lists,
   webhookDeliveries,
   webhookSources,
-  LEAD_QUALIFICATIONS,
-  type LeadQualification,
   type NewContact,
 } from "@/lib/db";
 import { encerrarPercursosDoContato } from "@/lib/automations/engine";
@@ -18,8 +16,8 @@ import { resolveListaDeLeads } from "@/lib/leads";
 import {
   ETAPA_DE_ENTRADA,
   resolverEtapa,
-  slugDaEtapa,
 } from "@/lib/leads/etapas";
+import { resolverQualificacao } from "@/lib/leads/qualificacoes";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, normalizeTags } from "@/lib/utils";
 
@@ -134,26 +132,6 @@ const CAMPOS_DE_TEXTO = [
   "qualification",
   "stage",
 ] as const;
-
-/**
- * Casa o que o agente mandou com uma qualificação do playbook.
- *
- * Aceita o slug (`alto_potencial`) e o rótulo escrito por extenso ("Promissor:
- * Alto Potencial", "Sim: Experiente") — o agente manda texto de conversa, não
- * identificador, e recusar por causa de um acento perderia a informação toda.
- */
-export function resolverQualificacao(valor: string): LeadQualification | null {
-  const alvo = slugDaEtapa(valor).replace(/-/g, "_");
-  const direto = LEAD_QUALIFICATIONS.find((q) => q === alvo);
-  if (direto) return direto;
-  // "sim_experiente", "promissor_alto_potencial": o prefixo de resposta do
-  // agente vem junto. Basta terminar com o nome da qualificação.
-  return (
-    LEAD_QUALIFICATIONS.find(
-      (q) => alvo.endsWith(`_${q}`) || alvo.startsWith(`${q}_`)
-    ) ?? null
-  );
-}
 
 /** Aplica o mapeamento da origem sobre o payload. */
 export function extrairCampos(
@@ -289,7 +267,7 @@ export async function processarEntrada(args: {
     campos.qualification ??
     (typeof padroes.qualification === "string" ? padroes.qualification : null);
   const qualificacao = qualificacaoPedida
-    ? resolverQualificacao(qualificacaoPedida)
+    ? (await resolverQualificacao(qualificacaoPedida))?.slug ?? null
     : null;
   if (qualificacaoPedida && !qualificacao) {
     recusas.qualificacao = qualificacaoPedida;

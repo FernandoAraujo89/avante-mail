@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { BarChart3, Pause, Play, Plus, Trash2, Workflow } from "lucide-react";
 
 import type { EtapaDto } from "@/components/leads/estagios";
+import type { QualificacaoDto } from "@/components/leads/qualificacoes";
 import { AutomationStatusBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -53,9 +54,10 @@ export default function AutomationsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<AutomationRow[] | null>(null);
   const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
-  // Sem as etapas, o resumo do gatilho mostraria o slug cru
+  // Sem as etapas e qualificações, o resumo do gatilho mostraria o slug cru
   // ("apresentacao-de-produto") em vez do nome que o comercial usa.
   const [etapas, setEtapas] = useState<EtapaDto[]>([]);
+  const [qualificacoes, setQualificacoes] = useState<QualificacaoDto[]>([]);
   const [error, setError] = useState("");
 
   const [novoAberto, setNovoAberto] = useState(false);
@@ -70,16 +72,20 @@ export default function AutomationsPage() {
   const load = useCallback(async () => {
     try {
       setError("");
-      const [res, listas, funil] = await Promise.all([
+      const [res, listas, funil, quals] = await Promise.all([
         fetch("/api/automations"),
         fetch("/api/lists").then((r) => r.json()),
         fetch("/api/leads/etapas").then((r) => r.json()),
+        fetch("/api/leads/qualificacoes").then((r) => r.json()),
       ]);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar automações.");
       setRows(json);
       setLists(Array.isArray(listas) ? listas : []);
       setEtapas(Array.isArray(funil?.etapas) ? funil.etapas : []);
+      setQualificacoes(
+        Array.isArray(quals?.qualificacoes) ? quals.qualificacoes : []
+      );
     } catch (err) {
       setRows([]);
       setError(err instanceof Error ? err.message : String(err));
@@ -218,7 +224,7 @@ export default function AutomationsPage() {
                     {row.triggers.length === 0
                       ? "—"
                       : row.triggers
-                          .map((t) => resumoDoGatilho(t, { lists, etapas, templates: [], waTemplates: [] }))
+                          .map((t) => resumoDoGatilho(t, { lists, etapas, qualificacoes, templates: [], waTemplates: [] }))
                           .join(" · ")}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
