@@ -145,6 +145,50 @@ Três vocabulários convivem na ficha e não são a mesma coisa: **faixa** é
 temperatura (o sistema calcula), **qualificação** é quem o lead é (o agente
 decide), **etapa** é onde ele está no funil do Pipedrive.
 
+### Sincronização com o Pipedrive (27/08/2026)
+
+Migração: `scripts/migrate-pipedrive-sync.ts`. Código: `lib/pipedrive/`.
+
+A porta de webhook ficou TRÊS SEMANAS pronta para receber `etapa` e
+`qualificacao` — e nenhuma das 311 entregas jamais trouxe os campos: o cenário
+do Make que deveria mandá-los nunca foi montado, sem erro em lugar nenhum. Só
+um funil parado (288 leads, todos na etapa de entrada, zero qualificações).
+Integração por evento falha assim, em silêncio.
+
+Por isso a ligação virou **reconciliação (pull)**: o worker de automações
+consulta a API do Pipedrive a cada 5 minutos (deals do funil com `update_time`
+desde a marca-d'água em `app_settings`), casa por e-mail/telefone e aplica
+qualificação, marco do funil e compra. Converge sozinha, e a PRIMEIRA passada
+(sem marca) é o backfill do que já existia. Sem `PIPEDRIVE_API_TOKEN` no
+ambiente ela fica quieta — avisa uma vez no log e segue.
+
+**Config por env:** `PIPEDRIVE_API_TOKEN` (Preferências pessoais → API),
+`PIPEDRIVE_PIPELINE` (padrão "White Label - Inbound"),
+`PIPEDRIVE_CAMPO_QUALIFICACAO` (padrão "Lead qualificado").
+
+**A tradução funil de vendas → marcos de marketing mora nos APELIDOS da
+etapa** (`lead_stages.aliases`, editáveis no lápis de `/leads/etapas`): as 8
+etapas do funil de lá caem nos marcos daqui ("Analisando proposta" →
+`apresentacao-de-produto`). Deal GANHO vira `comprou` — vem do status, não de
+etapa. Deal PERDIDO só mexe se uma etapa `perdido` for cadastrada (decisão de
+negócio em aberto: perdido pode merecer trilha de recuperação, não
+encerramento).
+
+**Chegar numa etapa pode CONVERTER em parceiro**
+(`lead_stages.convert_list_id`, no mesmo lápis): o lead sai do funil, entra na
+lista escolhida e deixa as de leads — a mesma mecânica da conversão manual da
+ficha, agora em `lib/leads/mudanca.ts`, que é a REGRA ÚNICA de mudança
+(webhook, sincronização e ficha usam a mesma: encerrar percursos ANTES do
+evento da etapa, converter DEPOIS dele). Semeada em produção: `comprou` →
+"Parceiros WHITE LABEL".
+
+No painel de `/leads`, etapa que converte mostra o ACUMULADO de quem já chegou
+(contado na linha do tempo), não a contagem ao vivo — que seria um zero eterno,
+já que quem chega vira parceiro na hora.
+
+O push pelo Make (Pipedrive → Watch Deals → nossa porta de entrada) continua
+possível por cima, como redução de latência; a correção não depende dele.
+
 ### A regra que passou a valer (04/08/2026)
 
 **Campanha é de parceiro, cliente e colaborador. Lead NUNCA entra — sem

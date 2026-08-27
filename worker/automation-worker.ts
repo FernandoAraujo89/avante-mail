@@ -8,6 +8,7 @@ import {
   percursosVencidos,
 } from "../lib/automations/engine";
 import { passagemDiaria, recalcularPendentes } from "../lib/leads/score";
+import { sincronizarPipedrive } from "../lib/pipedrive/sync";
 import {
   AUTOMATION_QUEUE_NAME,
   createRedisConnection,
@@ -145,6 +146,21 @@ async function ciclo(): Promise<void> {
     }
   } catch (error) {
     console.error(`[WORKER-AUTO] Lead Score falhou: ${errorMessage(error)}`);
+  }
+
+  // A reconciliação com o Pipedrive também tem try PRÓPRIO: ela lê a API de
+  // fora e aplica etapa/qualificação — uma indisponibilidade lá não pode
+  // parar nem as automações nem a pontuação. Ela mesma decide se já passou o
+  // intervalo (e fica quieta sem PIPEDRIVE_API_TOKEN).
+  try {
+    const pd = await sincronizarPipedrive();
+    if (pd.rodou && (pd.deals ?? 0) > 0) {
+      console.log(
+        `[WORKER-AUTO] pipedrive: ${pd.deals} deal(s) — ${pd.etapasAplicadas} etapa(s), ${pd.qualificacoesAplicadas} qualificação(ões), ${pd.convertidos} convertido(s), ${pd.semContato} sem contato, ${pd.recusas} recusa(s)`
+      );
+    }
+  } catch (error) {
+    console.error(`[WORKER-AUTO] Pipedrive falhou: ${errorMessage(error)}`);
   }
 
   // Só aqui: a trava cobre o ciclo INTEIRO. Liberá-la antes da pontuação

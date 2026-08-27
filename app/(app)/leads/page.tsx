@@ -62,6 +62,8 @@ interface Resposta {
   /** A lista cadastrada — espelho do campo do Pipedrive, vinda da tabela. */
   qualificacoesLista: QualificacaoDto[];
   funil: Record<string, number>;
+  /** Etapas que convertem em parceiro: quantos JÁ chegaram nelas (histórico). */
+  acumulado: Record<string, number>;
   qualificacoes: Record<string, number>;
   faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
@@ -111,6 +113,7 @@ export default function LeadsPage() {
         etapas: [],
         qualificacoesLista: [],
         funil: {},
+        acumulado: {},
         qualificacoes: {},
         faixas: {},
         canais: [],
@@ -247,28 +250,46 @@ export default function LeadsPage() {
           // Etapa desativada só aparece se ainda tiver alguém dentro — senão a
           // tela mostraria coluna vazia de um processo que não existe mais.
           .filter((e) => e.active || (dados?.funil[e.slug] ?? 0) > 0)
-          .map((e) => (
-            <button
-              key={e.slug}
-              type="button"
-              onClick={() => setEstagio(e.slug)}
-              className={`rounded-lg border px-4 py-3 text-left transition-colors ${
-                estagio === e.slug
-                  ? "border-primary bg-accent"
-                  : "border-border bg-card hover:border-muted-foreground/40"
-              }`}
-            >
-              <p className="text-xs text-muted-foreground">{e.label}</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums">
-                {dados?.funil[e.slug] ?? 0}
-              </p>
-              {e.stopsNurturing ? (
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  encerra a nutrição
+          .map((e) =>
+            e.convertListId ? (
+              // Etapa que converte em parceiro esvazia na hora — a contagem ao
+              // vivo seria um zero eterno. A coluna mostra o ACUMULADO de quem
+              // chegou, e não filtra: os convertidos já não estão nesta lista.
+              <div
+                key={e.slug}
+                className="rounded-lg border border-success-dark/30 bg-success-light/10 px-4 py-3 text-left"
+              >
+                <p className="text-xs text-muted-foreground">{e.label}</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums">
+                  {dados?.acumulado[e.slug] ?? 0}
                 </p>
-              ) : null}
-            </button>
-          ))}
+                <p className="mt-0.5 text-xs text-success-dark">
+                  chegaram e viraram parceiros
+                </p>
+              </div>
+            ) : (
+              <button
+                key={e.slug}
+                type="button"
+                onClick={() => setEstagio(e.slug)}
+                className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                  estagio === e.slug
+                    ? "border-primary bg-accent"
+                    : "border-border bg-card hover:border-muted-foreground/40"
+                }`}
+              >
+                <p className="text-xs text-muted-foreground">{e.label}</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums">
+                  {dados?.funil[e.slug] ?? 0}
+                </p>
+                {e.stopsNurturing ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    encerra a nutrição
+                  </p>
+                ) : null}
+              </button>
+            )
+          )}
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { count, eq } from "drizzle-orm";
 
-import { contacts, getDb, leadStages } from "@/lib/db";
+import { contacts, getDb, leadStages, lists } from "@/lib/db";
 import { listarEtapas, slugDaEtapa } from "@/lib/leads/etapas";
 import { errorMessage } from "@/lib/utils";
 
@@ -113,6 +113,46 @@ export async function PATCH(request: NextRequest) {
       patch.stopsNurturing = body.stopsNurturing;
     }
     if (typeof body.active === "boolean") patch.active = body.active;
+
+    // Apelidos: os nomes das etapas do Pipedrive que traduzem para esta.
+    if (Array.isArray(body.aliases)) {
+      patch.aliases = [
+        ...new Set(
+          body.aliases
+            .filter((a: unknown): a is string => typeof a === "string")
+            .map((a: string) => a.trim())
+            .filter(Boolean)
+        ),
+      ];
+    }
+
+    // Conversão automática: chegar aqui converte o lead em parceiro para a
+    // lista escolhida. As validações são as MESMAS da conversão manual — uma
+    // lista de leads como destino não converteria nada.
+    if (body.convertListId === null || body.convertListId === "") {
+      patch.convertListId = null;
+    } else if (typeof body.convertListId === "string") {
+      const [destino] = await db
+        .select({ id: lists.id, kind: lists.kind })
+        .from(lists)
+        .where(eq(lists.id, body.convertListId));
+      if (!destino) {
+        return NextResponse.json(
+          { error: "Lista de destino da conversão não encontrada." },
+          { status: 400 }
+        );
+      }
+      if (destino.kind === "leads") {
+        return NextResponse.json(
+          {
+            error:
+              "A conversão precisa apontar para uma lista de parceiros, clientes ou colaboradores — não para a própria lista de leads.",
+          },
+          { status: 400 }
+        );
+      }
+      patch.convertListId = destino.id;
+    }
 
     // O slug NÃO se edita: é o que o webhook do agente manda. Trocá-lo faria
     // toda entrega seguinte cair na recusa, e o sintoma ("o lead parou de

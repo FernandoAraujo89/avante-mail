@@ -54,6 +54,10 @@ export interface EtapaDto {
   label: string;
   position: number;
   stopsNurturing: boolean;
+  /** Nomes das etapas do Pipedrive que resolvem para esta (tradução N→1). */
+  aliases: string[] | null;
+  /** Chegar aqui converte o lead em parceiro, para esta lista. Nulo = manual. */
+  convertListId: string | null;
   active: boolean;
 }
 

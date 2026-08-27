@@ -10,7 +10,7 @@ import {
   webhookSources,
   type NewContact,
 } from "@/lib/db";
-import { encerrarPercursosDoContato } from "@/lib/automations/engine";
+import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { resolveListaDeLeads } from "@/lib/leads";
 import {
@@ -286,6 +286,7 @@ export async function processarEntrada(args: {
   // "null" mandaria quem investiga procurar um problema que não existe.
   let etapaAplicada: string | null = null;
   let percursosEncerrados = 0;
+  let convertidoPara: string | null = null;
 
   if (existente) {
     acao = "atualizado";
@@ -304,10 +305,6 @@ export async function processarEntrada(args: {
     }
 
     const tagsDepois = [...new Set([...(existente.tags ?? []), ...tags])];
-    const mudarQualificacao =
-      ehLead && qualificacao !== null && qualificacao !== existente.qualification;
-    const mudarEtapa =
-      ehLead && etapa !== null && etapa.slug !== existente.stage;
 
     await db
       .update(contacts)
@@ -318,44 +315,24 @@ export async function processarEntrada(args: {
         company: existente.company ?? campos.company,
         phone: existente.phone ?? telefone,
         tags: tagsDepois,
-        ...(mudarQualificacao
-          ? { qualification: qualificacao, qualifiedAt: new Date() }
-          : {}),
-        ...(mudarEtapa
-          ? { stage: etapa.slug, stageChangedAt: new Date() }
-          : {}),
       })
       .where(eq(contacts.id, existente.id));
 
     await emitTagDiff(existente.id, existente.tags, tagsDepois);
 
-    if (mudarQualificacao) {
-      await emitContactEvent("lead_qualified", contactId, {
-        de: existente.qualification,
-        qualificacao,
-      });
-    }
-
-    if (mudarEtapa) {
-      // ORDEM IMPORTA: encerrar ANTES de emitir o evento.
-      //
-      // "Comprou" para a nutrição, mas a automação que reage a "comprou"
-      // (marcar a tag de ganho, avisar alguém) precisa poder rodar. Se o
-      // evento saísse primeiro, o percurso novo nasceria e seria morto pelo
-      // encerramento no mesmo instante — e ninguém entenderia por quê.
-      etapaAplicada = etapa.slug;
-      percursosEncerrados = etapa.stopsNurturing
-        ? await encerrarPercursosDoContato(
-            contactId,
-            `etapa "${etapa.label}" encerra a nutrição`
-          )
-        : 0;
-
-      await emitContactEvent("lead_stage_changed", contactId, {
-        de: existente.stage,
-        para: etapa.slug,
-        origem: origem.slug,
-      });
+    // Qualificação e etapa passam pela regra ÚNICA (lib/leads/mudanca.ts) — a
+    // mesma da sincronização com o Pipedrive: encerramento antes do evento,
+    // conversão em parceiro depois da chegada, e não tocar em quem não é lead.
+    const aplicado = await aplicarMudancaDoLead(existente, {
+      qualificacao,
+      etapa,
+      origem: `webhook:${origem.slug}`,
+    });
+    if (aplicado.mudouEtapa && etapa) etapaAplicada = etapa.slug;
+    percursosEncerrados = aplicado.percursosEncerrados;
+    if (aplicado.convertidoPara) convertidoPara = aplicado.convertidoPara;
+    if (aplicado.conversaoRecusada) {
+      recusas.conversao = aplicado.conversaoRecusada;
     }
   } else {
     acao = "criado";
@@ -434,6 +411,7 @@ export async function processarEntrada(args: {
     qualificacao,
     consentimento,
     ...(percursosEncerrados > 0 ? { percursosEncerrados } : {}),
+    ...(convertidoPara ? { convertidoPara } : {}),
     ...(Object.keys(recusas).length > 0 ? { recusas } : {}),
     listId: destino.listId,
     // Fica registrado o que a origem PEDIU e não foi feito: sem isto, uma

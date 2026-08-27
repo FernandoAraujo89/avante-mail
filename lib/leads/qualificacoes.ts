@@ -36,7 +36,8 @@ export async function qualificacaoPorSlug(
 }
 
 /**
- * Casa o que o agente mandou com uma qualificação cadastrada.
+ * Casamento PURO, sobre uma lista já carregada — é o que a sincronização com o
+ * Pipedrive usa em lote, sem uma consulta por deal.
  *
  * Aceita o slug (`alto_potencial`), o rótulo por extenso ("Promissor: Alto
  * potencial") e o rótulo com prefixo de resposta ("Sim: Experiente" quando só
@@ -45,15 +46,14 @@ export async function qualificacaoPorSlug(
  *
  * As passadas rodam NESTA ordem, cada uma sobre a lista inteira: o casamento
  * exato de "nao-identificado" precisa vencer antes que a passada de prefixo
- * o entregue para "nao". Devolve null quando não existe — quem chama decide,
- * e a escolha em `entrada.ts` é registrar a recusa sem perder o resto.
+ * o entregue para "nao".
  */
-export async function resolverQualificacao(
+export function casarQualificacao(
+  lista: LeadQualificationRow[],
   valor: string
-): Promise<LeadQualificationRow | null> {
+): LeadQualificationRow | null {
   const alvo = slugDaEtapa(valor);
   if (!alvo) return null;
-  const lista = await listarQualificacoes(true);
 
   // Slugs antigos usam sublinhado (`alto_potencial`); os novos, hífen. A
   // comparação normaliza os dois lados para as duas gerações casarem.
@@ -69,4 +69,16 @@ export async function resolverQualificacao(
     (c) => alvo.endsWith(`-${c.slug}`) || alvo.startsWith(`${c.slug}-`)
   );
   return porPedaco?.q ?? null;
+}
+
+/**
+ * Casa o que veio de fora com uma qualificação cadastrada. Devolve null quando
+ * não existe — quem chama decide, e a escolha em `entrada.ts` é registrar a
+ * recusa sem perder o resto.
+ */
+export async function resolverQualificacao(
+  valor: string
+): Promise<LeadQualificationRow | null> {
+  const lista = await listarQualificacoes(true);
+  return casarQualificacao(lista, valor);
 }

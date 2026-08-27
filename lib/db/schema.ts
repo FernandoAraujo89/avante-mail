@@ -529,6 +529,27 @@ export const leadStages = pgTable("lead_stages", {
    * `lead_stage_changed` — um mecanismo só para cada coisa.
    */
   stopsNurturing: boolean("stops_nurturing").notNull().default(false),
+  /**
+   * Outros nomes que resolvem para esta etapa — os nomes das etapas do funil
+   * no Pipedrive ("Apresentar parte técnica", "Analisando proposta"...).
+   *
+   * É onde mora a tradução "funil de vendas detalhado → marcos de marketing":
+   * o Pipedrive tem 8 etapas, aqui interessam 3. Como coluna editável, e não
+   * numa rota do Make ou constante, porque tradução escondida é exatamente o
+   * que apodrece sem ninguém ver — e a lição das qualificações foi essa.
+   */
+  aliases: text("aliases").array(),
+  /**
+   * Chegar aqui CONVERTE o lead em parceiro, para esta lista.
+   *
+   * Mora na etapa pela mesma razão do `stopsNurturing`: converter (zerar o
+   * `stage` e trocar de lista) é ação que nenhum passo de automação sabe
+   * fazer — é o que muda QUEM O CONTATO É, não o que ele recebe. Nulo = a
+   * conversão continua manual, na ficha.
+   */
+  convertListId: uuid("convert_list_id").references(() => lists.id, {
+    onDelete: "set null",
+  }),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()

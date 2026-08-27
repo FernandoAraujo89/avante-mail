@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   and,
   count,
+  countDistinct,
   desc,
   eq,
   ilike,
@@ -13,6 +14,7 @@ import {
 } from "drizzle-orm";
 
 import {
+  contactEvents,
   contacts,
   getDb,
   LEAD_SCORE_BANDS,
@@ -146,6 +148,27 @@ export async function GET(request: NextRequest) {
       .where(ehLead())
       .groupBy(contacts.leadScoreBand);
 
+    // Etapa que CONVERTE em parceiro esvazia na hora — quem chega vira
+    // parceiro e sai do funil. A contagem "ao vivo" dela seria um zero eterno
+    // mentindo que ninguém comprou; o painel mostra o ACUMULADO de quem já
+    // passou por ela, contado na linha do tempo.
+    const comConversao = etapas.filter((e) => e.convertListId);
+    const acumulado: Record<string, number> = {};
+    if (comConversao.length > 0) {
+      const para = sql<string>`${contactEvents.payload}->>'para'`;
+      const chegadas = await db
+        .select({ para, total: countDistinct(contactEvents.contactId) })
+        .from(contactEvents)
+        .where(
+          and(
+            eq(contactEvents.type, "lead_stage_changed"),
+            inArray(para, comConversao.map((e) => e.slug))
+          )
+        )
+        .groupBy(para);
+      for (const r of chegadas) acumulado[r.para] = r.total;
+    }
+
     // A barra de calor precisa saber onde fica o "quente" para desenhar a
     // escala. Vem daqui e não de uma constante: o limiar é editável em
     // /leads/pontuacao, e uma barra com escala fixa mentiria no dia seguinte.
@@ -156,6 +179,7 @@ export async function GET(request: NextRequest) {
       config,
       etapas,
       qualificacoesLista,
+      acumulado,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
       qualificacoes: Object.fromEntries(
         porQualificacao
