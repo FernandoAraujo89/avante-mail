@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Pencil } from "lucide-react";
-import { asc, count, desc, eq, isNull, ne, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, ne, or } from "drizzle-orm";
 
 import { LeadAcoes } from "@/components/leads/lead-acoes";
 import { LeadQualificacao } from "@/components/leads/lead-qualificacao";
@@ -111,9 +111,25 @@ export default async function LeadPage({
   const [lead] = await db.select().from(contacts).where(eq(contacts.id, id));
   if (!lead) notFound();
 
-  // Contato que não é lead não tem ficha aqui: a área de Leads é separada da
-  // base de parceiros, e mostrar parceiro nela confundiria as duas.
-  if (!lead.stage) {
+  // Quem COMPROU e virou parceiro saiu do funil (`stage` nulo), mas a jornada
+  // dele como lead — qualificação, pontos de contato, avanço até a compra — é
+  // exatamente o que a gestão quer estudar. A passagem pelo funil fica na
+  // linha do tempo, e é ela que decide se esta ficha existe.
+  const [passagemPeloFunil] = await db
+    .select({ id: contactEvents.id })
+    .from(contactEvents)
+    .where(
+      and(
+        eq(contactEvents.contactId, id),
+        eq(contactEvents.type, "lead_stage_changed")
+      )
+    )
+    .limit(1);
+  const virouParceiro = !lead.stage && Boolean(passagemPeloFunil);
+
+  // Contato que nunca foi lead não tem ficha aqui: a área de Leads é separada
+  // da base de parceiros, e mostrar parceiro nela confundiria as duas.
+  if (!lead.stage && !virouParceiro) {
     return (
       <>
         <Button variant="ghost" size="sm" asChild className="-ml-2 mb-4">
@@ -203,7 +219,7 @@ export default async function LeadPage({
       // Os rótulos das etapas vêm da tabela: a linha do tempo guarda o slug, e
       // sem a tradução ela mostraria "apresentacao-de-produto" para o operador.
       listarEtapas(true),
-      etapaPorSlug(lead.stage),
+      lead.stage ? etapaPorSlug(lead.stage) : Promise.resolve(null),
       // As qualificações também: a ficha e a linha do tempo guardam o slug, e
       // o texto do playbook mora na tabela desde que a lista virou dado.
       listarQualificacoes(true),
@@ -267,7 +283,11 @@ export default async function LeadPage({
               {qualificacaoDoLead.label}
             </Badge>
           ) : null}
-          <Badge variant="secondary">{etapaAtual?.label ?? lead.stage}</Badge>
+          {virouParceiro ? (
+            <Badge variant="success">Virou parceiro</Badge>
+          ) : (
+            <Badge variant="secondary">{etapaAtual?.label ?? lead.stage}</Badge>
+          )}
           {lead.subscribed ? (
             <Badge variant="success">Aceita e-mail</Badge>
           ) : (
@@ -282,6 +302,18 @@ export default async function LeadPage({
         </PageHeader>
       </div>
 
+      {virouParceiro ? (
+        <div className="mb-6 rounded-lg border border-success-dark/30 bg-success-light/20 px-4 py-3 text-sm text-success-dark">
+          Este contato comprou e virou parceiro — a ficha abaixo é a jornada
+          dele como lead, congelada no dia da conversão. O relacionamento de
+          agora vive na{" "}
+          <Link href={`/contacts/${lead.id}`} className="font-medium underline">
+            base de contatos
+          </Link>
+          .
+        </div>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="grid gap-6">
           <LeadScoreCard leadId={lead.id} />
@@ -289,19 +321,28 @@ export default async function LeadPage({
           <LeadQualificacao
             info={qualificacaoDoLead}
             qualificadoEm={lead.qualifiedAt}
-            etapa={etapaAtual?.label ?? lead.stage}
+            etapa={
+              virouParceiro
+                ? "Virou parceiro"
+                : (etapaAtual?.label ?? lead.stage)
+            }
             etapaDesde={lead.stageChangedAt}
             encerraNutricao={etapaAtual?.stopsNurturing ?? false}
           />
 
-          <LeadAcoes
-            leadId={lead.id}
-            nome={lead.name}
-            subscribed={lead.subscribed}
-            listas={listasDestino}
-            totalEventos={totalEventos?.total ?? 0}
-            totalEnvios={totalEnvios?.total ?? 0}
-          />
+          {/* Converter e excluir são ações de LEAD; para quem já virou
+              parceiro, as duas viveriam mentindo — a exclusão inclusive é
+              recusada pela rota. */}
+          {virouParceiro ? null : (
+            <LeadAcoes
+              leadId={lead.id}
+              nome={lead.name}
+              subscribed={lead.subscribed}
+              listas={listasDestino}
+              totalEventos={totalEventos?.total ?? 0}
+              totalEnvios={totalEnvios?.total ?? 0}
+            />
+          )}
 
           <Card>
             <CardHeader>

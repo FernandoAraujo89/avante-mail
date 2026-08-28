@@ -55,8 +55,32 @@ export async function GET(request: NextRequest) {
       listarQualificacoes(true),
     ]);
 
-    // Ser lead é a condição de base — nunca opcional nesta rota.
-    const condicoes: SQL[] = [ehLead()];
+    // Ser lead é a condição de base — com UMA exceção deliberada: o filtro por
+    // etapa que CONVERTE. Quem chegou nela virou parceiro e saiu do funil, mas
+    // "quem comprou" é uma pergunta que a gestão precisa responder — a
+    // resposta vive na linha do tempo, e este filtro puxa por ela.
+    const etapaFiltrada = etapas.find((e) => e.slug === estagio);
+    const filtroPorConvertida = Boolean(etapaFiltrada?.convertListId);
+
+    const condicoes: SQL[] = [];
+    if (filtroPorConvertida) {
+      condicoes.push(
+        inArray(
+          contacts.id,
+          db
+            .select({ id: contactEvents.contactId })
+            .from(contactEvents)
+            .where(
+              and(
+                eq(contactEvents.type, "lead_stage_changed"),
+                sql`${contactEvents.payload}->>'para' = ${estagio}`
+              )
+            )
+        )
+      );
+    } else {
+      condicoes.push(ehLead());
+    }
 
     if (busca) {
       const termo = `%${busca}%`;
@@ -68,7 +92,7 @@ export async function GET(request: NextRequest) {
       );
       if (alvo) condicoes.push(alvo);
     }
-    if (estagio && etapas.some((e) => e.slug === estagio)) {
+    if (estagio && etapaFiltrada && !filtroPorConvertida) {
       condicoes.push(eq(contacts.stage, estagio));
     }
     if (

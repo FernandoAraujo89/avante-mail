@@ -261,10 +261,17 @@ export default function LeadsPage() {
             e.convertListId ? (
               // Etapa que converte em parceiro esvazia na hora — a contagem ao
               // vivo seria um zero eterno. A coluna mostra o ACUMULADO de quem
-              // chegou, e não filtra: os convertidos já não estão nesta lista.
-              <div
+              // chegou, e o clique filtra por ELES (pela linha do tempo): quem
+              // comprou saiu da lista de leads, mas não da pergunta.
+              <button
                 key={e.slug}
-                className="rounded-lg border border-success-dark/30 bg-success-light/10 px-4 py-3 text-left"
+                type="button"
+                onClick={() => setEstagio(e.slug)}
+                className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                  estagio === e.slug
+                    ? "border-success-dark bg-success-light/30"
+                    : "border-success-dark/30 bg-success-light/10 hover:border-success-dark/60"
+                }`}
               >
                 <p className="text-xs text-muted-foreground">{e.label}</p>
                 <p className="mt-1 text-2xl font-bold tabular-nums">
@@ -273,7 +280,7 @@ export default function LeadsPage() {
                 <p className="mt-0.5 text-xs text-success-dark">
                   chegaram e viraram parceiros
                 </p>
-              </div>
+              </button>
             ) : (
               <button
                 key={e.slug}
@@ -320,14 +327,12 @@ export default function LeadsPage() {
           <SelectContent>
             <SelectItem value="todos">Todas as etapas</SelectItem>
             {(dados?.etapas ?? [])
-              .filter(
-                (e) =>
-                  !e.convertListId &&
-                  (e.active || (dados?.funil[e.slug] ?? 0) > 0)
-              )
+              .filter((e) => e.active || (dados?.funil[e.slug] ?? 0) > 0)
               .map((e) => (
                 <SelectItem key={e.slug} value={e.slug}>
-                  {e.label} ({dados?.funil[e.slug] ?? 0})
+                  {e.convertListId
+                    ? `${e.label} — viraram parceiros (${dados?.acumulado[e.slug] ?? 0})`
+                    : `${e.label} (${dados?.funil[e.slug] ?? 0})`}
                 </SelectItem>
               ))}
           </SelectContent>
@@ -525,14 +530,22 @@ export default function LeadsPage() {
                     })()}
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm">
-                      {etapaLabel(dados?.etapas ?? [], lead.stage)}
-                    </span>
-                    {lead.stageChangedAt ? (
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        desde {formatDate(lead.stageChangedAt)}
-                      </p>
-                    ) : null}
+                    {lead.stage === null ? (
+                      // Só aparece no filtro por etapa que converte: o contato
+                      // comprou e saiu do funil.
+                      <Badge variant="success">Virou parceiro</Badge>
+                    ) : (
+                      <>
+                        <span className="text-sm">
+                          {etapaLabel(dados?.etapas ?? [], lead.stage)}
+                        </span>
+                        {lead.stageChangedAt ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            desde {formatDate(lead.stageChangedAt)}
+                          </p>
+                        ) : null}
+                      </>
+                    )}
                   </TableCell>
                   <TableCell>
                     <span className="text-sm">
