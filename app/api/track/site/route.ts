@@ -2,8 +2,15 @@ import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { contactEvents, contacts, getDb, siteEventRules } from "@/lib/db";
+import {
+  anonymousSiteEvents,
+  contactEvents,
+  contacts,
+  getDb,
+  siteEventRules,
+} from "@/lib/db";
 import { clientIp, rateLimitAllow } from "@/lib/rate-limit";
+import { costurarVisitante } from "@/lib/track/costura";
 import {
   marcarUltimaVisita,
   registrarRecusa,
@@ -17,6 +24,7 @@ import {
   origemPermitida,
   sessaoSegura,
   slugEvento,
+  visitanteSeguro,
   TAMANHO_MAXIMO_BYTES,
   textoSeguro,
 } from "@/lib/track/site";
@@ -131,7 +139,7 @@ export async function POST(request: NextRequest) {
     return recusar(origem, "corpo-grande", `${cru.length} bytes`);
   }
 
-  let corpo: { t?: unknown; s?: unknown; e?: unknown };
+  let corpo: { t?: unknown; v?: unknown; s?: unknown; e?: unknown };
   try {
     corpo = JSON.parse(cru || "{}");
   } catch {
@@ -178,9 +186,18 @@ export async function POST(request: NextRequest) {
     return recusar(origem, "nada-aproveitavel", "lote vazio");
   }
 
+  // O identificador de VISITANTE (fase E.2): sem assinatura, e por isso sem
+  // poder — ele só endereça o próprio histórico anônimo. Quem o transforma em
+  // ficha é um token válido (abaixo) ou o webhook autenticado do formulário.
+  const visitante = visitanteSeguro(corpo.v);
+
   // Aqui, e só aqui, o primeiro `esquecer`: daqui para baixo todas as saídas
   // são idênticas para token inválido e para contato suprimido.
-  if (!dono) {
+  //
+  // Um token PRESENTE e inválido derruba o lote inteiro — inclusive com
+  // visitante junto: `esquecer` manda o script zerar tudo, e aceitar a parte
+  // anônima de um lote meio-podre daria ao token ruim um caminho de escrita.
+  if (!dono && (token || !visitante)) {
     // Um token que não vale é lixo no armazenamento do visitante; some em vez
     // de virar tentativa eterna.
     return recusar(origem, "token-invalido", undefined, true);
@@ -189,22 +206,27 @@ export async function POST(request: NextRequest) {
   const db = getDb();
 
   // ── 6. O contato ainda pode ser rastreado? ───────────────────────────
-  const [contato] = await db
-    .select({
-      id: contacts.id,
-      optOut: contacts.emailOptOutAt,
-    })
-    .from(contacts)
-    .where(eq(contacts.id, dono.contactId));
+  let contactId: string | null = null;
+  if (dono) {
+    const [contato] = await db
+      .select({
+        id: contacts.id,
+        optOut: contacts.emailOptOutAt,
+      })
+      .from(contacts)
+      .where(eq(contacts.id, dono.contactId));
 
-  if (!contato) {
-    return recusar(origem, "contato-inexistente", undefined, true);
-  }
-  // A revogação de verdade: quem pediu para sair para de ser rastreado na
-  // hora, sem depender do token expirar. Por isso o prazo do token não é o
-  // mecanismo de revogação — esta consulta é.
-  if (contato.optOut) {
-    return recusar(origem, "contato-suprimido", undefined, true);
+    if (!contato) {
+      return recusar(origem, "contato-inexistente", undefined, true);
+    }
+    // A revogação de verdade: quem pediu para sair para de ser rastreado na
+    // hora, sem depender do token expirar. Por isso o prazo do token não é o
+    // mecanismo de revogação — esta consulta é. Vale notar: `esquecer` também
+    // apaga o visitante do navegador, então nem o anônimo continua daqui.
+    if (contato.optOut) {
+      return recusar(origem, "contato-suprimido", undefined, true);
+    }
+    contactId = contato.id;
   }
 
   // ── 7. Traduz caminho → evento nomeado (lista fechada, no servidor) ──
@@ -242,19 +264,10 @@ export async function POST(request: NextRequest) {
 
   const nomesValidos = new Set(regras.map((r) => r.evento));
 
-  // ── 8. Monta as linhas ───────────────────────────────────────────────
-  // `processedAt` já preenchido: nesta fase os eventos de site NÃO são gatilho
-  // de automação (nenhum está em AUTOMATION_TRIGGER_TYPES), e o motor varre
-  // `processed_at IS NULL` com teto de 100 por ciclo de 10s. Deixá-los pendentes
-  // faria o rastreio do site competir com tag e clique pelo mesmo orçamento —
-  // atrasando automação de verdade para marcar como lido um evento que nenhum
-  // gatilho quer. Quando a §6.5 do plano for implementada, esta linha sai.
-  const agora = new Date();
+  // ── 8. Monta as linhas (sem dono ainda — os dois destinos usam o mesmo) ──
   const linhas: {
-    contactId: string;
     type: "site_visited" | "site_event";
     payload: Record<string, unknown>;
-    processedAt: Date;
   }[] = [];
 
   for (const bruto of recebidos) {
@@ -266,10 +279,8 @@ export async function POST(request: NextRequest) {
 
     if (bruto.tipo === "visita") {
       linhas.push({
-        contactId: contato.id,
         type: "site_visited",
-        processedAt: agora,
-        // O índice de deduplicação casa por (contato, tipo, sessão): uma visita
+        // O índice de deduplicação casa por (dono, tipo, sessão): uma visita
         // por sessão, e não uma por página. Sem isso, quem abre 20 páginas
         // ganharia 20x os pontos e passaria na frente de quem pediu demo.
         payload: {
@@ -288,9 +299,7 @@ export async function POST(request: NextRequest) {
       const daPagina = eventoDoCaminho(path);
       if (daPagina) {
         linhas.push({
-          contactId: contato.id,
           type: "site_event",
-          processedAt: agora,
           payload: { sessao, evento: daPagina, path, ...(titulo ? { titulo } : {}) },
         });
       }
@@ -308,9 +317,7 @@ export async function POST(request: NextRequest) {
     if (!nome) continue;
 
     linhas.push({
-      contactId: contato.id,
       type: "site_event",
-      processedAt: agora,
       payload: { sessao, evento: nome, path, ...(titulo ? { titulo } : {}) },
     });
   }
@@ -331,16 +338,60 @@ export async function POST(request: NextRequest) {
     return true;
   });
 
-  // ── 9. Grava ─────────────────────────────────────────────────────────
+  // ── 9a. Visitante ANÔNIMO (fase E.2) ─────────────────────────────────
+  // Sem token não há ficha — mas há memória: o histórico fica guardado por
+  // visitante, esperando a identidade aparecer (clique de e-mail ou o
+  // formulário via webhook). É o que permite responder "ele entrou no site
+  // antes do e-mail?" com a visita que já estava aqui.
+  if (!contactId) {
+    await db
+      .insert(anonymousSiteEvents)
+      .values(
+        unicas.map((l) => ({
+          visitorId: visitante as string,
+          type: l.type,
+          payload: l.payload,
+        }))
+      )
+      .onConflictDoNothing();
+    await marcarUltimaVisita();
+    return resposta(origem);
+  }
+
+  // ── 9b. Grava no contato ─────────────────────────────────────────────
+  // `processedAt` já preenchido: nesta fase os eventos de site NÃO são gatilho
+  // de automação (nenhum está em AUTOMATION_TRIGGER_TYPES), e o motor varre
+  // `processed_at IS NULL` com teto de 100 por ciclo de 10s. Deixá-los pendentes
+  // faria o rastreio do site competir com tag e clique pelo mesmo orçamento —
+  // atrasando automação de verdade para marcar como lido um evento que nenhum
+  // gatilho quer. Quando a §6.5 do plano for implementada, esta linha sai.
+  //
   // onConflictDoNothing casa com o índice parcial de deduplicação: repetição
   // da mesma sessão é ignorada pelo banco, não pela nossa memória — o que
   // sobrevive a duas abas e a duas instâncias do app.
-  await db.insert(contactEvents).values(unicas).onConflictDoNothing();
+  const agora = new Date();
+  await db
+    .insert(contactEvents)
+    .values(
+      unicas.map((l) => ({ contactId, type: l.type, payload: l.payload, processedAt: agora }))
+    )
+    .onConflictDoNothing();
   await marcarUltimaVisita();
 
+  // A COSTURA: o navegador acabou de se identificar (token válido) e carrega
+  // um histórico anônimo — ele vira linha do tempo do contato agora. Em try
+  // próprio: uma falha na costura não pode derrubar a coleta do lote.
+  if (visitante) {
+    try {
+      await costurarVisitante(visitante, contactId);
+    } catch (error) {
+      console.error("[track/site] costura falhou:", error);
+    }
+  }
+
   // ── 10. Renova o token quando estiver perto do fim ───────────────────
-  if (precisaRenovar(dono.expiraEm)) {
-    return resposta(origem, { t: await signSiteToken(contato.id) });
+  if (dono && precisaRenovar(dono.expiraEm)) {
+    return resposta(origem, { t: await signSiteToken(contactId) });
   }
   return resposta(origem);
 }

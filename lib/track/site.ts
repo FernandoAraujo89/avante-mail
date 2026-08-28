@@ -161,3 +161,17 @@ export function sessaoSegura(cru: unknown): string | null {
   if (!/^[A-Za-z0-9_-]{6,64}$/.test(limpo)) return null;
   return limpo.slice(0, MAX_SESSAO);
 }
+
+/**
+ * Identificador de VISITANTE (fase E.2) — o que o script gera no primeiro
+ * acesso e o formulário entrega junto do lead. Opaco e sem assinatura: ele só
+ * dá acesso ao próprio histórico anônimo, nunca a uma ficha — a costura para
+ * dentro de um contato exige um token válido ou a porta autenticada do
+ * webhook. Mais estrito que a sessão (mínimo 8) porque vive mais.
+ */
+export function visitanteSeguro(cru: unknown): string | null {
+  if (typeof cru !== "string") return null;
+  const limpo = cru.trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(limpo)) return null;
+  return limpo;
+}

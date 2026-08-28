@@ -9,6 +9,7 @@ import {
 } from "../lib/automations/engine";
 import { passagemDiaria, recalcularPendentes } from "../lib/leads/score";
 import { sincronizarPipedrive } from "../lib/pipedrive/sync";
+import { limparVisitantesAntigos } from "../lib/track/costura";
 import {
   AUTOMATION_QUEUE_NAME,
   createRedisConnection,
@@ -161,6 +162,21 @@ async function ciclo(): Promise<void> {
     }
   } catch (error) {
     console.error(`[WORKER-AUTO] Pipedrive falhou: ${errorMessage(error)}`);
+  }
+
+  // Retenção do rastreio anônimo (fase E.2): visitante que nunca virou lead
+  // expira em 90 dias. A limpeza se regula sozinha (uma vez por dia).
+  try {
+    const limpeza = await limparVisitantesAntigos();
+    if (limpeza.rodou && limpeza.apagados > 0) {
+      console.log(
+        `[WORKER-AUTO] rastreio anônimo: ${limpeza.apagados} evento(s) expirados apagados`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `[WORKER-AUTO] limpeza do rastreio anônimo falhou: ${errorMessage(error)}`
+    );
   }
 
   // Só aqui: a trava cobre o ciclo INTEIRO. Liberá-la antes da pontuação

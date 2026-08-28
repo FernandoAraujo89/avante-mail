@@ -189,6 +189,41 @@ já que quem chega vira parceiro na hora.
 O push pelo Make (Pipedrive → Watch Deals → nossa porta de entrada) continua
 possível por cima, como redução de latência; a correção não depende dele.
 
+### Rastreio anônimo e costura (fase E.2, 28/08/2026)
+
+Migração: `scripts/migrate-rastreio-anonimo.ts`. Código: `lib/track/costura.ts`.
+
+A fase E só coletava quem JÁ estava identificado pelo token do clique de
+e-mail — e ficou meses em ZERO eventos, porque nenhum lead recebeu e-mail. O
+que faltava é o que as plataformas de referência fazem: **coletar o visitante
+anônimo desde a primeira página e costurar retroativamente**.
+
+- O script (v2) gera um identificador de visitante (`av_visitante`,
+  localStorage, mesmas regras de consentimento/GPC/DNT do token) e envia os
+  eventos mesmo sem token; a rota os guarda em `anonymous_site_events` —
+  tabela separada, com a MESMA deduplicação por sessão, retenção de 90 dias
+  (limpeza diária no worker).
+- O visitante é opaco e SEM assinatura de propósito: ele só endereça o próprio
+  histórico anônimo. A costura para dentro de uma ficha exige um dos dois
+  caminhos com prova: token válido na rota de coleta (clique de e-mail), ou o
+  webhook AUTENTICADO de entrada trazendo `visitorId` — o campo oculto
+  `av_visitante` que o script preenche nos formulários do site (basta um
+  `<input type="hidden" name="av_visitante">` no formulário e o campo
+  `visitante` mapeado na origem).
+- A costura (`costurarVisitante`) move o histórico com o `created_at`
+  ORIGINAL — a visita de três semanas atrás decai como tal — e zera
+  `lead_score_at`, então o worker repontua o lead com a história completa no
+  ciclo seguinte. `esquecer` (token podre ou contato suprimido) apaga também o
+  visitante do navegador.
+- `/leads/rastreio` mostra o funil do anônimo: visitantes aguardando,
+  eventos guardados, jornadas costuradas, visitas incorporadas.
+
+**Fora desta fase, anotado:** token de rastreio nos links de WhatsApp exige
+migrar os modelos para botão de URL com sufixo dinâmico (aprovação Meta) — é
+um projeto próprio. E os formulários que vivem FORA do site (Respondi,
+formulário instantâneo do Meta) não têm como carregar o `av_visitante`; para
+esses leads a identificação continua vindo do primeiro clique de e-mail.
+
 ### A regra que passou a valer (04/08/2026)
 
 **Campanha é de parceiro, cliente e colaborador. Lead NUNCA entra — sem

@@ -18,6 +18,8 @@ import {
   resolverEtapa,
 } from "@/lib/leads/etapas";
 import { resolverQualificacao } from "@/lib/leads/qualificacoes";
+import { costurarVisitante } from "@/lib/track/costura";
+import { visitanteSeguro } from "@/lib/track/site";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, normalizeTags } from "@/lib/utils";
 
@@ -112,6 +114,12 @@ export interface CamposExtraidos {
   qualification: string | null;
   /** Etapa do funil do Pipedrive — slug ou rótulo por extenso. */
   stage: string | null;
+  /**
+   * Identidade anônima do navegador (campo oculto `av_visitante` do
+   * formulário, preenchido pelo script do site). É o que permite COSTURAR as
+   * visitas de antes do formulário na linha do tempo do lead.
+   */
+  visitorId: string | null;
   tags: string[];
 }
 
@@ -131,6 +139,7 @@ const CAMPOS_DE_TEXTO = [
   "referrer",
   "qualification",
   "stage",
+  "visitorId",
 ] as const;
 
 /** Aplica o mapeamento da origem sobre o payload. */
@@ -383,6 +392,21 @@ export async function processarEntrada(args: {
     }
   }
 
+  // ── A COSTURA do rastreio (fase E.2) ─────────────────────────────────
+  // O formulário trouxe a identidade anônima do navegador: as visitas de
+  // ANTES deste momento viram linha do tempo do lead agora — com a data
+  // original, para o score decair certo. Em try próprio: uma falha aqui não
+  // pode derrubar a entrega do lead.
+  let visitasCosturadas = 0;
+  const visitanteDoSite = visitanteSeguro(campos.visitorId);
+  if (visitanteDoSite) {
+    try {
+      visitasCosturadas = await costurarVisitante(visitanteDoSite, contactId);
+    } catch (error) {
+      console.error("[webhook/entrada] costura do rastreio falhou:", error);
+    }
+  }
+
   // TRAVA 1: lead entra SÓ na lista de leads. O `listId` vem do defaults da
   // origem, que é dado editável — um id trocado à mão despejaria leads na lista
   // de parceiros, e daí em diante toda campanha de parceiro os alcançaria.
@@ -412,6 +436,7 @@ export async function processarEntrada(args: {
     consentimento,
     ...(percursosEncerrados > 0 ? { percursosEncerrados } : {}),
     ...(convertidoPara ? { convertidoPara } : {}),
+    ...(visitasCosturadas > 0 ? { visitasCosturadas } : {}),
     ...(Object.keys(recusas).length > 0 ? { recusas } : {}),
     listId: destino.listId,
     // Fica registrado o que a origem PEDIU e não foi feito: sem isto, uma

@@ -60,6 +60,13 @@ interface Dados {
   visitasNaSemana: number;
   cargas: { hoje: number; ultimos7dias: number };
   baseLegal: "consentimento" | "legitimo_interesse";
+  /** Fase E.2: o histórico anônimo à espera de identidade, e o já costurado. */
+  anonimos: {
+    visitantes: number;
+    eventos: number;
+    costuras: number;
+    eventosCosturados: number;
+  };
 }
 
 /**
@@ -227,8 +234,8 @@ export default function RastreioPage() {
       detalhe: `O script carregou ${dados?.cargas.ultimos7dias ?? 0} vez(es) nos últimos 7 dias, e nenhuma visita chegou. O script só envia depois que o site chamar av('consentimento', true) — enquanto isso ele fica inerte de propósito.`,
     },
     esperando: {
-      titulo: "Pronto, esperando o primeiro lead",
-      detalhe: `O script carregou ${dados?.cargas.ultimos7dias ?? 0} vez(es) nos últimos 7 dias e está coletando. Só é rastreado quem chega por um link nosso — a primeira visita aparece quando um lead clicar num e-mail e navegar pelo site.`,
+      titulo: "Pronto, esperando o primeiro lead identificado",
+      detalhe: `O script carregou ${dados?.cargas.ultimos7dias ?? 0} vez(es) nos últimos 7 dias e está coletando. Todo visitante é lembrado anonimamente desde a primeira página; a visita vira ficha quando ele se identificar — clicando num e-mail nosso ou preenchendo um formulário do site.`,
     },
     recebendo: {
       titulo: "Recebendo visitas",
@@ -251,7 +258,7 @@ export default function RastreioPage() {
         </Button>
         <PageHeader
           title="Rastreio do site"
-          description="Liga a visita ao site à ficha do lead. Só quem chegou por um link nosso é identificado — e só depois de aceitar o rastreio no site."
+          description="Liga a visita ao site à ficha do lead. Todo visitante é lembrado anonimamente; quando ele se identifica — clique num e-mail ou formulário do site — o histórico de antes é costurado na ficha."
         />
       </div>
 
@@ -305,6 +312,44 @@ export default function RastreioPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* O anônimo e a costura (fase E.2): quantos navegadores estão sendo
+          lembrados à espera de dono, e quantas jornadas já viraram ficha. */}
+      {dados ? (
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            {
+              rotulo: "Visitantes anônimos",
+              valor: dados.anonimos.visitantes,
+              sub: "aguardando identificação",
+            },
+            {
+              rotulo: "Visitas anônimas guardadas",
+              valor: dados.anonimos.eventos,
+              sub: "expiram em 90 dias",
+            },
+            {
+              rotulo: "Jornadas costuradas",
+              valor: dados.anonimos.costuras,
+              sub: "visitantes que viraram lead",
+            },
+            {
+              rotulo: "Visitas incorporadas",
+              valor: dados.anonimos.eventosCosturados,
+              sub: "entraram na ficha e no score",
+            },
+          ].map((k) => (
+            <div
+              key={k.rotulo}
+              className="rounded-xl border border-border bg-card px-4 py-3"
+            >
+              <p className="text-xs text-muted-foreground">{k.rotulo}</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">{k.valor}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{k.sub}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {/* Só no estado "calado": é onde a decisão trava, e a tela precisa dizer
           exatamente o que falta em vez de deixar parecer defeito nosso. */}

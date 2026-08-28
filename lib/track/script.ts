@@ -28,7 +28,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
 (function () {
   "use strict";
 
-  var VERSAO = "1";
+  var VERSAO = "2";
   // Carga dupla é o cenário MAIS provável (tag no cabeçalho e no rodapé), e o
   // pior: duas cópias disputando o patch de history quebrariam a navegação do
   // site. A guarda vem antes de qualquer efeito colateral.
@@ -42,6 +42,10 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
   var COLETA_POR_PADRAO = ${coletaPorPadrao};
   var CHAVE_TOKEN = "av_token";
   var CHAVE_SESSAO = "av_sessao";
+  // O VISITANTE (fase E.2): identidade anônima deste navegador, criada na
+  // primeira visita. É o que deixa o histórico esperando dono — quando a
+  // pessoa se identificar (clique de e-mail ou formulário), o servidor costura.
+  var CHAVE_VISITANTE = "av_visitante";
   // A RECUSA é persistida; o consentimento não. A assimetria é deliberada:
   // quem manda no "sim" é o banner do site, que o reafirma a cada página; mas
   // um "não" que sumisse ao recarregar não seria um "não". Sem isto, bastava
@@ -49,6 +53,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
   var CHAVE_RECUSA = "av_recusado";
 
   var token = null;          // só em memória até haver consentimento
+  var visitante = null;      // identidade anônima; mesmas regras de guarda
   var sessao = null;
   var consentido = false;
   var recusado = false;      // "não" explícito: para de coletar, não só de enviar
@@ -105,6 +110,18 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
     return s.slice(0, 40);
   }
 
+  function novoVisitante() {
+    var v = "v";
+    try {
+      var buf = new Uint8Array(16);
+      (window.crypto || window.msCrypto).getRandomValues(buf);
+      for (var i = 0; i < buf.length; i++) v += ("0" + buf[i].toString(16)).slice(-2);
+    } catch (e) {
+      v += String(Date.now()) + Math.random().toString(36).slice(2, 12);
+    }
+    return v.slice(0, 40);
+  }
+
   // ── Captura do token vindo do e-mail ──────────────────────────────────
   // Lê o ?av= para a MEMÓRIA e limpa a URL na mesma volta. Limpar não é
   // detalhe: sem isso o visitante copia a barra de endereço e manda no grupo
@@ -131,13 +148,20 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
 
   // ── Envio ─────────────────────────────────────────────────────────────
   function enviar(usarBeacon) {
-    if (!consentido || !token || fila.length === 0) return;
+    if (!consentido || fila.length === 0) return;
+    // Sem token E sem visitante não há a quem atribuir nada — não envia.
+    if (!token && !visitante) return;
     // GPC/DNT conferidos NO ENVIO, e não só na hora do aceite: o sinal pode
     // aparecer depois (extensão que liga, aba nova), e o que importa é o
     // instante em que o dado sairia daqui.
     if (recusaDoNavegador()) { fila = []; return; }
     var lote = fila.splice(0, 20);
-    var corpo = JSON.stringify({ t: token, s: sessao, e: lote });
+    var corpo = JSON.stringify({
+      t: token || undefined,
+      v: visitante || undefined,
+      s: sessao,
+      e: lote
+    });
 
     // text/plain evita o preflight (requisição simples), e o servidor lê o
     // corpo cru de qualquer jeito.
@@ -173,9 +197,11 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
             // pessoa pediu para sair). Some com ele em vez de tentar para
             // sempre.
             token = null;
+            visitante = null;
             apagar(CHAVE_TOKEN);
+            apagar(CHAVE_VISITANTE);
             fila = [];
-            log("token descartado a pedido do servidor");
+            log("identificacao descartada a pedido do servidor");
           } else if (dados.t) {
             token = dados.t;
             gravar(CHAVE_TOKEN, dados.t);
@@ -200,7 +226,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
     if (recusado) return;
     if (fila.length > 40) return; // teto de memória; site não é fila de log
     fila.push(item);
-    if (consentido && token) enviar(false);
+    if (consentido && (token || visitante)) enviar(false);
   }
 
   // ── O que é observado ─────────────────────────────────────────────────
@@ -242,6 +268,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       apagar(CHAVE_RECUSA);
       // Só agora o token e a sessão saem da memória para o armazenamento.
       if (token) gravar(CHAVE_TOKEN, token);
+      if (visitante) gravar(CHAVE_VISITANTE, visitante);
       if (sessao) gravar(CHAVE_SESSAO, sessao, true);
       log("consentimento concedido");
       enviar(false);
@@ -254,10 +281,12 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       // de um "não" seria guardar um identificador de pessoa sem base para
       // isso, mesmo sem transmitir.
       token = null;
+      visitante = null;
       // Revogar apaga o que está NESTE navegador. O histórico já coletado é
       // pedido de titular, atendido por um operador na ficha do lead — um
       // endpoint público que apaga evento por token seria convite a estrago.
       apagar(CHAVE_TOKEN);
+      apagar(CHAVE_VISITANTE);
       apagar(CHAVE_SESSAO, true);
       log("consentimento revogado");
     }
@@ -275,8 +304,9 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       if (acao === "evento") return evento(args[0]);
       if (acao === "pagina") return pagina();
       if (acao === "debug") { depurar = args[0] !== false; return log("debug ligado"); }
+      if (acao === "visitante") return consentido ? visitante : null;
       if (acao === "estado") {
-        return { versao: VERSAO, identificado: !!token, consentido: consentido, fila: fila.length };
+        return { versao: VERSAO, identificado: !!token, visitante: !!visitante, consentido: consentido, fila: fila.length };
       }
     } catch (e) {}
   }
@@ -284,6 +314,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
   // ── Ligação com a página ──────────────────────────────────────────────
   function ligar() {
     if (!token) token = ler(CHAVE_TOKEN);
+    visitante = ler(CHAVE_VISITANTE) || novoVisitante();
     sessao = ler(CHAVE_SESSAO, true) || novaSessao();
 
     // Legítimo interesse: já nasce coletando — MENOS para quem recusou antes
@@ -295,8 +326,33 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       // Sem uma chamada de consentimento para fazer isso, é aqui que o token e
       // a sessão passam a sobreviver à navegação entre páginas.
       if (token) gravar(CHAVE_TOKEN, token);
+      gravar(CHAVE_VISITANTE, visitante);
       gravar(CHAVE_SESSAO, sessao, true);
     }
+
+    // ── Formulários (fase E.2) ────────────────────────────────────────
+    // Um input escondido chamado "av_visitante" no formulário recebe a
+    // identidade anônima; o payload do webhook a entrega junto do lead, e o
+    // servidor costura o histórico. Preenche agora (formulário já na página)
+    // e de novo no submit (formulário que aparece depois) — o submit é a
+    // última chance e a que vale.
+    function preencherFormularios() {
+      if (!consentido || !visitante) return;
+      try {
+        var campos = document.querySelectorAll('input[name="av_visitante"]');
+        for (var i = 0; i < campos.length; i++) campos[i].value = visitante;
+      } catch (e) {}
+    }
+    preencherFormularios();
+    document.addEventListener("submit", function (ev) {
+      try {
+        if (!consentido || !visitante) return;
+        var f = ev.target;
+        if (!f || !f.querySelector) return;
+        var campo = f.querySelector('input[name="av_visitante"]');
+        if (campo) campo.value = visitante;
+      } catch (e) {}
+    }, true);
 
     // Cliques em elementos marcados: data-av-evento="demo". Delegado no
     // documento, então funciona para conteúdo que aparece depois.

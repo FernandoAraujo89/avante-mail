@@ -33,6 +33,10 @@ export const CAMPOS_MAPEAVEIS = [
   { campo: "utmTerm", rotulo: "utm_term", exemplo: "utm_term" },
   { campo: "landingPage", rotulo: "Página de entrada", exemplo: "pagina" },
   { campo: "referrer", rotulo: "Referrer", exemplo: "referrer" },
+  // O campo oculto `av_visitante` que o script do site preenche no formulário.
+  // Com ele, as visitas anônimas de ANTES do formulário são costuradas na
+  // linha do tempo do lead (fase E.2).
+  { campo: "visitorId", rotulo: "Visitante do site", exemplo: "visitante" },
   // Os dois campos do agente. Aceitam o valor por extenso ("Sim: Experiente",
   // "Passou por apresentação de produto"): o agente manda texto de conversa,
   // não identificador, e recusar por causa de um acento perderia a informação.
@@ -65,6 +69,7 @@ export const PAYLOAD_DE_EXEMPLO = {
   pagina: "https://avantejuntos.com.br/seja-um-parceiro",
   qualificacao: "Sim: Experiente",
   etapa: "Qualificado no CRM",
+  visitante: "v3f9c2ab41d86e07b52a91c4",
 };
 
 /**

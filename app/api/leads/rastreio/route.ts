@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, count, eq, gte } from "drizzle-orm";
+import { and, asc, count, countDistinct, eq, gte } from "drizzle-orm";
 
-import { contactEvents, getDb, siteEventRules, SITE_MATCH_TYPES } from "@/lib/db";
+import {
+  anonymousSiteEvents,
+  contactEvents,
+  getDb,
+  siteEventRules,
+  SITE_MATCH_TYPES,
+} from "@/lib/db";
 import { getBaseUrl } from "@/lib/email";
+import { lerContadoresDaCostura } from "@/lib/track/costura";
 import {
   BASES_LEGAIS,
   gravarBaseLegal,
@@ -53,6 +60,18 @@ export async function GET() {
       lerBaseLegal(),
     ]);
 
+    // O anônimo (fase E.2): quantos navegadores estão sendo lembrados à
+    // espera de uma identidade, e quantos já viraram linha do tempo de lead.
+    const [[anonimos], costuras] = await Promise.all([
+      db
+        .select({
+          eventos: count(),
+          visitantes: countDistinct(anonymousSiteEvents.visitorId),
+        })
+        .from(anonymousSiteEvents),
+      lerContadoresDaCostura(),
+    ]);
+
     const origens = origensPermitidas();
 
     return NextResponse.json({
@@ -74,6 +93,12 @@ export async function GET() {
       // está lá" de "a tag está lá e calada".
       cargas,
       baseLegal,
+      anonimos: {
+        visitantes: anonimos?.visitantes ?? 0,
+        eventos: anonimos?.eventos ?? 0,
+        costuras: costuras.costuras,
+        eventosCosturados: costuras.eventosCosturados,
+      },
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

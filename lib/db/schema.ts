@@ -931,6 +931,32 @@ export const leadScoreRules = pgTable("lead_score_rules", {
 export const SITE_MATCH_TYPES = ["exato", "prefixo"] as const;
 export type SiteMatchType = (typeof SITE_MATCH_TYPES)[number];
 
+/**
+ * Eventos de site de visitantes AINDA ANÔNIMOS (fase E.2).
+ *
+ * A peça que faltava para "saber que o lead entrou no site antes do e-mail":
+ * o script coleta com um identificador próprio de visitante desde a primeira
+ * visita, e quando a identidade aparece (token do e-mail, ou o formulário que
+ * o webhook entrega), o histórico daqui é COSTURADO em `contact_events` — com
+ * o `created_at` original, para o decaimento do score valer de verdade.
+ *
+ * Tabela separada de propósito: `contact_events` exige contato, e visitante
+ * anônimo não é contato — é uma promessa de um. Retenção de 90 dias (limpeza
+ * no worker): anônimo que nunca vira lead expira, por higiene de LGPD.
+ */
+export const anonymousSiteEvents = pgTable("anonymous_site_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** O identificador do navegador, gerado pelo script (opaco, saneado). */
+  visitorId: text("visitor_id").notNull(),
+  type: text("type").$type<"site_visited" | "site_event">().notNull(),
+  /** Mesmo formato do payload de contact_events — é o que permite a costura. */
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+export type AnonymousSiteEventRow = typeof anonymousSiteEvents.$inferSelect;
+
 export const siteEventRules = pgTable("site_event_rules", {
   id: uuid("id").primaryKey().defaultRandom(),
   /** Nome do evento gerado: slug curto, casado com a regra de pontuação. */
