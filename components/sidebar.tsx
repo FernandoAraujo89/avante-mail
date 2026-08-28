@@ -143,7 +143,7 @@ export function Sidebar() {
   return (
     <>
       {/* Top bar — só no mobile */}
-      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-4 md:hidden">
+      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-card px-4 md:hidden print:hidden">
         <button
           ref={menuButtonRef}
           type="button"
@@ -170,7 +170,7 @@ export function Sidebar() {
       <aside
         inert={isMobile && !open ? true : undefined}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-card transition-transform duration-200 ease-out md:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-card transition-transform duration-200 ease-out md:translate-x-0 print:hidden",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >

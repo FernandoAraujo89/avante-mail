@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   BadgeCheck,
+  ChartColumn,
   Gauge,
   ListChecks,
   Magnet,
@@ -202,6 +203,12 @@ export default function LeadsPage() {
         description="Nutrição de quem chegou por formulário, anúncio ou integração. Aqui a gente esquenta e mede o interesse; a venda acontece no Pipedrive."
       >
         <Button variant="outline" asChild>
+          <Link href="/leads/relatorio">
+            <ChartColumn />
+            Relatório
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
           <Link href="/leads/pontuacao">
             <Gauge />
             Pontuação
@@ -302,6 +309,29 @@ export default function LeadsPage() {
             className="pl-9"
           />
         </div>
+        {/* O mesmo filtro dos cartões do funil, em forma de seletor: os
+            cartões não se enxergam como controle, e o filtro por etapa
+            precisa estar onde os outros filtros estão. Etapa que converte
+            fica fora — quem chega nela vira parceiro e sai desta lista. */}
+        <Select value={estagio} onValueChange={setEstagio}>
+          <SelectTrigger className="w-52">
+            <SelectValue placeholder="Etapa" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas as etapas</SelectItem>
+            {(dados?.etapas ?? [])
+              .filter(
+                (e) =>
+                  !e.convertListId &&
+                  (e.active || (dados?.funil[e.slug] ?? 0) > 0)
+              )
+              .map((e) => (
+                <SelectItem key={e.slug} value={e.slug}>
+                  {e.label} ({dados?.funil[e.slug] ?? 0})
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
         <Select value={faixa} onValueChange={setFaixa}>
           <SelectTrigger className="w-52">
             <SelectValue placeholder="Pontuação" />
