@@ -40,7 +40,7 @@ const ETAPA_DE_ENTRADA = "qualificado";
 // exatamente como a tela passa a mentir — já aconteceu com as páginas do site
 // no rastreio, e o custo foi retrabalho.
 const ETAPAS: [string, string, number, boolean][] = [
-  [ETAPA_DE_ENTRADA, "Qualificado pelo agente", 10, false],
+  [ETAPA_DE_ENTRADA, "Qualificado no CRM", 10, false],
   ["apresentacao-de-produto", "Passou por apresentação de produto", 20, false],
   ["comprou", "Comprou", 90, true],
 ];

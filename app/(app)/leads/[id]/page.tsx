@@ -55,7 +55,7 @@ const EVENTO_LABEL: Record<string, string> = {
   whatsapp_replied: "Respondeu no WhatsApp",
   whatsapp_unsubscribed: "Pediu para sair do WhatsApp",
   lead_stage_changed: "Andou no funil",
-  lead_qualified: "Qualificado pelo agente",
+  lead_qualified: "Qualificado no CRM",
   lead_score_changed: "Mudou de faixa de pontuação",
   site_visited: "Visitou o site",
   site_event: "Ação no site",

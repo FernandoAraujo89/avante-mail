@@ -64,7 +64,7 @@ export const PAYLOAD_DE_EXEMPLO = {
   utm_campaign: "lancamento-agosto",
   pagina: "https://avantejuntos.com.br/seja-um-parceiro",
   qualificacao: "Sim: Experiente",
-  etapa: "Qualificado pelo agente",
+  etapa: "Qualificado no CRM",
 };
 
 /**

@@ -214,7 +214,7 @@ export function TriggerEditor({
               o select de baixo e os dois campos parariam de se alinhar. */}
           {trigger.type === "lead_stage_changed" ? (
             <p className="text-xs text-muted-foreground sm:col-span-3">
-              A etapa chega pelo webhook do agente, espelhando o Pipedrive. É
+              A etapa chega do Pipedrive pela sincronização, espelhando o funil. É
               assim que se troca a trilha de nutrição quando o lead avança lá.
             </p>
           ) : null}

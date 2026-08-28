@@ -73,7 +73,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json(
       {
         error:
-          "A etapa do funil vem do Pipedrive pelo webhook do agente e não se altera por aqui.",
+          "A etapa do funil vem do Pipedrive pela sincronização e não se altera por aqui.",
       },
       { status: 400 }
     );

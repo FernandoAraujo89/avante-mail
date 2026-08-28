@@ -193,7 +193,7 @@ export default function EtapasPage() {
 
       <PageHeader
         title="Etapas do funil"
-        description="Espelho do funil do Pipedrive. O agente acompanha o lead lá e avisa por webhook quando ele anda — é por estes nomes que o webhook chega."
+        description="Espelho do funil do Pipedrive. O comercial move o deal lá; a sincronização (e o webhook) trazem a mudança por estes nomes."
       />
 
       {erro ? (
@@ -280,8 +280,8 @@ export default function EtapasPage() {
           </p>
         ) : etapas.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            Nenhuma etapa cadastrada. Sem elas, o webhook do agente não consegue
-            mover o lead no funil.
+            Nenhuma etapa cadastrada. Sem elas, nem a sincronização nem o
+            webhook conseguem mover o lead no funil.
           </p>
         ) : (
           <Table>
@@ -495,7 +495,7 @@ export default function EtapasPage() {
               {removerAlvo
                 ? (dados?.uso[removerAlvo.slug] ?? 0) > 0
                   ? `"${removerAlvo.label}" tem ${dados?.uso[removerAlvo.slug]} lead${(dados?.uso[removerAlvo.slug] ?? 0) === 1 ? "" : "s"} dentro, então será apenas desativada — os leads continuam contados no funil e a etapa pode ser reativada depois.`
-                  : `Remover a etapa "${removerAlvo.label}"? O webhook do agente deixa de reconhecer este nome.`
+                  : `Remover a etapa "${removerAlvo.label}"? A sincronização e o webhook deixam de reconhecer este nome.`
                 : null}
             </DialogDescription>
           </DialogHeader>

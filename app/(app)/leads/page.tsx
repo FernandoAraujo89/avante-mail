@@ -549,8 +549,8 @@ export default function LeadsPage() {
               contatos, eles voltam com ficha nova. Dizer aqui evita a conclusão
               errada de que a exclusão falhou. */}
           <p className="text-xs text-muted-foreground">
-            Se o agente enviar esses contatos de novo pelo webhook, eles voltam
-            a entrar como leads novos.
+            Se esses contatos entrarem de novo por uma origem de webhook, eles
+            voltam a entrar como leads novos.
           </p>
 
           <DialogFooter>

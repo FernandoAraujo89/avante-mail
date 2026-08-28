@@ -229,7 +229,7 @@ export function LeadAcoes({
               e-mail, o lead volta com ficha nova. Dizer aqui evita a conclusão
               errada de que a exclusão falhou. */}
           <p className="text-xs text-muted-foreground">
-            Se o agente enviar este contato de novo pelo webhook, ele volta a
+            Se este contato entrar de novo por uma origem de webhook, ele volta a
             entrar como lead novo.
           </p>
 

@@ -201,7 +201,7 @@ export default function QualificacoesPage() {
 
       <PageHeader
         title="Qualificações"
-        description="Espelho do campo &ldquo;Lead qualificado&rdquo; do Pipedrive. O agente qualifica o lead lá e avisa por webhook — é por estes nomes que a qualificação chega."
+        description="Espelho do campo &ldquo;Lead qualificado&rdquo; do Pipedrive. O vendedor (SDR) qualifica o lead lá; a sincronização traz por estes nomes."
       />
 
       {erro ? (
@@ -227,8 +227,8 @@ export default function QualificacoesPage() {
           </p>
           <p className="text-muted-foreground">
             Os <span className="font-medium">pontos</span> entram no Lead Score
-            no momento em que o agente qualifica: quem chega mais maduro começa
-            mais quente. São as mesmas regras da tela de{" "}
+            no momento em que o vendedor qualifica: quem chega mais maduro
+            começa mais quente. São as mesmas regras da tela de{" "}
             <Link href="/leads/pontuacao" className="underline">
               Pontuação
             </Link>
@@ -288,8 +288,8 @@ export default function QualificacoesPage() {
           </p>
         ) : qualificacoes.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            Nenhuma qualificação cadastrada. Sem elas, o webhook do agente não
-            consegue qualificar o lead.
+            Nenhuma qualificação cadastrada. Sem elas, nem a sincronização nem
+            o webhook conseguem qualificar o lead.
           </p>
         ) : (
           <Table>
@@ -509,7 +509,7 @@ export default function QualificacoesPage() {
               {removerAlvo
                 ? (dados?.uso[removerAlvo.slug] ?? 0) > 0
                   ? `"${removerAlvo.label}" tem ${dados?.uso[removerAlvo.slug]} lead${(dados?.uso[removerAlvo.slug] ?? 0) === 1 ? "" : "s"} dentro, então será apenas desativada — os leads continuam com ela na ficha e a qualificação pode ser reativada depois.`
-                  : `Remover a qualificação "${removerAlvo.label}"? O webhook do agente deixa de reconhecer este nome, e a regra de pontos dela é removida junto.`
+                  : `Remover a qualificação "${removerAlvo.label}"? A sincronização e o webhook deixam de reconhecer este nome, e a regra de pontos dela é removida junto.`
                 : null}
             </DialogDescription>
           </DialogHeader>

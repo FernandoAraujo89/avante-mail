@@ -44,7 +44,7 @@ export function LeadQualificacao({
       <CardContent className="grid gap-4">
         <div className="grid gap-1.5">
           <p className="text-xs text-muted-foreground">
-            Qualificação do agente
+            Qualificação do comercial (CRM)
           </p>
           {info ? (
             <>
@@ -72,9 +72,10 @@ export function LeadQualificacao({
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Sem qualificação. O agente a envia junto com o lead — se está
-              faltando, confira o mapeamento da origem e se a opção do
-              Pipedrive está cadastrada em Qualificações.
+              Sem qualificação. O vendedor a preenche no Pipedrive e a
+              sincronização traz — se está faltando, confira se o deal está no
+              funil certo com este mesmo e-mail, e se a opção está cadastrada
+              em Qualificações.
             </p>
           )}
         </div>
@@ -84,8 +85,8 @@ export function LeadQualificacao({
           <p className="text-sm font-medium">{etapa ?? "—"}</p>
           <p className="text-xs text-muted-foreground">
             {etapaDesde ? `Desde ${formatDate(etapaDesde)}. ` : ""}
-            Espelha o Pipedrive e é atualizada pelo agente — não se altera por
-            aqui.
+            Espelha o Pipedrive e é atualizada pela sincronização — não se
+            altera por aqui.
           </p>
           {encerraNutricao ? (
             <p className="rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2 text-xs text-warning-dark">

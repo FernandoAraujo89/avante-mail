@@ -309,7 +309,7 @@ export function OrigemDialog({
                   mesmo campo. */}
               <p className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
                 Vem do próprio payload, pelo mapeamento acima. Sem esse campo, o
-                lead entra na etapa de entrada e o agente o move depois.
+                lead entra na etapa de entrada e o Pipedrive o move depois.
               </p>
             </div>
           </div>
