@@ -8,6 +8,7 @@ import {
   Gauge,
   ListChecks,
   Magnet,
+  RefreshCw,
   Search,
   Trash2,
   Webhook,
@@ -90,48 +91,83 @@ export default function LeadsPage() {
   // Separado do erro: `carregar` começa com setErro(""), e o resultado da
   // exclusão sobrevive ao recarregamento que vem logo depois dela.
   const [aviso, setAviso] = useState("");
+  const [atualizadoEm, setAtualizadoEm] = useState<Date | null>(null);
 
-  const carregar = useCallback(async () => {
-    try {
-      setErro("");
-      const params = new URLSearchParams();
-      if (busca.trim()) params.set("busca", busca.trim());
-      if (estagio !== "todos") params.set("estagio", estagio);
-      if (canal !== "todos") params.set("canal", canal);
-      if (faixa !== "todas") params.set("faixa", faixa);
-      if (qualificacao !== "todas") params.set("qualificacao", qualificacao);
+  const carregar = useCallback(
+    async (silencioso = false) => {
+      try {
+        if (!silencioso) setErro("");
+        const params = new URLSearchParams();
+        if (busca.trim()) params.set("busca", busca.trim());
+        if (estagio !== "todos") params.set("estagio", estagio);
+        if (canal !== "todos") params.set("canal", canal);
+        if (faixa !== "todas") params.set("faixa", faixa);
+        if (qualificacao !== "todas") params.set("qualificacao", qualificacao);
 
-      const res = await fetch(`/api/leads?${params.toString()}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Erro ao carregar os leads.");
-      setDados(json);
-      // A seleção não sobrevive ao filtro: marcado fora da tela é marcado que
-      // ninguém vê, e a exclusão levaria junto quem sumiu da lista.
-      setSelecionados(new Set());
-    } catch (err) {
-      setDados({
-        leads: [],
-        etapas: [],
-        qualificacoesLista: [],
-        funil: {},
-        acumulado: {},
-        qualificacoes: {},
-        faixas: {},
-        canais: [],
-        config: {
-          faixaQuente: 100,
-          faixaAquecido: 50,
-          faixaMorno: 20,
-          meiaVidaDias: 30,
-        },
-      });
-      setErro(err instanceof Error ? err.message : String(err));
-    }
-  }, [busca, estagio, canal, faixa, qualificacao]);
+        const res = await fetch(`/api/leads?${params.toString()}`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar os leads.");
+        setDados(json);
+        setAtualizadoEm(new Date());
+        if (silencioso) {
+          // A atualização de fundo não pode roubar o trabalho de ninguém: a
+          // seleção fica — só perde quem saiu da lista, senão o "excluir
+          // selecionados" levaria junto alguém que ninguém está vendo.
+          const visiveis = new Set(
+            (json.leads as LeadDto[]).map((l) => l.id)
+          );
+          setSelecionados(
+            (antes) => new Set([...antes].filter((id) => visiveis.has(id)))
+          );
+        } else {
+          // A seleção não sobrevive ao filtro: marcado fora da tela é marcado
+          // que ninguém vê, e a exclusão levaria junto quem sumiu da lista.
+          setSelecionados(new Set());
+        }
+      } catch (err) {
+        // Falha na atualização de fundo NÃO apaga a tela: um soluço de rede a
+        // cada 30s viraria uma lista piscando em branco.
+        if (silencioso) return;
+        setDados({
+          leads: [],
+          etapas: [],
+          qualificacoesLista: [],
+          funil: {},
+          acumulado: {},
+          qualificacoes: {},
+          faixas: {},
+          canais: [],
+          config: {
+            faixaQuente: 100,
+            faixaAquecido: 50,
+            faixaMorno: 20,
+            meiaVidaDias: 30,
+          },
+        });
+        setErro(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [busca, estagio, canal, faixa, qualificacao]
+  );
 
   useEffect(() => {
     const timer = setTimeout(carregar, 300);
     return () => clearTimeout(timer);
+  }, [carregar]);
+
+  // Tempo real, do jeito que o dado anda aqui (webhooks + sincronização de 5
+  // min): a tela se atualiza sozinha a cada 30s enquanto está visível, e na
+  // hora em que a pessoa volta para a aba — que é quando a foto velha engana.
+  useEffect(() => {
+    const aoVoltar = () => {
+      if (document.visibilityState === "visible") carregar(true);
+    };
+    const timer = setInterval(aoVoltar, 30_000);
+    document.addEventListener("visibilitychange", aoVoltar);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", aoVoltar);
+    };
   }, [carregar]);
 
   // O aviso da última exclusão some assim que a pessoa mexe nos filtros: senão
@@ -382,6 +418,20 @@ export default function LeadsPage() {
             ))}
           </SelectContent>
         </Select>
+        <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+          {atualizadoEm
+            ? `Atualizado às ${atualizadoEm.toLocaleTimeString("pt-BR")}`
+            : ""}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Atualizar agora"
+            title="Atualizar agora — a lista também se atualiza sozinha a cada 30s"
+            onClick={() => carregar(true)}
+          >
+            <RefreshCw className="size-4" />
+          </Button>
+        </span>
       </div>
 
       {erro ? (
