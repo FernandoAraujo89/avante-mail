@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowDown,
+  ArrowUp,
   BadgeCheck,
   ChartColumn,
+  ChevronsUpDown,
   Gauge,
   ListChecks,
   Magnet,
@@ -77,6 +80,33 @@ interface Resposta {
   };
 }
 
+type ChaveDeOrdenacao =
+  | "lead"
+  | "pontuacao"
+  | "qualificacao"
+  | "etapa"
+  | "origem"
+  | "entrada";
+
+/**
+ * As colunas ordenáveis, na ordem da tabela. O primeiro clique usa a direção
+ * que responde a pergunta mais comum da coluna: texto em A→Z; pontuação e
+ * data pelo maior/mais recente; etapa e qualificação na ordem do cadastro
+ * (que espelha o funil e o campo do Pipedrive), não alfabética.
+ */
+const COLUNAS: {
+  chave: ChaveDeOrdenacao;
+  rotulo: string;
+  inicial: "asc" | "desc";
+}[] = [
+  { chave: "lead", rotulo: "Lead", inicial: "asc" },
+  { chave: "pontuacao", rotulo: "Pontuação", inicial: "desc" },
+  { chave: "qualificacao", rotulo: "Qualificação", inicial: "asc" },
+  { chave: "etapa", rotulo: "Etapa", inicial: "asc" },
+  { chave: "origem", rotulo: "Origem", inicial: "asc" },
+  { chave: "entrada", rotulo: "Entrou em", inicial: "desc" },
+];
+
 export default function LeadsPage() {
   const [dados, setDados] = useState<Resposta | null>(null);
   const [erro, setErro] = useState("");
@@ -92,6 +122,12 @@ export default function LeadsPage() {
   // exclusão sobrevive ao recarregamento que vem logo depois dela.
   const [aviso, setAviso] = useState("");
   const [atualizadoEm, setAtualizadoEm] = useState<Date | null>(null);
+  // O padrão é o da API: mais quente primeiro, porque a lista existe para
+  // dizer com quem falar AGORA.
+  const [ordem, setOrdem] = useState<{
+    chave: ChaveDeOrdenacao;
+    direcao: "asc" | "desc";
+  }>({ chave: "pontuacao", direcao: "desc" });
 
   const carregar = useCallback(
     async (silencioso = false) => {
@@ -230,7 +266,65 @@ export default function LeadsPage() {
     [dados]
   );
 
-  const leads = dados?.leads ?? null;
+  function alternarOrdem(chave: ChaveDeOrdenacao) {
+    setOrdem((atual) =>
+      atual.chave === chave
+        ? { chave, direcao: atual.direcao === "asc" ? "desc" : "asc" }
+        : { chave, direcao: COLUNAS.find((c) => c.chave === chave)!.inicial }
+    );
+  }
+
+  // Ordenação no cliente, como nas tabelas de relatório: a lista já chega
+  // inteira da API, e reordenar não pode custar uma ida ao servidor. O sort é
+  // estável, então empates preservam o "mais quente primeiro" que vem de lá.
+  const leads = useMemo(() => {
+    if (!dados) return null;
+    const posicaoDaEtapa = new Map(dados.etapas.map((e) => [e.slug, e.position]));
+    const posicaoDaQualificacao = new Map(
+      dados.qualificacoesLista.map((q) => [q.slug, q.position])
+    );
+    // Etapa e qualificação ordenam pela POSIÇÃO do cadastro: "onde no funil" e
+    // "qual opção do campo", não ordem alfabética de rótulo. Etapa nula é quem
+    // virou parceiro — além do fim do funil, não "sem dado".
+    const valorDe = (l: LeadDto): string | number | null => {
+      switch (ordem.chave) {
+        case "lead":
+          return l.name;
+        case "pontuacao":
+          return l.leadScore;
+        case "qualificacao":
+          return l.qualification
+            ? (posicaoDaQualificacao.get(l.qualification) ??
+                Number.MAX_SAFE_INTEGER)
+            : null;
+        case "etapa":
+          return l.stage === null
+            ? Number.MAX_SAFE_INTEGER
+            : (posicaoDaEtapa.get(l.stage) ?? Number.MAX_SAFE_INTEGER);
+        case "origem":
+          return l.sourceChannel;
+        case "entrada":
+          return l.acquiredAt ?? l.createdAt;
+      }
+    };
+    const dir = ordem.direcao === "asc" ? 1 : -1;
+    const lista = [...dados.leads];
+    lista.sort((a, b) => {
+      const va = valorDe(a);
+      const vb = valorDe(b);
+      // Sem valor é sempre o fim da lista, nas duas direções: lead sem nota ou
+      // sem qualificação não pode encabeçar nada só por estar em branco.
+      if (va === null || vb === null) {
+        return va === vb ? 0 : va === null ? 1 : -1;
+      }
+      const cmp =
+        typeof va === "number"
+          ? va - (vb as number)
+          : va.localeCompare(vb as string, "pt-BR", { sensitivity: "base" });
+      return cmp * dir;
+    });
+    return lista;
+  }, [dados, ordem]);
 
   return (
     <>
@@ -275,18 +369,22 @@ export default function LeadsPage() {
           responderia isso.
 
           As colunas vêm da tabela de etapas, não de uma constante: quem manda
-          no funil é o comercial, e a tela precisa acompanhar sem deploy. */}
+          no funil é o comercial, e a tela precisa acompanhar sem deploy.
+
+          O rótulo reserva duas linhas (min-h-8): etapa de nome longo quebra, e
+          sem a reserva o número dela desceria — os números precisam dividir a
+          mesma linha de base para a comparação de relance funcionar. */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <button
           type="button"
           onClick={() => setEstagio("todos")}
-          className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+          className={`flex flex-col rounded-lg border px-4 py-3 text-left transition-colors ${
             estagio === "todos"
               ? "border-primary bg-accent"
               : "border-border bg-card hover:border-muted-foreground/40"
           }`}
         >
-          <p className="text-xs text-muted-foreground">Todos</p>
+          <p className="min-h-8 text-xs text-muted-foreground">Todos</p>
           <p className="mt-1 text-2xl font-bold tabular-nums">{totalNoFunil}</p>
         </button>
         {(dados?.etapas ?? [])
@@ -303,13 +401,15 @@ export default function LeadsPage() {
                 key={e.slug}
                 type="button"
                 onClick={() => setEstagio(e.slug)}
-                className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                className={`flex flex-col rounded-lg border px-4 py-3 text-left transition-colors ${
                   estagio === e.slug
                     ? "border-success-dark bg-success-light/30"
                     : "border-success-dark/30 bg-success-light/10 hover:border-success-dark/60"
                 }`}
               >
-                <p className="text-xs text-muted-foreground">{e.label}</p>
+                <p className="min-h-8 text-xs text-muted-foreground">
+                  {e.label}
+                </p>
                 <p className="mt-1 text-2xl font-bold tabular-nums">
                   {dados?.acumulado[e.slug] ?? 0}
                 </p>
@@ -322,13 +422,15 @@ export default function LeadsPage() {
                 key={e.slug}
                 type="button"
                 onClick={() => setEstagio(e.slug)}
-                className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+                className={`flex flex-col rounded-lg border px-4 py-3 text-left transition-colors ${
                   estagio === e.slug
                     ? "border-primary bg-accent"
                     : "border-border bg-card hover:border-muted-foreground/40"
                 }`}
               >
-                <p className="text-xs text-muted-foreground">{e.label}</p>
+                <p className="min-h-8 text-xs text-muted-foreground">
+                  {e.label}
+                </p>
                 <p className="mt-1 text-2xl font-bold tabular-nums">
                   {dados?.funil[e.slug] ?? 0}
                 </p>
@@ -342,96 +444,106 @@ export default function LeadsPage() {
           )}
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative min-w-64 flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nome, e-mail, empresa ou telefone..."
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            className="pl-9"
-          />
+      {/* Busca em cima, filtros embaixo em colunas IGUAIS: no flex com larguras
+          fixas eles embrulhavam em linhas tortas — três numa linha, um sozinho
+          na outra. A grade mantém as bordas alinhadas em qualquer largura, e no
+          celular cada filtro ocupa a linha inteira. */}
+      <div className="mb-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nome, e-mail, empresa ou telefone..."
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            <span className="hidden tabular-nums sm:inline">
+              {atualizadoEm
+                ? `Atualizado às ${atualizadoEm.toLocaleTimeString("pt-BR")}`
+                : ""}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Atualizar agora"
+              title="Atualizar agora — a lista também se atualiza sozinha a cada 30s"
+              onClick={() => carregar(true)}
+            >
+              <RefreshCw className="size-4" />
+            </Button>
+          </span>
         </div>
-        {/* O mesmo filtro dos cartões do funil, em forma de seletor: os
-            cartões não se enxergam como controle, e o filtro por etapa
-            precisa estar onde os outros filtros estão. Etapa que converte
-            fica fora — quem chega nela vira parceiro e sai desta lista. */}
-        <Select value={estagio} onValueChange={setEstagio}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Etapa" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todas as etapas</SelectItem>
-            {(dados?.etapas ?? [])
-              .filter((e) => e.active || (dados?.funil[e.slug] ?? 0) > 0)
-              .map((e) => (
-                <SelectItem key={e.slug} value={e.slug}>
-                  {e.convertListId
-                    ? `${e.label} — viraram parceiros (${dados?.acumulado[e.slug] ?? 0})`
-                    : `${e.label} (${dados?.funil[e.slug] ?? 0})`}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {/* O mesmo filtro dos cartões do funil, em forma de seletor: os
+              cartões não se enxergam como controle, e o filtro por etapa
+              precisa estar onde os outros filtros estão. Etapa que converte
+              fica fora — quem chega nela vira parceiro e sai desta lista. */}
+          <Select value={estagio} onValueChange={setEstagio}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Etapa" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas as etapas</SelectItem>
+              {(dados?.etapas ?? [])
+                .filter((e) => e.active || (dados?.funil[e.slug] ?? 0) > 0)
+                .map((e) => (
+                  <SelectItem key={e.slug} value={e.slug}>
+                    {e.convertListId
+                      ? `${e.label} — viraram parceiros (${dados?.acumulado[e.slug] ?? 0})`
+                      : `${e.label} (${dados?.funil[e.slug] ?? 0})`}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <Select value={faixa} onValueChange={setFaixa}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Pontuação" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas as pontuações</SelectItem>
+              {FAIXAS.map((f) => (
+                <SelectItem key={f.valor} value={f.valor}>
+                  {f.rotulo} ({dados?.faixas?.[f.valor] ?? 0})
                 </SelectItem>
               ))}
-          </SelectContent>
-        </Select>
-        <Select value={faixa} onValueChange={setFaixa}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Pontuação" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas as pontuações</SelectItem>
-            {FAIXAS.map((f) => (
-              <SelectItem key={f.valor} value={f.valor}>
-                {f.rotulo} ({dados?.faixas?.[f.valor] ?? 0})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={qualificacao} onValueChange={setQualificacao}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Qualificação" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas as qualificações</SelectItem>
-            {(dados?.qualificacoesLista ?? [])
-              // Desativada só aparece se ainda tiver alguém dentro — mesma
-              // regra do painel de etapas logo acima.
-              .filter(
-                (q) => q.active || (dados?.qualificacoes?.[q.slug] ?? 0) > 0
-              )
-              .map((q) => (
-                <SelectItem key={q.slug} value={q.slug}>
-                  {q.label} ({dados?.qualificacoes?.[q.slug] ?? 0})
+            </SelectContent>
+          </Select>
+          <Select value={qualificacao} onValueChange={setQualificacao}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Qualificação" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas as qualificações</SelectItem>
+              {(dados?.qualificacoesLista ?? [])
+                // Desativada só aparece se ainda tiver alguém dentro — mesma
+                // regra do painel de etapas logo acima.
+                .filter(
+                  (q) => q.active || (dados?.qualificacoes?.[q.slug] ?? 0) > 0
+                )
+                .map((q) => (
+                  <SelectItem key={q.slug} value={q.slug}>
+                    {q.label} ({dados?.qualificacoes?.[q.slug] ?? 0})
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <Select value={canal} onValueChange={setCanal}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Canal de origem" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos os canais</SelectItem>
+              {(dados?.canais ?? []).map((c) => (
+                <SelectItem key={c.canal} value={c.canal}>
+                  {c.canal} ({c.total})
                 </SelectItem>
               ))}
-          </SelectContent>
-        </Select>
-        <Select value={canal} onValueChange={setCanal}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Canal de origem" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos os canais</SelectItem>
-            {(dados?.canais ?? []).map((c) => (
-              <SelectItem key={c.canal} value={c.canal}>
-                {c.canal} ({c.total})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-          {atualizadoEm
-            ? `Atualizado às ${atualizadoEm.toLocaleTimeString("pt-BR")}`
-            : ""}
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Atualizar agora"
-            title="Atualizar agora — a lista também se atualiza sozinha a cada 30s"
-            onClick={() => carregar(true)}
-          >
-            <RefreshCw className="size-4" />
-          </Button>
-        </span>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {erro ? (
@@ -507,12 +619,35 @@ export default function LeadsPage() {
                     onChange={alternarTodos}
                   />
                 </TableHead>
-                <TableHead>Lead</TableHead>
-                <TableHead>Pontuação</TableHead>
-                <TableHead>Qualificação</TableHead>
-                <TableHead>Etapa</TableHead>
-                <TableHead>Origem</TableHead>
-                <TableHead>Entrou em</TableHead>
+                {COLUNAS.map((c) => (
+                  <TableHead
+                    key={c.chave}
+                    aria-sort={
+                      ordem.chave === c.chave
+                        ? ordem.direcao === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => alternarOrdem(c.chave)}
+                      className="inline-flex items-center gap-1 hover:text-foreground"
+                    >
+                      {c.rotulo}
+                      {ordem.chave === c.chave ? (
+                        ordem.direcao === "asc" ? (
+                          <ArrowUp className="size-3" />
+                        ) : (
+                          <ArrowDown className="size-3" />
+                        )
+                      ) : (
+                        <ChevronsUpDown className="size-3 opacity-40" />
+                      )}
+                    </button>
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -607,7 +742,7 @@ export default function LeadsPage() {
                       </p>
                     ) : null}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
                     {formatDate(lead.acquiredAt ?? lead.createdAt)}
                   </TableCell>
                 </TableRow>
