@@ -9,6 +9,7 @@ import {
   whatsappTemplates,
 } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
+import { internalizarImagensDoDesign } from "@/lib/uploads-externas";
 import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 import { parseVariableMap } from "@/lib/whatsapp/template-input";
 
@@ -108,8 +109,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         updates.design = null;
         updates.mjmlContent = null;
       } else if (isValidDesign(body.design)) {
-        updates.design = body.design;
-        updates.mjmlContent = compileDesignToMjml(body.design);
+        // Como na criação: nada de imagem de terceiro no que vai ser enviado.
+        const internalizado = await internalizarImagensDoDesign(body.design);
+        updates.design = internalizado.design;
+        updates.mjmlContent = compileDesignToMjml(internalizado.design);
         updates.editorType = "builder";
       } else {
         return NextResponse.json(

@@ -9,6 +9,7 @@ import {
   whatsappTemplates,
 } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
+import { internalizarImagensDoDesign } from "@/lib/uploads-externas";
 import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 import { parseVariableMap } from "@/lib/whatsapp/template-input";
 
@@ -104,8 +105,11 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      design = body.design;
-      mjmlContent = compileDesignToMjml(body.design);
+      // Imagem hospedada fora vira imagem nossa antes de a campanha existir:
+      // depois do disparo não há como consertar um endereço que caiu.
+      const internalizado = await internalizarImagensDoDesign(body.design);
+      design = internalizado.design;
+      mjmlContent = compileDesignToMjml(design);
       editorType = "builder";
     }
 

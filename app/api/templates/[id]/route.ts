@@ -3,6 +3,11 @@ import { eq } from "drizzle-orm";
 
 import { getDb, templates } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
+import {
+  internalizarImagensDoDesign,
+  internalizarImagensDoHtml,
+  type RelatorioImagens,
+} from "@/lib/uploads-externas";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +60,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           ? body.category
           : null;
     }
+    // Como na criação: o que é de fora passa a ser nosso antes de virar
+    // template salvo (ver internalizarImagens*).
+    let imagens: RelatorioImagens = { baixadas: 0, falhas: [] };
+
     if (body.design !== undefined && body.design !== null) {
       if (!isValidDesign(body.design)) {
         return NextResponse.json(
@@ -62,9 +71,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           { status: 400 }
         );
       }
-      updates.design = body.design;
+      const internalizado = await internalizarImagensDoDesign(body.design);
+      imagens = internalizado.relatorio;
+      updates.design = internalizado.design;
       updates.editorType = "builder";
-      updates.mjmlContent = compileDesignToMjml(body.design);
+      updates.mjmlContent = compileDesignToMjml(internalizado.design);
     } else if (typeof body.mjmlContent === "string") {
       if (!body.mjmlContent.trim()) {
         return NextResponse.json(
@@ -72,7 +83,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           { status: 400 }
         );
       }
-      updates.mjmlContent = body.mjmlContent;
+      const internalizado = await internalizarImagensDoHtml(body.mjmlContent);
+      imagens = internalizado.relatorio;
+      updates.mjmlContent = internalizado.html;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -95,7 +108,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
-    return NextResponse.json(updated);
+    return NextResponse.json({ ...updated, imagens });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

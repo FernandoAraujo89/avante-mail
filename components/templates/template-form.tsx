@@ -7,6 +7,7 @@ import { Eye, MousePointerClick, Save } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { TestSendButton } from "@/components/templates/test-send-button";
+import { descreverRelatorioDeImagens } from "@/lib/imagens-relatorio";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -96,6 +97,16 @@ export function TemplateForm({
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao salvar template.");
+      // O salvamento traz para o servidor as imagens hospedadas fora. Quando
+      // alguma não veio, a pessoa fica aqui para ler o motivo — o código na
+      // tela já está salvo, e a imagem de fora é entrega em risco.
+      if (json.imagens?.falhas?.length) {
+        setError(
+          `Template salvo. ${descreverRelatorioDeImagens(json.imagens)}`
+        );
+        setSaving(false);
+        return;
+      }
       router.push("/templates");
       router.refresh();
     } catch (err) {

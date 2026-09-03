@@ -3,6 +3,11 @@ import { desc } from "drizzle-orm";
 
 import { getDb, templates } from "@/lib/db";
 import { compileDesignToMjml, isValidDesign } from "@/lib/email-builder/compile";
+import {
+  internalizarImagensDoDesign,
+  internalizarImagensDoHtml,
+  type RelatorioImagens,
+} from "@/lib/uploads-externas";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +48,10 @@ export async function POST(request: NextRequest) {
     let design = null;
     let editorType: "builder" | "code" = "code";
 
+    // Imagem de outro domínio vira imagem nossa antes de o template existir:
+    // o e-mail não pode depender de um site que amanhã sai do ar.
+    let imagens: RelatorioImagens = { baixadas: 0, falhas: [] };
+
     if (body.design !== undefined && body.design !== null) {
       if (!isValidDesign(body.design)) {
         return NextResponse.json(
@@ -50,9 +59,15 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      design = body.design;
+      const internalizado = await internalizarImagensDoDesign(body.design);
+      design = internalizado.design;
+      imagens = internalizado.relatorio;
       editorType = "builder";
-      mjmlContent = compileDesignToMjml(body.design);
+      mjmlContent = compileDesignToMjml(design);
+    } else if (mjmlContent.trim()) {
+      const internalizado = await internalizarImagensDoHtml(mjmlContent);
+      mjmlContent = internalizado.html;
+      imagens = internalizado.relatorio;
     }
 
     if (!mjmlContent.trim()) {
@@ -67,7 +82,7 @@ export async function POST(request: NextRequest) {
       .values({ name, category, mjmlContent, design, editorType })
       .returning();
 
-    return NextResponse.json(created, { status: 201 });
+    return NextResponse.json({ ...created, imagens }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

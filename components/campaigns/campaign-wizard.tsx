@@ -54,6 +54,7 @@ import type { CampaignChannel } from "@/lib/db/schema";
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
 import { importarHtmlParaDesign } from "@/lib/email-builder/importar";
 import { materializeDesignForEditing } from "@/lib/email-builder/materialize";
+import { descreverRelatorioDeImagens } from "@/lib/imagens-relatorio";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EditorType, EmailDesign } from "@/lib/email-builder/types";
 import { formatBrl, listsLabel } from "@/lib/format";
@@ -509,13 +510,10 @@ export function CampaignWizard({
     }
     setImportingModelId(model.id);
     try {
-      const res = await fetch("/api/templates/preview", {
+      const res = await fetch("/api/templates/importar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mjml: model.mjmlContent,
-          manterVariaveis: true,
-        }),
+        body: JSON.stringify({ templateId: model.id }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao abrir o modelo.");
@@ -526,6 +524,9 @@ export function CampaignWizard({
         templateId: model.id,
         editorType: "builder",
       });
+      // As imagens que vinham de outros sites já foram salvas no servidor
+      // pelo import; o que não veio precisa ser dito antes do disparo.
+      setModelMessage(descreverRelatorioDeImagens(json.imagens));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

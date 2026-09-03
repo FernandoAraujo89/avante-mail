@@ -26,6 +26,7 @@ import {
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
 import { importarHtmlParaDesign } from "@/lib/email-builder/importar";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
+import { descreverRelatorioDeImagens } from "@/lib/imagens-relatorio";
 import type { EmailDesign } from "@/lib/email-builder/types";
 
 export function EmailBuilder({ templateId }: { templateId?: string }) {
@@ -62,15 +63,12 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
         }
 
         // Template escrito como código: em vez de recusar a abrir, importa.
-        // Compila no servidor (mesmo caminho do envio) mantendo as variáveis,
-        // e quebra o resultado em seções editáveis.
-        const res2 = await fetch("/api/templates/preview", {
+        // O servidor compila pelo mesmo caminho do envio, mantém as variáveis
+        // e traz as imagens de outros domínios para o banco de imagens.
+        const res2 = await fetch("/api/templates/importar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mjml: json.mjmlContent ?? "",
-            manterVariaveis: true,
-          }),
+          body: JSON.stringify({ templateId }),
         });
         const compilado = await res2.json();
         if (!res2.ok) {
@@ -80,7 +78,12 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
         }
         setDesign(importarHtmlParaDesign(compilado.html));
         setAviso(
-          "Este template foi criado como código e foi aberto no criador visual: cada seção do e-mail virou uma estrutura editável. Ao salvar, ele passa a ser um template do criador."
+          [
+            "Este template foi criado como código e foi aberto no criador visual: cada seção do e-mail virou uma estrutura editável. Ao salvar, ele passa a ser um template do criador.",
+            descreverRelatorioDeImagens(compilado.imagens),
+          ]
+            .filter(Boolean)
+            .join(" ")
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -138,6 +141,14 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao salvar template.");
+      // Se o salvamento trouxe imagens de fora (ou não conseguiu), a pessoa
+      // fica na tela para ler o que aconteceu antes de ir embora.
+      const sobreImagens = descreverRelatorioDeImagens(json.imagens);
+      if (json.imagens?.falhas?.length) {
+        setAviso(`Template salvo. ${sobreImagens}`);
+        setSaving(false);
+        return;
+      }
       router.push("/templates");
       router.refresh();
     } catch (err) {
