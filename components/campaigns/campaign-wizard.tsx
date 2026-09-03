@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -52,6 +52,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { CampaignChannel } from "@/lib/db/schema";
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
+import { importarHtmlParaDesign } from "@/lib/email-builder/importar";
 import { materializeDesignForEditing } from "@/lib/email-builder/materialize";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EditorType, EmailDesign } from "@/lib/email-builder/types";
@@ -197,25 +198,39 @@ export function CampaignWizard({
   const [testFailed, setTestFailed] = useState(false);
 
   // "Salvar como novo modelo"
+  const [importingModelId, setImportingModelId] = useState<string | null>(null);
   const [saveModelOpen, setSaveModelOpen] = useState(false);
   const [modelName, setModelName] = useState("");
   const [savingModel, setSavingModel] = useState(false);
   const [modelMessage, setModelMessage] = useState("");
 
-  // Carrega os modelos disponíveis (templates com design editável).
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/templates");
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar modelos.");
-        setTemplates(json);
-      } catch (err) {
-        setTemplates([]);
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
+  // Carrega os modelos disponíveis.
+  //
+  // `no-store` porque a lista muda FORA daqui: quem acabou de criar um template
+  // em outra aba volta ao wizard e precisa vê-lo. Com a resposta em cache do
+  // navegador, o modelo novo só aparecia recarregando a página.
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/templates", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao carregar modelos.");
+      setTemplates(json);
+    } catch (err) {
+      setTemplates([]);
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }, []);
+
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
+
+  // Ao chegar na escolha do modelo, busca de novo: é o momento em que a lista
+  // desatualizada custa caro.
+  useEffect(() => {
+    if (step === 2 && data.channel === "email") loadTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, data.channel]);
 
   // Listas disponíveis para segmentar os destinatários. As de LEADS ficam de
   // fora: campanha é de parceiro, cliente e colaborador, então oferecer a lista
@@ -354,9 +369,15 @@ export function CampaignWizard({
     });
   }, [selectedWaTemplate, data.whatsappVariables]);
 
-  // Modelos que podem ser abertos no Criador (têm design).
-  const editableModels = useMemo(
-    () => (templates ?? []).filter((t) => t.editorType === "builder" && t.design),
+  // Todos os modelos entram na galeria. Os de código não ficam de fora: eles
+  // são importados para o Criador na hora de usar (cada seção do e-mail vira
+  // uma estrutura editável) — antes, um template escrito em HTML simplesmente
+  // não aparecia como opção de campanha.
+  const availableModels = useMemo(
+    () =>
+      (templates ?? []).filter((t) =>
+        t.editorType === "builder" ? Boolean(t.design) : Boolean(t.mjmlContent)
+      ),
     [templates]
   );
 
@@ -474,14 +495,42 @@ export function CampaignWizard({
   }
 
   // Usa um modelo como ponto de partida: copia o design (materializado).
-  function pickModel(model: TemplateDto) {
-    if (!model.design) return;
-    update({
-      design: materializeDesignForEditing(model.design),
-      templateId: model.id,
-      editorType: "builder",
-    });
+  // Modelo de código não tem design — compila-se o MJML/HTML no servidor
+  // (mantendo as variáveis) e importa-se o resultado em seções editáveis.
+  async function pickModel(model: TemplateDto) {
     setError("");
+    if (model.design) {
+      update({
+        design: materializeDesignForEditing(model.design),
+        templateId: model.id,
+        editorType: "builder",
+      });
+      return;
+    }
+    setImportingModelId(model.id);
+    try {
+      const res = await fetch("/api/templates/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mjml: model.mjmlContent,
+          manterVariaveis: true,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao abrir o modelo.");
+      update({
+        design: materializeDesignForEditing(
+          importarHtmlParaDesign(json.html)
+        ),
+        templateId: model.id,
+        editorType: "builder",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImportingModelId(null);
+    }
   }
 
   function startFromScratch() {
@@ -685,8 +734,7 @@ export function CampaignWizard({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao salvar o modelo.");
       // Recarrega a lista de modelos para o novo aparecer na galeria.
-      const listRes = await fetch("/api/templates");
-      if (listRes.ok) setTemplates(await listRes.json());
+      await loadTemplates();
       update({ templateId: json.id });
       setSaveModelOpen(false);
       setModelName("");
@@ -1066,14 +1114,20 @@ export function CampaignWizard({
             </p>
           ) : (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  Escolha um modelo para começar
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  O modelo é só o ponto de partida — no passo seguinte você edita
-                  todo o layout livremente.
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    Escolha um modelo para começar
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    O modelo é só o ponto de partida — no passo seguinte você
+                    edita todo o layout livremente.
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={loadTemplates}>
+                  <RotateCcw />
+                  Atualizar lista
+                </Button>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1089,30 +1143,39 @@ export function CampaignWizard({
                   </span>
                 </button>
 
-                {editableModels.map((model) => (
+                {availableModels.map((model) => (
                   <button
                     key={model.id}
                     type="button"
                     onClick={() => pickModel(model)}
-                    className="flex min-h-32 flex-col justify-between rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary hover:bg-primary/5"
+                    disabled={importingModelId !== null}
+                    className="flex min-h-32 flex-col justify-between rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:opacity-60"
                   >
                     <div className="flex items-start gap-2">
                       <LayoutTemplate className="mt-0.5 size-5 shrink-0 text-primary" />
                       <p className="font-medium">{model.name}</p>
                     </div>
-                    {model.category ? (
-                      <Badge variant="outline" className="mt-3 w-fit">
-                        {model.category}
-                      </Badge>
-                    ) : null}
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      {model.category ? (
+                        <Badge variant="outline">{model.category}</Badge>
+                      ) : null}
+                      {model.editorType === "builder" ? null : (
+                        <Badge variant="outline">Código</Badge>
+                      )}
+                      {importingModelId === model.id ? (
+                        <span className="text-xs text-muted-foreground">
+                          Abrindo no criador...
+                        </span>
+                      ) : null}
+                    </div>
                   </button>
                 ))}
               </div>
 
-              {editableModels.length === 0 ? (
+              {availableModels.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Nenhum modelo editável cadastrado ainda — comece do zero acima,
-                  ou crie modelos em Templates.
+                  Nenhum modelo cadastrado ainda — comece do zero acima, ou crie
+                  modelos em Templates.
                 </p>
               ) : null}
             </div>
@@ -1460,13 +1523,13 @@ export function CampaignWizard({
             effectiveRecipients !== null &&
             effectiveRecipients > waConfig.dailyLimit ? (
               <div className="rounded-lg border border-border bg-accent/50 px-4 py-3 text-sm">
-                Atenção: seu limite atual é de{" "}
+                Seu limite atual é de{" "}
                 <span className="font-medium">
                   {waConfig.dailyLimit} conversas/24h
                 </span>{" "}
-                e a campanha tem {effectiveRecipients} destinatários — o excedente
-                pode falhar no envio. Considere dividir por listas ou aguardar
-                o limite subir.
+                e a campanha tem {effectiveRecipients} destinatários — o
+                disparo será parcelado automaticamente: o que couber na janela
+                de hoje sai agora e o restante sai em lotes de 24 em 24 horas.
               </div>
             ) : null}
 

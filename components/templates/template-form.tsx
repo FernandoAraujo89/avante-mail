@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, Save } from "lucide-react";
+import { Eye, MousePointerClick, Save } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { TestSendButton } from "@/components/templates/test-send-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -112,6 +113,17 @@ export function TemplateForm({
         <Button variant="outline" asChild>
           <Link href="/templates">Cancelar</Link>
         </Button>
+        {isEditing ? (
+          // A ida para o criador visual só faz sentido com o template salvo:
+          // é de lá que o criador lê o código para importar.
+          <Button variant="outline" asChild>
+            <Link href={`/templates/builder?id=${templateId}`}>
+              <MousePointerClick />
+              Editar no criador visual
+            </Link>
+          </Button>
+        ) : null}
+        <TestSendButton mjmlContent={mjml} name={name} />
         <Button onClick={handleSave} disabled={saving || loading}>
           <Save />
           {saving ? "Salvando..." : "Salvar template"}

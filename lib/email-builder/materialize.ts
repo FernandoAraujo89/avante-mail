@@ -54,6 +54,10 @@ function materializeBlock(block: Block): Block {
 export function materializeRow(row: Row): Row {
   return {
     ...row,
+    // Linha com HTML próprio (o caso de um modelo importado de código) também
+    // carrega os tokens de conteúdo — sem isto, a campanha sairia com
+    // "{{corpo}}" impresso no lugar do texto.
+    ...(row.customHtml ? { customHtml: materializeString(row.customHtml) } : {}),
     columns: row.columns.map((col) => ({
       ...col,
       blocks: col.blocks.map(materializeBlock),
@@ -68,6 +72,9 @@ export function materializeRow(row: Row): Row {
 export function materializeDesignForEditing(design: EmailDesign): EmailDesign {
   return {
     ...design,
+    ...(design.customHtml
+      ? { customHtml: materializeString(design.customHtml) }
+      : {}),
     rows: design.rows.map(materializeRow),
   };
 }

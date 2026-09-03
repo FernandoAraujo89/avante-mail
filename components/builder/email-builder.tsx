@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Eye, Save } from "lucide-react";
 
 import { DesignEditor } from "@/components/builder/design-editor";
+import { TestSendButton } from "@/components/templates/test-send-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
+import { importarHtmlParaDesign } from "@/lib/email-builder/importar";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EmailDesign } from "@/lib/email-builder/types";
 
@@ -36,6 +38,7 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
   const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [previewHtml, setPreviewHtml] = useState("");
@@ -55,11 +58,30 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
         setCategory(json.category ?? "");
         if (json.design) {
           setDesign(json.design);
-        } else {
+          return;
+        }
+
+        // Template escrito como código: em vez de recusar a abrir, importa.
+        // Compila no servidor (mesmo caminho do envio) mantendo as variáveis,
+        // e quebra o resultado em seções editáveis.
+        const res2 = await fetch("/api/templates/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mjml: json.mjmlContent ?? "",
+            manterVariaveis: true,
+          }),
+        });
+        const compilado = await res2.json();
+        if (!res2.ok) {
           throw new Error(
-            "Este template foi criado como código e não pode ser aberto no criador visual."
+            compilado.error ?? "Erro ao abrir o template no criador visual."
           );
         }
+        setDesign(importarHtmlParaDesign(compilado.html));
+        setAviso(
+          "Este template foi criado como código e foi aberto no criador visual: cada seção do e-mail virou uma estrutura editável. Ao salvar, ele passa a ser um template do criador."
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setDesign(createDefaultDesign());
@@ -164,6 +186,7 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
             <Eye />
             Pré-visualizar
           </Button>
+          <TestSendButton design={design} name={name} />
           <Button onClick={handleSave} disabled={saving}>
             <Save />
             {saving ? "Salvando..." : "Salvar template"}
@@ -174,6 +197,12 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
       {error ? (
         <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
           {error}
+        </div>
+      ) : null}
+
+      {aviso ? (
+        <div className="mb-4 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 text-sm text-primary">
+          {aviso}
         </div>
       ) : null}
 

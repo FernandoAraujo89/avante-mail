@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { Code2, Pencil } from "lucide-react";
 import { desc } from "drizzle-orm";
 
 import { DeleteButton } from "@/components/delete-button";
@@ -88,19 +88,25 @@ export default async function TemplatesPage() {
                   Criado em {formatDate(template.createdAt)}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex items-center gap-1">
+              <CardContent className="flex flex-wrap items-center gap-1">
+                {/* Editar abre sempre o criador visual — inclusive para os
+                    templates de código, que são importados em seções
+                    editáveis. Quem quer o código continua tendo o botão ao
+                    lado. */}
                 <Button variant="outline" size="sm" asChild>
-                  <Link
-                    href={
-                      template.editorType === "builder"
-                        ? `/templates/builder?id=${template.id}`
-                        : `/templates/new?id=${template.id}`
-                    }
-                  >
+                  <Link href={`/templates/builder?id=${template.id}`}>
                     <Pencil />
                     Editar
                   </Link>
                 </Button>
+                {template.editorType === "builder" ? null : (
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href={`/templates/new?id=${template.id}`}>
+                      <Code2 />
+                      Código
+                    </Link>
+                  </Button>
+                )}
                 <DeleteButton
                   endpoint={`/api/templates/${template.id}`}
                   title="Excluir template"

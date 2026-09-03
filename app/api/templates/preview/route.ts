@@ -25,7 +25,12 @@ export async function POST(request: NextRequest) {
         : {}),
     };
 
-    const rendered = renderVariables(mjml, variables);
+    // `manterVariaveis` serve ao IMPORT para o criador visual: ali o HTML vai
+    // ser guardado como template, e substituir {{corpo}} pelos dados de
+    // exemplo gravaria o exemplo dentro do modelo para sempre.
+    const rendered = body.manterVariaveis
+      ? mjml
+      : renderVariables(mjml, variables);
     const { html, errors } = await compileEmailContent(rendered);
 
     return NextResponse.json({ html, errors });
