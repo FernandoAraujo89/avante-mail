@@ -573,6 +573,12 @@ export function DesignEditor({
             onUpdateBlock={handleUpdateBlock}
             onUpdateRowAttrs={handleUpdateRowAttrs}
             onUpdateSettings={handleUpdateSettings}
+            onUpdateRowHtml={(rowId, html) =>
+              apply((d) => setRowCustomHtml(d, rowId, html))
+            }
+            onUpdateBlockHtml={(blockId, html) =>
+              apply((d) => setBlockCustomHtml(d, blockId, html))
+            }
             onClearSelection={() => setSelection(null)}
             onDragChange={setDrag}
           />

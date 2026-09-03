@@ -34,6 +34,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  listarImagensDoHtml,
+  trocarImagemNoHtml,
+} from "@/lib/email-builder/imagens-do-html";
 import { findBlock } from "@/lib/email-builder/ops";
 import {
   BLOCK_LABELS,
@@ -700,6 +704,8 @@ export function BuilderSidebar({
   onUpdateBlock,
   onUpdateRowAttrs,
   onUpdateSettings,
+  onUpdateRowHtml,
+  onUpdateBlockHtml,
   onClearSelection,
   onDragChange,
 }: {
@@ -713,6 +719,10 @@ export function BuilderSidebar({
   onUpdateBlock: (blockId: string, updater: (block: Block) => Block) => void;
   onUpdateRowAttrs: (rowId: string, patch: Partial<Row["attrs"]>) => void;
   onUpdateSettings: (patch: Partial<DesignSettings>) => void;
+  /** HTML próprio da estrutura, quando o painel o edita (troca de imagem). */
+  onUpdateRowHtml: (rowId: string, html: string) => void;
+  /** Idem para o HTML próprio de um bloco. */
+  onUpdateBlockHtml: (blockId: string, html: string) => void;
   onClearSelection: () => void;
   onDragChange: (drag: DragState | null) => void;
 }) {
@@ -832,6 +842,14 @@ export function BuilderSidebar({
                   onUpdateBlock(selectedBlock.block.id, updater)
                 }
               />
+              {selectedBlock.block.customHtml?.trim() ? (
+                <ImagensDoCodigo
+                  html={selectedBlock.block.customHtml}
+                  onChange={(html) =>
+                    onUpdateBlockHtml(selectedBlock.block.id, html)
+                  }
+                />
+              ) : null}
             </div>
           </div>
         ) : selectedRow ? (
@@ -852,6 +870,12 @@ export function BuilderSidebar({
                 row={selectedRow}
                 onUpdate={(patch) => onUpdateRowAttrs(selectedRow.id, patch)}
               />
+              {selectedRow.customHtml?.trim() ? (
+                <ImagensDoCodigo
+                  html={selectedRow.customHtml}
+                  onChange={(html) => onUpdateRowHtml(selectedRow.id, html)}
+                />
+              ) : null}
             </div>
             <div className="border-t border-border">
               <Section
@@ -1002,6 +1026,77 @@ function AvisoDeCodigoProprio({ o }: { o: "bloco" | "estrutura" }) {
       aplicados direto no código, e o texto segue editável no e-mail. Para
       mudar a estrutura do código — ou voltar ao gerado — use o botão{" "}
       <span className="font-medium">{rotulo}</span>, acima do e-mail.
+    </div>
+  );
+}
+
+/**
+ * Trocar imagem dentro de um pedaço com HTML próprio.
+ *
+ * É o conserto mais pedido de um e-mail importado: a arte vinha por link de
+ * outro site, o link caiu, e sem isto a única saída seria editar o código.
+ * Cada imagem do código aparece aqui com a mesma escolha do bloco de imagem —
+ * banco de imagens, envio de arquivo ou endereço digitado.
+ */
+function ImagensDoCodigo({
+  html,
+  onChange,
+}: {
+  html: string;
+  onChange: (html: string) => void;
+}) {
+  const imagens = useMemo(() => listarImagensDoHtml(html), [html]);
+  if (imagens.length === 0) return null;
+
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Imagens deste código
+      </p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Troque a arte sem mexer no HTML. O resto do código fica como está.
+      </p>
+      <div className="grid gap-4">
+        {imagens.map((imagem) => (
+          <div
+            key={imagem.indice}
+            className="rounded-lg border border-border p-3"
+          >
+            <div className="mb-2 flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imagem.src}
+                alt=""
+                className="size-10 shrink-0 rounded border border-border object-contain"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium">
+                  {imagem.alt || `Imagem ${imagem.indice + 1}`}
+                </p>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {imagem.src || "(sem endereço)"}
+                </p>
+              </div>
+            </div>
+            <ImageUploadControl
+              onPick={(url) =>
+                onChange(trocarImagemNoHtml(html, imagem.indice, url))
+              }
+            />
+            <Field label="Endereço da imagem">
+              <Input
+                defaultValue={imagem.src}
+                onBlur={(e) =>
+                  e.target.value !== imagem.src &&
+                  onChange(
+                    trocarImagemNoHtml(html, imagem.indice, e.target.value)
+                  )
+                }
+              />
+            </Field>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
