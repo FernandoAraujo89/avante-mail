@@ -52,7 +52,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { CampaignChannel } from "@/lib/db/schema";
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
-import { importarHtmlParaDesign } from "@/lib/email-builder/importar";
+import {
+  descreverImportacao,
+  importarHtmlParaDesign,
+} from "@/lib/email-builder/importar";
 import { materializeDesignForEditing } from "@/lib/email-builder/materialize";
 import { descreverRelatorioDeImagens } from "@/lib/imagens-relatorio";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
@@ -517,16 +520,19 @@ export function CampaignWizard({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao abrir o modelo.");
+      const importado = importarHtmlParaDesign(json.html);
       update({
-        design: materializeDesignForEditing(
-          importarHtmlParaDesign(json.html)
-        ),
+        design: materializeDesignForEditing(importado.design),
         templateId: model.id,
         editorType: "builder",
       });
-      // As imagens que vinham de outros sites já foram salvas no servidor
-      // pelo import; o que não veio precisa ser dito antes do disparo.
-      setModelMessage(descreverRelatorioDeImagens(json.imagens));
+      // O que virou bloco e o que não virou, mais as imagens que já foram
+      // salvas no servidor pelo import — tudo antes do disparo.
+      setModelMessage(
+        [descreverImportacao(importado), descreverRelatorioDeImagens(json.imagens)]
+          .filter(Boolean)
+          .join(" ")
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

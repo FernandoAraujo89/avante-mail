@@ -24,7 +24,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { compileDesignToMjml } from "@/lib/email-builder/compile";
-import { importarHtmlParaDesign } from "@/lib/email-builder/importar";
+import {
+  descreverImportacao,
+  importarHtmlParaDesign,
+} from "@/lib/email-builder/importar";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import { descreverRelatorioDeImagens } from "@/lib/imagens-relatorio";
 import type { EmailDesign } from "@/lib/email-builder/types";
@@ -76,10 +79,13 @@ export function EmailBuilder({ templateId }: { templateId?: string }) {
             compilado.error ?? "Erro ao abrir o template no criador visual."
           );
         }
-        setDesign(importarHtmlParaDesign(compilado.html));
+        const importado = importarHtmlParaDesign(compilado.html);
+        setDesign(importado.design);
         setAviso(
           [
-            "Este template foi criado como código e foi aberto no criador visual: cada seção do e-mail virou uma estrutura editável. Ao salvar, ele passa a ser um template do criador.",
+            "Este template foi criado como código e foi aberto no criador visual.",
+            descreverImportacao(importado),
+            "Ao salvar, ele passa a ser um template do criador.",
             descreverRelatorioDeImagens(compilado.imagens),
           ]
             .filter(Boolean)
