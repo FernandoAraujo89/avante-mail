@@ -19,7 +19,10 @@ import {
   resolverEtapa,
 } from "@/lib/leads/etapas";
 import { resolverQualificacao } from "@/lib/leads/qualificacoes";
-import { costurarVisitante } from "@/lib/track/costura";
+import {
+  costurarVisitante,
+  type ResultadoDaCostura,
+} from "@/lib/track/costura";
 import { visitanteSeguro } from "@/lib/track/site";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, normalizeTags } from "@/lib/utils";
@@ -298,6 +301,27 @@ export async function processarEntrada(args: {
   let percursosEncerrados = 0;
   let convertidoPara: string | null = null;
 
+  // ── A COSTURA do rastreio (fase E.2) ─────────────────────────────────
+  // O formulário trouxe a identidade anônima do navegador: as visitas de
+  // ANTES deste momento viram linha do tempo do lead — com a data original,
+  // para o score decair certo. Roda assim que o contato existe e ANTES dos
+  // eventos da entrega (fase 1.5): o primeiro toque do site preenche a
+  // origem que o formulário não trouxe, e o evento de criação nasce sabendo.
+  // Em try próprio: uma falha aqui não pode derrubar a entrega do lead.
+  let visitasCosturadas = 0;
+  const visitanteDoSite = visitanteSeguro(campos.visitorId);
+  async function costurar(id: string): Promise<ResultadoDaCostura | null> {
+    if (!visitanteDoSite) return null;
+    try {
+      const resultado = await costurarVisitante(visitanteDoSite, id);
+      visitasCosturadas = resultado.eventos;
+      return resultado;
+    } catch (error) {
+      console.error("[webhook/entrada] costura do rastreio falhou:", error);
+      return null;
+    }
+  }
+
   if (existente) {
     acao = "atualizado";
     contactId = existente.id;
@@ -327,6 +351,10 @@ export async function processarEntrada(args: {
         tags: tagsDepois,
       })
       .where(eq(contacts.id, existente.id));
+
+    // Lead que já existia sem origem ganha a do primeiro toque; o evento de
+    // criação, que é passado, não é reescrito.
+    await costurar(existente.id);
 
     await emitTagDiff(existente.id, existente.tags, tagsDepois);
 
@@ -379,17 +407,27 @@ export async function processarEntrada(args: {
     contactId = criado.id;
     etapaAplicada = novo.stage ?? null;
 
+    // A costura vem ANTES do evento de criação: se o formulário não disse de
+    // onde a pessoa veio, a primeira visita costurada pode dizer — e o
+    // evento precisa nascer já com a resposta, porque é ele que a regra
+    // "entrou como lead pelo Instagram" pontua.
+    const costura = await costurar(contactId);
+
     await emitContactEvent("contact_created", contactId, {
       origem: origem.slug,
-      canal: novo.sourceChannel ?? null,
+      // O canal cru da origem ou, na falta dele, o que a costura preencheu.
+      // Continua texto livre de propósito: uma automação pode estar casando
+      // com ele.
+      canal: novo.sourceChannel ?? costura?.preenchido?.sourceChannel ?? null,
       // A rede normalizada (fase E.3): "Instagram", "ig" e "l.instagram.com"
-      // viram `instagram`, que é o que a regra de pontuação compara. O `canal`
-      // acima continua cru de propósito — é texto livre da origem, e uma
-      // automação pode estar casando com ele. A UTM vem primeiro: o canal
-      // pode dizer "site" quando a UTM diz de qual rede a pessoa saiu.
+      // viram `instagram`, que é o que a regra de pontuação compara. A UTM
+      // vem primeiro: o canal pode dizer "site" quando a UTM diz de qual
+      // rede a pessoa saiu. Por último, o primeiro toque do site.
       fonte:
         fonteDoUtm(campos.utmSource) ??
-        fonteDe(campos.sourceChannel, campos.referrer),
+        fonteDe(campos.sourceChannel, campos.referrer) ??
+        costura?.primeiroToque?.fonte ??
+        null,
     });
     await emitTagDiff(contactId, [], tags);
 
@@ -398,21 +436,6 @@ export async function processarEntrada(args: {
         de: null,
         qualificacao,
       });
-    }
-  }
-
-  // ── A COSTURA do rastreio (fase E.2) ─────────────────────────────────
-  // O formulário trouxe a identidade anônima do navegador: as visitas de
-  // ANTES deste momento viram linha do tempo do lead agora — com a data
-  // original, para o score decair certo. Em try próprio: uma falha aqui não
-  // pode derrubar a entrega do lead.
-  let visitasCosturadas = 0;
-  const visitanteDoSite = visitanteSeguro(campos.visitorId);
-  if (visitanteDoSite) {
-    try {
-      visitasCosturadas = await costurarVisitante(visitanteDoSite, contactId);
-    } catch (error) {
-      console.error("[webhook/entrada] costura do rastreio falhou:", error);
     }
   }
 

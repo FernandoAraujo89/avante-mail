@@ -262,12 +262,41 @@ preciso API da Meta nem revisão de app.
   decide o resultado, e é operacional: sem UTM no link da bio, nos stories e
   nos anúncios, a regra nunca dispara.
 
-**Limite anotado (fase 1.5, não feita):** quem entra pelo Instagram, fecha, e
-dias depois preenche o formulário numa visita direta nasce como lead sem UTM.
-A visita antiga pontua pela costura, mas o `contact_created` fica sem fonte.
-Preencher o canal do lead com a fonte da primeira visita costurada é o passo
-seguinte. E comentário/DM por webhook da Meta (fase 3 da resposta) exige App
-Review — projeto próprio.
+**Fase 1.5 — o primeiro toque do site (04/09/2026).** Quem entra pelo
+Instagram, fecha, e dias depois preenche o formulário numa visita direta
+nascia como lead sem UTM: a visita antiga pontuava pela costura, mas a ficha
+e o `contact_created` ficavam sem fonte. Medido em produção antes de fazer:
+407 leads em 30 dias, 43 sem canal, 7 deles com pista na visita costurada.
+
+- `lib/track/primeiro-toque.ts` (puro): a visita costurada mais antiga que
+  carrega PISTA — UTM, ou referrer de fora. Visita direta não conta; referrer
+  do nosso próprio domínio (home → /produtos, blog → site) também não, senão
+  a aquisição seria atribuída a nós mesmos (`hostsPermitidos()` decide o que
+  é nosso, por sufixo de domínio).
+- A costura (`costurarVisitante`) passa a devolver o primeiro toque e a
+  **preencher só os campos vazios** da ficha a partir dele: canal (a fonte
+  normalizada, ou o utm_source cru), as cinco UTMs, referrer (o host) e
+  página de entrada (o caminho). Primeiro toque, e não último (§3): origem
+  gravada na entrada não é sobrescrita. Vale nos dois caminhos da costura —
+  formulário via webhook e clique de e-mail.
+- No webhook, a costura roda assim que o contato existe e ANTES do
+  `contact_created`, que nasce com `canal` e `fonte` vindos do site quando o
+  formulário não os trouxe — é o que faz "entrou como lead pelo Instagram"
+  valer nesse caso. Lead que já existia só ganha os campos vazios; o evento
+  antigo não é reescrito.
+- Backfill `scripts/migrate-score-fonte-visitas.ts`: estampa `fonte` nas
+  visitas anteriores à E.3 a partir do `refHost` (derivação pura), nas duas
+  tabelas de eventos de site, e o evento nomeado herda a fonte da visita da
+  mesma sessão. Referrer nosso ou sem rede conhecida (um `linktr.ee` sem UTM)
+  fica como está. Só linhas sem fonte são tocadas — idempotente sem
+  marcador. Leads afetados têm `lead_score_at` zerado.
+- **De propósito fora:** preencher retroativamente o canal dos leads antigos
+  a partir da visita costurada, e reescrever o `contact_created` deles. É
+  inferência, não derivação; fica como passo à parte se o time quiser.
+
+**Ainda não feito:** comentário/DM por webhook da Meta (fase 3 da resposta)
+exige App Review — projeto próprio. E o link da bio é um Linktree: sem UTM
+nos links dele, a visita chega como `linktr.ee` e não vira fonte.
 
 ### A regra que passou a valer (04/08/2026)
 
@@ -889,6 +918,7 @@ configura a URL, é desproporcional; fica registrado.
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
 | **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa ✅ |
 | **E.3** | A rede que trouxe a pessoa: UTM/referrer → `fonte` → regras por Instagram/Facebook | pequena ✅ |
+| **E.3 / 1.5** | O primeiro toque do site preenche a origem que o formulário não trouxe; backfill da fonte nas visitas antigas | pequena ✅ |
 | **F** | Passo `webhook` de saída (avisa o Make/CRM) | pequena ✅ |
 
 **A ordem importa.** A fase C vem **antes** do rastreio do site de propósito: o

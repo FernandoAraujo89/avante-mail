@@ -202,3 +202,14 @@ export function utmSegura(cru: unknown): Utm | null {
   }
   return Object.keys(saida).length > 0 ? saida : null;
 }
+
+/**
+ * Só os HOSTS das origens permitidas. É o que o primeiro toque (fase 1.5)
+ * usa para não atribuir a aquisição a nós mesmos quando o referrer é a nossa
+ * própria home ou o nosso blog.
+ */
+export function hostsPermitidos(): string[] {
+  return origensPermitidas()
+    .map((o) => o.replace(/^https?:\/\//, "").split("/")[0])
+    .filter(Boolean);
+}

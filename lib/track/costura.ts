@@ -5,8 +5,11 @@ import {
   contactEvents,
   contacts,
   getDb,
+  type NewContact,
 } from "@/lib/db";
 import { getSetting, setSetting } from "@/lib/settings";
+import { hostsPermitidos } from "@/lib/track/site";
+import { primeiroToque, type PrimeiroToque } from "@/lib/track/primeiro-toque";
 
 /**
  * A costura (fase E.2): o histórico anônimo de um visitante vira linha do
@@ -36,10 +39,36 @@ const MAX_EVENTOS_POR_COSTURA = 500;
 /** Retenção do anônimo: quem nunca virou lead expira. */
 export const RETENCAO_DIAS = 90;
 
+/** Os campos de origem que o primeiro toque pode preencher. */
+export type OrigemPreenchida = Partial<
+  Pick<
+    NewContact,
+    | "sourceChannel"
+    | "utmSource"
+    | "utmMedium"
+    | "utmCampaign"
+    | "utmContent"
+    | "utmTerm"
+    | "referrer"
+    | "landingPage"
+  >
+>;
+
+export interface ResultadoDaCostura {
+  /** Quantos eventos anônimos viraram linha do tempo. */
+  eventos: number;
+  /** A primeira visita com pista, quando alguma disse de onde veio. */
+  primeiroToque: PrimeiroToque | null;
+  /** O que estava vazio na ficha e foi preenchido a partir dela. */
+  preenchido: OrigemPreenchida | null;
+}
+
+const NADA: ResultadoDaCostura = { eventos: 0, primeiroToque: null, preenchido: null };
+
 export async function costurarVisitante(
   visitorId: string,
   contactId: string
-): Promise<number> {
+): Promise<ResultadoDaCostura> {
   const db = getDb();
 
   const eventos = await db
@@ -49,7 +78,7 @@ export async function costurarVisitante(
     .orderBy(asc(anonymousSiteEvents.createdAt))
     .limit(MAX_EVENTOS_POR_COSTURA);
 
-  if (eventos.length === 0) return 0;
+  if (eventos.length === 0) return NADA;
 
   // O `createdAt` ORIGINAL vai junto — a visita de três semanas atrás precisa
   // decair como uma visita de três semanas atrás, senão a costura fabricaria
@@ -89,7 +118,58 @@ export async function costurarVisitante(
   await incrementar(CHAVE_COSTURAS, 1);
   await incrementar(CHAVE_EVENTOS_COSTURADOS, eventos.length);
 
-  return eventos.length;
+  // O PRIMEIRO TOQUE (fase 1.5): a jornada acabou de ganhar dono, e a ficha
+  // pode estar sem origem — o formulário não trouxe UTM, ou a pessoa se
+  // identificou por um clique de e-mail. A visita mais antiga com pista
+  // responde de onde ela veio. Só preenche o que está vazio: origem gravada
+  // na entrada não é sobrescrita (§3 do plano, "primeiro toque").
+  const toque = primeiroToque(eventos, hostsPermitidos());
+  const preenchido = toque ? await preencherOrigem(contactId, toque) : null;
+
+  return { eventos: eventos.length, primeiroToque: toque, preenchido };
+}
+
+async function preencherOrigem(
+  contactId: string,
+  toque: PrimeiroToque
+): Promise<OrigemPreenchida | null> {
+  const db = getDb();
+  const [contato] = await db
+    .select({
+      sourceChannel: contacts.sourceChannel,
+      utmSource: contacts.utmSource,
+      utmMedium: contacts.utmMedium,
+      utmCampaign: contacts.utmCampaign,
+      utmContent: contacts.utmContent,
+      utmTerm: contacts.utmTerm,
+      referrer: contacts.referrer,
+      landingPage: contacts.landingPage,
+    })
+    .from(contacts)
+    .where(eq(contacts.id, contactId));
+  if (!contato) return null;
+
+  // O canal é a rede normalizada; sem rede reconhecida, o utm_source cru —
+  // a mesma regra do webhook (`sourceChannel ?? utmSource`). Referrer de
+  // fora sem rede conhecida (um linktr.ee sem UTM) fica só no referrer.
+  const canal = toque.fonte ?? toque.utm?.source ?? null;
+  const patch: OrigemPreenchida = {};
+  if (!contato.sourceChannel && canal) patch.sourceChannel = canal;
+  if (!contato.utmSource && toque.utm?.source) patch.utmSource = toque.utm.source;
+  if (!contato.utmMedium && toque.utm?.medium) patch.utmMedium = toque.utm.medium;
+  if (!contato.utmCampaign && toque.utm?.campaign) {
+    patch.utmCampaign = toque.utm.campaign;
+  }
+  if (!contato.utmContent && toque.utm?.content) patch.utmContent = toque.utm.content;
+  if (!contato.utmTerm && toque.utm?.term) patch.utmTerm = toque.utm.term;
+  if (!contato.referrer && toque.refHost) patch.referrer = toque.refHost;
+  // Da visita só existe o caminho; a ficha mostra "/produtos" no lugar da
+  // URL completa que o formulário mandaria. Legível, e sem inventar host.
+  if (!contato.landingPage && toque.path) patch.landingPage = toque.path;
+
+  if (Object.keys(patch).length === 0) return null;
+  await db.update(contacts).set(patch).where(eq(contacts.id, contactId));
+  return patch;
 }
 
 async function incrementar(chave: string, quanto: number): Promise<void> {
