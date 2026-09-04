@@ -2,9 +2,31 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Quando a tabela é mais larga que o espaço disponível, uma sombra some/aparece
+ * nas bordas conforme o scroll horizontal avança — sinal visual de que há mais
+ * colunas fora da tela, para a última coluna nunca parecer só "cortada".
+ */
+const SOMBRA_DE_SCROLL: React.CSSProperties = {
+  backgroundColor: "var(--color-card)",
+  backgroundImage:
+    "linear-gradient(to right, var(--color-card), var(--color-card)), " +
+    "linear-gradient(to left, var(--color-card), var(--color-card)), " +
+    "linear-gradient(to right, rgba(40,46,63,0.16), rgba(40,46,63,0)), " +
+    "linear-gradient(to left, rgba(40,46,63,0.16), rgba(40,46,63,0))",
+  backgroundPosition: "left center, right center, left center, right center",
+  backgroundRepeat: "no-repeat",
+  backgroundSize: "24px 100%, 24px 100%, 10px 100%, 10px 100%",
+  backgroundAttachment: "local, local, scroll, scroll",
+};
+
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto"
+      style={SOMBRA_DE_SCROLL}
+    >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}
