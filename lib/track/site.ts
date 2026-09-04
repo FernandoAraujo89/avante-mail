@@ -175,3 +175,30 @@ export function visitanteSeguro(cru: unknown): string | null {
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(limpo)) return null;
   return limpo;
 }
+
+/** Teto de cada valor de UTM. Campanha tem nome curto; acima disso é lixo. */
+export const MAX_UTM = 100;
+export const CHAVES_UTM = [
+  "source",
+  "medium",
+  "campaign",
+  "content",
+  "term",
+] as const;
+export type Utm = Partial<Record<(typeof CHAVES_UTM)[number], string>>;
+
+/**
+ * As UTMs da sessão, como o script as manda (fase E.3): só as cinco chaves
+ * conhecidas, cada valor saneado e com teto. Chave desconhecida é descartada —
+ * o objeto vem do navegador, e um POST forjado manda o que quiser. Vazio vira
+ * null: sem UTM não há o que guardar, e um `utm: {}` na ficha só confundiria.
+ */
+export function utmSegura(cru: unknown): Utm | null {
+  if (typeof cru !== "object" || cru === null || Array.isArray(cru)) return null;
+  const saida: Utm = {};
+  for (const chave of CHAVES_UTM) {
+    const valor = textoSeguro((cru as Record<string, unknown>)[chave], MAX_UTM);
+    if (valor) saida[chave] = valor;
+  }
+  return Object.keys(saida).length > 0 ? saida : null;
+}

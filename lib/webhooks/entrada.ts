@@ -10,6 +10,7 @@ import {
   webhookSources,
   type NewContact,
 } from "@/lib/db";
+import { fonteDe, fonteDoUtm } from "@/lib/leads/fonte";
 import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { resolveListaDeLeads } from "@/lib/leads";
@@ -381,6 +382,14 @@ export async function processarEntrada(args: {
     await emitContactEvent("contact_created", contactId, {
       origem: origem.slug,
       canal: novo.sourceChannel ?? null,
+      // A rede normalizada (fase E.3): "Instagram", "ig" e "l.instagram.com"
+      // viram `instagram`, que é o que a regra de pontuação compara. O `canal`
+      // acima continua cru de propósito — é texto livre da origem, e uma
+      // automação pode estar casando com ele. A UTM vem primeiro: o canal
+      // pode dizer "site" quando a UTM diz de qual rede a pessoa saiu.
+      fonte:
+        fonteDoUtm(campos.utmSource) ??
+        fonteDe(campos.sourceChannel, campos.referrer),
     });
     await emitTagDiff(contactId, [], tags);
 

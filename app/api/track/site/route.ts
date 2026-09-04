@@ -9,6 +9,7 @@ import {
   getDb,
   siteEventRules,
 } from "@/lib/db";
+import { fonteDe } from "@/lib/leads/fonte";
 import { clientIp, rateLimitAllow } from "@/lib/rate-limit";
 import { costurarVisitante } from "@/lib/track/costura";
 import {
@@ -27,6 +28,7 @@ import {
   visitanteSeguro,
   TAMANHO_MAXIMO_BYTES,
   textoSeguro,
+  utmSegura,
 } from "@/lib/track/site";
 import { precisaRenovar, signSiteToken, verifySiteToken } from "@/lib/track/token";
 
@@ -139,7 +141,7 @@ export async function POST(request: NextRequest) {
     return recusar(origem, "corpo-grande", `${cru.length} bytes`);
   }
 
-  let corpo: { t?: unknown; v?: unknown; s?: unknown; e?: unknown };
+  let corpo: { t?: unknown; v?: unknown; s?: unknown; u?: unknown; e?: unknown };
   try {
     corpo = JSON.parse(cru || "{}");
   } catch {
@@ -170,6 +172,11 @@ export async function POST(request: NextRequest) {
 
   const sessao = sessaoSegura(corpo.s);
   if (!sessao) return recusar(origem, "corpo-invalido", "sessão inválida");
+
+  // As UTMs da SESSÃO (fase E.3), uma vez por lote: o script as lê da página
+  // de entrada e as segura pela sessão inteira. Só as cinco chaves conhecidas
+  // sobrevivem — o objeto vem do navegador.
+  const utm = utmSegura(corpo.u);
 
   // Só objetos. Um `[null]` no lote derrubaria o handler com 500 no acesso a
   // `.path` — e o corpo vem do navegador, então "malformado" é o normal, não o
@@ -276,6 +283,12 @@ export async function POST(request: NextRequest) {
 
     const titulo = textoSeguro(bruto.titulo, MAX_TITULO);
     const refHost = hostDoReferrer(bruto.ref);
+    // De que rede a pessoa veio (lib/leads/fonte.ts). A UTM vence o referrer:
+    // o referrer some quando o aplicativo abre o link no navegador de fora, e
+    // a UTM é a única pista que sobrevive a isso. Vai como chave de TOPO do
+    // payload porque a condição da regra de pontuação compara chave a chave —
+    // `{"fonte":"instagram"}` é o que faz a visita valer 6 e não 3.
+    const fonte = fonteDe(utm?.source, refHost);
 
     if (bruto.tipo === "visita") {
       linhas.push({
@@ -288,6 +301,8 @@ export async function POST(request: NextRequest) {
           path,
           ...(titulo ? { titulo } : {}),
           ...(refHost ? { refHost } : {}),
+          ...(utm ? { utm } : {}),
+          ...(fonte ? { fonte } : {}),
         },
       });
 
@@ -300,7 +315,13 @@ export async function POST(request: NextRequest) {
       if (daPagina) {
         linhas.push({
           type: "site_event",
-          payload: { sessao, evento: daPagina, path, ...(titulo ? { titulo } : {}) },
+          payload: {
+            sessao,
+            evento: daPagina,
+            path,
+            ...(titulo ? { titulo } : {}),
+            ...(fonte ? { fonte } : {}),
+          },
         });
       }
       continue;
@@ -318,7 +339,13 @@ export async function POST(request: NextRequest) {
 
     linhas.push({
       type: "site_event",
-      payload: { sessao, evento: nome, path, ...(titulo ? { titulo } : {}) },
+      payload: {
+        sessao,
+        evento: nome,
+        path,
+        ...(titulo ? { titulo } : {}),
+        ...(fonte ? { fonte } : {}),
+      },
     });
   }
 

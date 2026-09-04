@@ -11,6 +11,7 @@ import {
   varianteDaQualificacao,
   type QualificacaoDto,
 } from "@/components/leads/qualificacoes";
+import { rotuloDaFonte } from "@/lib/leads/fonte";
 import { etapaPorSlug, listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { PageHeader } from "@/components/page-header";
@@ -89,14 +90,26 @@ function detalheDoEvento(
   // O caminho é o que o operador precisa ver; a URL completa não é guardada
   // (ela carregaria o próprio token de rastreio para dentro da tela).
   if (tipo === "site_visited") {
-    const de = payload.refHost ? ` · veio de ${payload.refHost}` : "";
+    // A rede, quando reconhecida (fase E.3); senão o host cru do referrer.
+    const de =
+      typeof payload.fonte === "string"
+        ? ` · veio do ${rotuloDaFonte(payload.fonte)}`
+        : payload.refHost
+          ? ` · veio de ${payload.refHost}`
+          : "";
     return `${payload.path ?? "—"}${de}`;
   }
   if (tipo === "site_event") {
     return `${payload.evento} · ${payload.path ?? "—"}`;
   }
   if (typeof payload.tag === "string") return payload.tag;
-  if (typeof payload.origem === "string") return `origem: ${payload.origem}`;
+  if (typeof payload.origem === "string") {
+    const pela =
+      typeof payload.fonte === "string"
+        ? ` · pelo ${rotuloDaFonte(payload.fonte)}`
+        : "";
+    return `origem: ${payload.origem}${pela}`;
+  }
   return null;
 }
 

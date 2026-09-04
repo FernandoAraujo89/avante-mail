@@ -224,6 +224,51 @@ um projeto próprio. E os formulários que vivem FORA do site (Respondi,
 formulário instantâneo do Meta) não têm como carregar o `av_visitante`; para
 esses leads a identificação continua vindo do primeiro clique de e-mail.
 
+### A rede que trouxe a pessoa (fase E.3, 04/09/2026)
+
+Migração: `scripts/migrate-score-fonte-social.ts`. Código: `lib/leads/fonte.ts`.
+
+A pergunta era "dá para pontuar quem visitou, curtiu ou comentou no
+Instagram?". A resposta continua a da seção 6.1: curtida, seguidor e visita ao
+perfil **não têm identidade** em nenhuma rede. O que dá para pontuar é quem
+**clica num link nosso** e chega ao site, ou vira lead — e para isso não é
+preciso API da Meta nem revisão de app.
+
+- O script (v3) lê as cinco `utm_*` da página de entrada e as segura na
+  **sessão** do navegador (`av_utm`, sessionStorage, mesmas regras de guarda da
+  sessão: só persiste depois do consentimento; um "não" apaga). Vão **uma vez
+  por lote** (`u`), não em cada evento — repetidas em 20 eventos estourariam o
+  teto do corpo.
+- A rota grava no payload de `site_visited` o objeto `utm` e uma chave de
+  TOPO `fonte`, normalizada (`instagram`, `facebook`, `tiktok`, `linkedin`,
+  `youtube`, `google`, `whatsapp`); `site_event` leva só a `fonte`. **UTM
+  vence referrer**: o referrer some quando o app abre o link no navegador de
+  fora, e a UTM é a única pista que sobrevive. "Instagram", "ig",
+  "instagram_bio" e "l.instagram.com" viram a mesma chave — `ig`, `fb` e
+  `msg` são o que o Meta Ads manda em `{{site_source_name}}`.
+- O webhook de entrada grava a mesma `fonte` no `contact_created` (UTM, senão
+  canal, senão referrer). O `canal` continua cru: é texto livre da origem e
+  uma automação pode estar casando com ele.
+- Quatro regras novas, editáveis em `/leads/pontuacao`: visita vinda do
+  Instagram/Facebook vale **o curinga + 3** e lead entrado pelo
+  Instagram/Facebook, **o curinga + 5** — com o plano intocado, 6 e 15. A
+  migração lê o curinga do banco na hora, e não um número fixo: em produção o
+  time subiu "visitou o site" para 10, e um 6 fixo faria a visita do
+  Instagram valer MENOS que uma visita qualquer (a condição vence sempre).
+  Lá ela entra com 13. A migração zera `lead_score_at` para o worker
+  repontuar todo mundo sem esperar a passagem diária.
+- A ficha mostra "veio do Instagram" na visita e "pelo Instagram" na entrada.
+  `/leads/rastreio` passou a instruir a convenção de UTM — é a parte que mais
+  decide o resultado, e é operacional: sem UTM no link da bio, nos stories e
+  nos anúncios, a regra nunca dispara.
+
+**Limite anotado (fase 1.5, não feita):** quem entra pelo Instagram, fecha, e
+dias depois preenche o formulário numa visita direta nasce como lead sem UTM.
+A visita antiga pontua pela costura, mas o `contact_created` fica sem fonte.
+Preencher o canal do lead com a fonte da primeira visita costurada é o passo
+seguinte. E comentário/DM por webhook da Meta (fase 3 da resposta) exige App
+Review — projeto próprio.
+
 ### A regra que passou a valer (04/08/2026)
 
 **Campanha é de parceiro, cliente e colaborador. Lead NUNCA entra — sem
@@ -535,12 +580,14 @@ Esta é a parte que precisa de honestidade antes de virar expectativa:
 | Visita ao site | ⚠️ **exige trabalho** | script no site + identificação (6.4) |
 | Evento no site (preço, demo, formulário) | ⚠️ mesmo mecanismo | evento nomeado pelo script |
 | **Visita ao Instagram** | ❌ **impossível por pessoa** | ver abaixo |
+| Clique em link nosso no Instagram/Facebook | ✅ **fase E.3** | `fonte` no `site_visited` e no `contact_created` (UTM, senão referrer) |
 
 **Sobre o Instagram:** nenhuma plataforma entrega "o lead Fulano visitou nosso
 perfil" — o Instagram não expõe isso, para ninguém. O que existe de real é:
 
 - **clique em link nosso** (link da bio passando pelo nosso redirecionador) → vira ponto de contato identificado;
-- **origem por UTM** (`utm_source=instagram`) → aquisição, já contemplada;
+- **origem por UTM** (`utm_source=instagram`) → aquisição, já contemplada — e,
+  desde a fase E.3, também a **visita** ao site com UTM ou referrer da rede;
 - **DM ou comentário**, se um cenário do Make empurrar esses eventos para o nosso webhook.
 
 Vale dizer isso ao time antes de prometerem "rastreamento de Instagram" a
@@ -557,6 +604,8 @@ Regras editáveis na tela, não no código:
 | Clicou em e-mail | +5 |
 | Respondeu no WhatsApp | +15 |
 | Visitou o site | +3 |
+| Visitou o site vindo do Instagram / Facebook (E.3) | curinga + 3 (6 no plano; 13 em produção) |
+| Entrou como lead pelo Instagram / Facebook (E.3) | curinga + 5 (15) |
 | Viu a página de preços | +10 |
 | Pediu demonstração | +25 |
 | Descadastrou | −30 |
@@ -637,10 +686,11 @@ filtrar o destino mandaria a identidade do lead para qualquer site linkado numa
 campanha, e o dono daquele site passaria a poder escrever na ficha dele. O
 token só é anexado para as origens configuradas.
 
-**3. O que é guardado de cada visita: `path`, `titulo`, `refHost`, `sessao`.**
-Nunca a URL completa — ela contém o nosso próprio `?av=`, e gravá-la colocaria
-um token que identifica o contato dentro de um evento que a ficha do lead
-mostra na tela. Do referrer, só o host.
+**3. O que é guardado de cada visita: `path`, `titulo`, `refHost`, `sessao`**
+— e, desde a fase E.3, `utm` (as cinco chaves, saneadas) e `fonte`. Nunca a
+URL completa — ela contém o nosso próprio `?av=`, e gravá-la colocaria um token
+que identifica o contato dentro de um evento que a ficha do lead mostra na
+tela. Do referrer, só o host.
 
 **4. Uma visita por SESSÃO, não por página.** Índice único parcial em
 `contact_events`. Sem isso, quem abre 20 páginas ganharia 20× os pontos e
@@ -838,6 +888,7 @@ configura a URL, é desproporcional; fica registrado.
 | **C** | **Lead Score sobre o que já é capturado** (e-mail, WhatsApp, entrada) + regras + decaimento + faixas | média |
 | **D** | Tela `/leads` + cadastro de origens + painel por canal | **a maior** |
 | **E** | Rastreio do site (script + identificação) — amplia a pontuação | média, com dependência externa ✅ |
+| **E.3** | A rede que trouxe a pessoa: UTM/referrer → `fonte` → regras por Instagram/Facebook | pequena ✅ |
 | **F** | Passo `webhook` de saída (avisa o Make/CRM) | pequena ✅ |
 
 **A ordem importa.** A fase C vem **antes** do rastreio do site de propósito: o

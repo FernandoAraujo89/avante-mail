@@ -28,7 +28,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
 (function () {
   "use strict";
 
-  var VERSAO = "2";
+  var VERSAO = "3";
   // Carga dupla é o cenário MAIS provável (tag no cabeçalho e no rodapé), e o
   // pior: duas cópias disputando o patch de history quebrariam a navegação do
   // site. A guarda vem antes de qualquer efeito colateral.
@@ -51,10 +51,17 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
   // um "não" que sumisse ao recarregar não seria um "não". Sem isto, bastava
   // um F5 — ou um clique num e-mail futuro — para o rastreio voltar sozinho.
   var CHAVE_RECUSA = "av_recusado";
+  // As UTMs da sessão (fase E.3): a pista de qual rede trouxe a pessoa. Vivem
+  // na sessão do navegador, e não só na página de entrada — quem chega pelo
+  // Instagram e navega até o formulário continua "vindo do Instagram" em todas
+  // as páginas do caminho. Mesmas regras de guarda da sessão: só saem da
+  // memória para o armazenamento depois do consentimento.
+  var CHAVE_UTM = "av_utm";
 
   var token = null;          // só em memória até haver consentimento
   var visitante = null;      // identidade anônima; mesmas regras de guarda
   var sessao = null;
+  var utm = null;            // as UTMs da sessão; mesmas regras de guarda
   var consentido = false;
   var recusado = false;      // "não" explícito: para de coletar, não só de enviar
   var fila = [];
@@ -122,6 +129,36 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
     return v.slice(0, 40);
   }
 
+  // ── As UTMs da URL (fase E.3) ─────────────────────────────────────────
+  // Lê para a MEMÓRIA, sem limpar a URL: as UTMs são do site (a analítica
+  // dele depende delas) e não identificam pessoa. Uma URL com UTM substitui a
+  // guardada — é outra campanha entrando na mesma aba.
+  function capturarUtm() {
+    if (recusado) return;
+    try {
+      var url = new URL(window.location.href);
+      var chaves = ["source", "medium", "campaign", "content", "term"];
+      var lidas = null;
+      for (var i = 0; i < chaves.length; i++) {
+        var valor = url.searchParams.get("utm_" + chaves[i]);
+        if (valor && valor.trim()) {
+          lidas = lidas || {};
+          lidas[chaves[i]] = valor.trim().slice(0, 100);
+        }
+      }
+      if (lidas) { utm = lidas; log("utm capturada", lidas.source); }
+    } catch (e) {}
+  }
+  function lerUtm() {
+    try {
+      var cru = ler(CHAVE_UTM, true);
+      return cru ? JSON.parse(cru) : null;
+    } catch (e) { return null; }
+  }
+  function gravarUtm() {
+    if (utm) gravar(CHAVE_UTM, JSON.stringify(utm), true);
+  }
+
   // ── Captura do token vindo do e-mail ──────────────────────────────────
   // Lê o ?av= para a MEMÓRIA e limpa a URL na mesma volta. Limpar não é
   // detalhe: sem isso o visitante copia a barra de endereço e manda no grupo
@@ -160,6 +197,9 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       t: token || undefined,
       v: visitante || undefined,
       s: sessao,
+      // As UTMs vão UMA vez por lote, e não em cada evento: são da sessão, e
+      // repetidas em 20 eventos estourariam o teto do corpo no servidor.
+      u: utm || undefined,
       e: lote
     });
 
@@ -270,6 +310,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       if (token) gravar(CHAVE_TOKEN, token);
       if (visitante) gravar(CHAVE_VISITANTE, visitante);
       if (sessao) gravar(CHAVE_SESSAO, sessao, true);
+      gravarUtm();
       log("consentimento concedido");
       enviar(false);
     } else {
@@ -288,6 +329,8 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       apagar(CHAVE_TOKEN);
       apagar(CHAVE_VISITANTE);
       apagar(CHAVE_SESSAO, true);
+      utm = null;
+      apagar(CHAVE_UTM, true);
       log("consentimento revogado");
     }
   }
@@ -306,7 +349,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       if (acao === "debug") { depurar = args[0] !== false; return log("debug ligado"); }
       if (acao === "visitante") return consentido ? visitante : null;
       if (acao === "estado") {
-        return { versao: VERSAO, identificado: !!token, visitante: !!visitante, consentido: consentido, fila: fila.length };
+        return { versao: VERSAO, identificado: !!token, visitante: !!visitante, consentido: consentido, utm: !!utm, fila: fila.length };
       }
     } catch (e) {}
   }
@@ -316,6 +359,9 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
     if (!token) token = ler(CHAVE_TOKEN);
     visitante = ler(CHAVE_VISITANTE) || novoVisitante();
     sessao = ler(CHAVE_SESSAO, true) || novaSessao();
+    // A UTM da URL (já em memória) vence a guardada; sem UTM na URL, a da
+    // sessão continua valendo nas páginas seguintes.
+    if (!utm) utm = lerUtm();
 
     // Legítimo interesse: já nasce coletando — MENOS para quem recusou antes
     // (o "não" é persistido e vale para sempre neste navegador) e menos sob
@@ -328,6 +374,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
       if (token) gravar(CHAVE_TOKEN, token);
       gravar(CHAVE_VISITANTE, visitante);
       gravar(CHAVE_SESSAO, sessao, true);
+      gravarUtm();
     }
 
     // ── Formulários (fase E.2) ────────────────────────────────────────
@@ -417,6 +464,7 @@ export function corpoDoScript(baseLegal: BaseLegal = "consentimento"): string {
     // mesmo com recusa: ali dentro ela decide não guardar o token, mas a
     // limpeza da URL vale para os dois casos.
     capturarToken();
+    capturarUtm();
 
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", ligar);

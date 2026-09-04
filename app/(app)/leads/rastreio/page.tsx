@@ -530,6 +530,39 @@ export default function RastreioPage() {
               do site e rode{" "}
               <code className="rounded bg-muted px-1">av(&apos;debug&apos;, true)</code>.
             </p>
+
+            {/* A pista de qual rede trouxe a pessoa (fase E.3) é a UTM do
+                link — o referrer some quando o aplicativo abre o link no
+                navegador de fora. Sem a convenção, a regra "veio do
+                Instagram" nunca dispara, e ninguém entende por quê. */}
+            <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <p className="font-medium text-foreground">
+                3. Links nas redes, sempre com UTM
+              </p>
+              <p className="mt-1">
+                O script lê as UTMs da página de entrada e as guarda pela
+                sessão inteira. É o que faz a pontuação saber que a visita
+                veio do Instagram ou do Facebook — o referrer some quando o
+                aplicativo abre o link no navegador de fora.
+              </p>
+              <p className="mt-1">
+                Na bio, nos stories e nos anúncios, use{" "}
+                <code className="rounded bg-muted px-1">utm_source=instagram</code>{" "}
+                ou{" "}
+                <code className="rounded bg-muted px-1">utm_source=facebook</code>.
+                No Meta Ads,{" "}
+                <code className="rounded bg-muted px-1">
+                  utm_source={"{{site_source_name}}"}
+                </code>{" "}
+                manda <code className="rounded bg-muted px-1">ig</code> e{" "}
+                <code className="rounded bg-muted px-1">fb</code>, que também
+                são reconhecidos.{" "}
+                <code className="rounded bg-muted px-1">utm_medium</code> diz
+                onde estava o link (bio, story, post, reels, ads) e{" "}
+                <code className="rounded bg-muted px-1">utm_campaign</code>{" "}
+                nomeia a campanha.
+              </p>
+            </div>
           </CardContent>
         </Card>
 

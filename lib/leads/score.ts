@@ -95,6 +95,39 @@ export const REGRAS_PADRAO: {
     description: "Pediu contato no site",
     condition: { evento: "contato" },
   },
+  // ── Fase E.3: a rede que trouxe a pessoa ────────────────────────────
+  //
+  // `fonte` é a chave normalizada que a rota de coleta e o webhook gravam no
+  // payload (lib/leads/fonte.ts): "Instagram", "ig" e "l.instagram.com" viram
+  // `instagram`. A regra com condição vence o curinga do mesmo tipo — a visita
+  // vinda do Instagram vale 6, e não 6 + 3. Os números aqui são os do plano
+  // intocado; a migração (scripts/migrate-score-fonte-social.ts) semeia como
+  // BÔNUS sobre o curinga que estiver no banco (+3 na visita, +5 na entrada),
+  // porque em produção o curinga da visita já foi subido na tela.
+  {
+    eventType: "site_visited",
+    points: 6,
+    description: "Visitou o site vindo do Instagram",
+    condition: { fonte: "instagram" },
+  },
+  {
+    eventType: "site_visited",
+    points: 6,
+    description: "Visitou o site vindo do Facebook",
+    condition: { fonte: "facebook" },
+  },
+  {
+    eventType: "contact_created",
+    points: 15,
+    description: "Entrou como lead pelo Instagram",
+    condition: { fonte: "instagram" },
+  },
+  {
+    eventType: "contact_created",
+    points: 15,
+    description: "Entrou como lead pelo Facebook",
+    condition: { fonte: "facebook" },
+  },
 ];
 
 export interface Configuracao {
