@@ -14,6 +14,7 @@ import {
 
 import { PageHeader } from "@/components/page-header";
 import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
+import { VideoCoverPicker } from "@/components/whatsapp/video-cover-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -68,6 +69,8 @@ interface TemplateDto {
   headerText: string | null;
   headerMediaUrl: string | null;
   headerMediaFilename: string | null;
+  headerMediaSourceUrl: string | null;
+  headerMediaCoverAt: number | null;
   bodyText: string;
   footerText: string | null;
   buttons: WhatsAppButton[] | null;
@@ -101,8 +104,13 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
   const [headerMedia, setHeaderMedia] = useState<{
     url: string;
     filename: string;
+    /** Vídeo: original enviado (url passa a ser a regravação com a capa). */
+    sourceUrl: string | null;
+    /** Vídeo: instante da capa em segundos; null = primeiro quadro. */
+    coverAt: number | null;
   } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [renderingCover, setRenderingCover] = useState(false);
   const [bodyText, setBodyText] = useState("");
   const [footerText, setFooterText] = useState(DEFAULT_FOOTER);
   const [buttons, setButtons] = useState<ButtonRow[]>([]);
@@ -143,6 +151,8 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
             ? {
                 url: json.headerMediaUrl,
                 filename: json.headerMediaFilename ?? "arquivo",
+                sourceUrl: json.headerMediaSourceUrl ?? json.headerMediaUrl,
+                coverAt: json.headerMediaCoverAt ?? null,
               }
             : null
         );
@@ -207,12 +217,56 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
             `O servidor recusou o arquivo (HTTP ${res.status}). Se o arquivo for grande, o limite pode estar no servidor web.`
         );
       }
-      setHeaderMedia({ url: json.url, filename: json.filename });
+      setHeaderMedia({
+        url: json.url,
+        filename: json.filename,
+        sourceUrl: json.url,
+        coverAt: null,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
     }
+  }
+
+  // Capa do vídeo: regrava o ORIGINAL com o quadro escolhido no início e
+  // passa a usar a regravação no cabeçalho (o original fica para trocar).
+  async function handlePickCover(at: number) {
+    if (!headerMedia?.sourceUrl) return;
+    setError("");
+    setRenderingCover(true);
+    try {
+      const res = await fetch("/api/whatsapp-templates/media/cover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceUrl: headerMedia.sourceUrl, at }),
+      });
+      const json = (await res
+        .json()
+        .catch(() => ({}))) as { error?: string; url?: string };
+      if (!res.ok || !json.url) {
+        throw new Error(
+          json.error ?? `Não foi possível gerar a capa (HTTP ${res.status}).`
+        );
+      }
+      const url = json.url;
+      setHeaderMedia((current) =>
+        current ? { ...current, url, coverAt: at } : current
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRenderingCover(false);
+    }
+  }
+
+  function handleResetCover() {
+    setHeaderMedia((current) =>
+      current?.sourceUrl
+        ? { ...current, url: current.sourceUrl, coverAt: null }
+        : current
+    );
   }
 
   function updateButton(index: number, patch: Partial<ButtonRow>) {
@@ -249,6 +303,10 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
         headerMediaFilename: isMediaHeader(headerType)
           ? (headerMedia?.filename ?? null)
           : null,
+        headerMediaSourceUrl:
+          headerType === "video" ? (headerMedia?.sourceUrl ?? null) : null,
+        headerMediaCoverAt:
+          headerType === "video" ? (headerMedia?.coverAt ?? null) : null,
         bodyText,
         footerText,
         buttons: buttons.map((b) =>
@@ -467,7 +525,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                               variant="outline"
                               size="sm"
                               onClick={() => mediaRef.current?.click()}
-                              disabled={uploading}
+                              disabled={uploading || renderingCover}
                             >
                               {uploading ? "Enviando..." : "Trocar"}
                             </Button>
@@ -477,7 +535,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                               size="icon"
                               onClick={() => setHeaderMedia(null)}
                               aria-label="Remover arquivo"
-                              disabled={uploading}
+                              disabled={uploading || renderingCover}
                             >
                               <X className="text-muted-foreground" />
                             </Button>
@@ -501,6 +559,16 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       {Math.round(mediaSpec.maxBytes / (1024 * 1024))}MB. O
                       arquivo fica hospedado aqui e a Meta baixa em cada envio.
                     </p>
+                    {headerType === "video" && headerMedia?.sourceUrl ? (
+                      <VideoCoverPicker
+                        sourceUrl={headerMedia.sourceUrl}
+                        coverAt={headerMedia.coverAt}
+                        disabled={readOnly || uploading}
+                        busy={renderingCover}
+                        onPick={handlePickCover}
+                        onReset={handleResetCover}
+                      />
+                    ) : null}
                   </div>
                 ) : null}
 

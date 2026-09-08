@@ -84,6 +84,15 @@ export interface WhatsAppMediaHeaderSpec {
 }
 
 /**
+ * Capa do vídeo: o WhatsApp mostra o PRIMEIRO quadro do arquivo como capa, e
+ * a Cloud API não aceita miniatura. Para o contato ver o quadro escolhido, o
+ * vídeo é regravado com ele parado por este tempo no início — curto o bastante
+ * para não atrapalhar quem dá play, longo o bastante para o gerador de
+ * miniatura (que às vezes pega um quadro logo depois do zero) cair nele.
+ */
+export const VIDEO_COVER_STILL_SECONDS = 0.5;
+
+/**
  * Formatos aceitos pela Meta NO CABEÇALHO DE TEMPLATE — mais estreitos que os
  * da mensagem avulsa: imagem só JPEG/PNG (sem GIF, sem SVG), documento só PDF
  * e vídeo só MP4 (sem 3GPP), com teto de 16MB.

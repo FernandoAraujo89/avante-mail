@@ -6,6 +6,11 @@ FROM node:22-slim
 
 WORKDIR /app
 
+# ffmpeg: regrava o vídeo do cabeçalho de modelo de WhatsApp com a capa
+# escolhida no início (lib/whatsapp/video-cover.ts).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 # Dependências primeiro (camada cacheável entre builds).
 COPY package.json package-lock.json ./
 RUN npm ci

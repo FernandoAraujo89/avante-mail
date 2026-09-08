@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -709,6 +710,12 @@ export const whatsappTemplates = pgTable("whatsapp_templates", {
   headerMediaUrl: text("header_media_url"),
   headerMediaFilename: text("header_media_filename"),
   headerMediaHandle: text("header_media_handle"),
+  // Só no vídeo: o arquivo original enviado (de onde o instante da capa é
+  // escolhido) e o instante escolhido em segundos. headerMediaUrl passa a ser
+  // a regravação com esse quadro parado no início; null = capa não escolhida,
+  // o WhatsApp mostra o primeiro quadro do original.
+  headerMediaSourceUrl: text("header_media_source_url"),
+  headerMediaCoverAt: doublePrecision("header_media_cover_at"),
   bodyText: text("body_text").notNull(),
   footerText: text("footer_text"),
   buttons: jsonb("buttons").$type<WhatsAppButton[]>(),

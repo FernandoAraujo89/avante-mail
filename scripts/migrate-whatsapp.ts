@@ -85,6 +85,13 @@ async function main() {
   await client.query(
     `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_media_handle text`
   );
+  // Capa do vídeo: original enviado + instante escolhido (ver schema.ts).
+  await client.query(
+    `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_media_source_url text`
+  );
+  await client.query(
+    `ALTER TABLE whatsapp_templates ADD COLUMN IF NOT EXISTS header_media_cover_at double precision`
+  );
 
   console.log("[MIGRATE] campaigns: canal e modelo de WhatsApp...");
   await client.query(

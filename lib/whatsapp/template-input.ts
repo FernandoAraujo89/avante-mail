@@ -25,6 +25,9 @@ export interface WhatsAppTemplateInput {
   headerText: string | null;
   headerMediaUrl: string | null;
   headerMediaFilename: string | null;
+  /** Só vídeo: original de onde a capa foi escolhida e o instante dela. */
+  headerMediaSourceUrl: string | null;
+  headerMediaCoverAt: number | null;
   bodyText: string;
   footerText: string | null;
   buttons: WhatsAppButton[] | null;
@@ -74,6 +77,8 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
   let headerText: string | null = null;
   let headerMediaUrl: string | null = null;
   let headerMediaFilename: string | null = null;
+  let headerMediaSourceUrl: string | null = null;
+  let headerMediaCoverAt: number | null = null;
 
   if (headerType === "text") {
     headerText =
@@ -112,6 +117,32 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
       data.headerMediaFilename.trim()
         ? data.headerMediaFilename.trim().slice(0, 120)
         : uploadName;
+
+    if (headerType === "video") {
+      // Capa: o original de onde ela foi escolhida (mesma regra de origem do
+      // arquivo do cabeçalho) e o instante. Sem capa, o original é o próprio
+      // arquivo do cabeçalho.
+      const rawSource =
+        typeof data.headerMediaSourceUrl === "string"
+          ? data.headerMediaSourceUrl.trim()
+          : "";
+      if (rawSource) {
+        const sourceName = uploadNameFromUrl(rawSource);
+        const sourceExt = sourceName?.split(".").pop()?.toLowerCase() ?? "";
+        if (!sourceName || !spec.types[sourceExt]) {
+          return fail("Vídeo original inválido — envie o arquivo novamente.");
+        }
+      }
+      headerMediaSourceUrl = rawSource || rawUrl;
+
+      const at = data.headerMediaCoverAt;
+      if (at !== null && at !== undefined) {
+        if (typeof at !== "number" || !Number.isFinite(at) || at < 0) {
+          return fail("Instante da capa inválido.");
+        }
+        headerMediaCoverAt = at;
+      }
+    }
   }
 
   const bodyText =
@@ -208,6 +239,8 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
       headerText,
       headerMediaUrl,
       headerMediaFilename,
+      headerMediaSourceUrl,
+      headerMediaCoverAt,
       bodyText,
       footerText,
       buttons,
