@@ -2,10 +2,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { buildSendComponents, type SendTemplate } from "./variables";
 
-// O que estes testes protegem: o cabeçalho de imagem/PDF só chega ao contato se
-// o payload do envio levar o componente "header" com o link do arquivo. Se ele
-// faltar (ou vier com caminho relativo), a Cloud API recusa a mensagem inteira
-// — o modelo aprovado promete um arquivo que o envio não entrega.
+// O que estes testes protegem: o cabeçalho de imagem/PDF/vídeo só chega ao
+// contato se o payload do envio levar o componente "header" com o link do
+// arquivo. Se ele faltar (ou vier com caminho relativo), a Cloud API recusa a
+// mensagem inteira — o modelo aprovado promete um arquivo que o envio não
+// entrega.
 
 const CONTATO = { name: "Fernando", company: "Avante" };
 
@@ -66,6 +67,32 @@ describe("buildSendComponents", () => {
           document: {
             link: "https://campanhas.exemplo.com.br/uploads/proposta-a1b2c3.pdf",
             filename: "Proposta Avante.pdf",
+          },
+        },
+      ],
+    });
+  });
+
+  it("manda o vídeo como parâmetro video, sem filename", () => {
+    const [header] = buildSendComponents({
+      template: {
+        ...BASE,
+        headerType: "video",
+        headerMediaUrl: "/uploads/promo-a1b2c3.mp4",
+        // Nome guardado no modelo, mas o vídeo não é card: não vai no payload.
+        headerMediaFilename: "Promo Avante.mp4",
+      },
+      variables: null,
+      contact: CONTATO,
+    });
+
+    expect(header).toEqual({
+      type: "header",
+      parameters: [
+        {
+          type: "video",
+          video: {
+            link: "https://campanhas.exemplo.com.br/uploads/promo-a1b2c3.mp4",
           },
         },
       ],

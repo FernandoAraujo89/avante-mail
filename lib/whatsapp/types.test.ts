@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { SERVED_UPLOAD_TYPES } from "../uploads";
 import {
   isMediaHeader,
   missingHeaderMedia,
@@ -21,13 +22,15 @@ describe("parseHeaderType", () => {
     }
   });
 
-  it("mantém image e document — os que motivaram a função", () => {
+  it("mantém os cabeçalhos de arquivo — os que motivaram a função", () => {
     expect(parseHeaderType("image")).toBe("image");
     expect(parseHeaderType("document")).toBe("document");
+    expect(parseHeaderType("video")).toBe("video");
   });
 
   it("cai para none quando o tipo é desconhecido ou ausente", () => {
-    expect(parseHeaderType("video")).toBe("none");
+    // "location" existe na Meta, mas o editor não oferece.
+    expect(parseHeaderType("location")).toBe("none");
     expect(parseHeaderType("")).toBe("none");
     expect(parseHeaderType(undefined)).toBe("none");
     expect(parseHeaderType(null)).toBe("none");
@@ -48,6 +51,7 @@ describe("isMediaHeader", () => {
   it("separa cabeçalho de arquivo de cabeçalho de texto", () => {
     expect(isMediaHeader("image")).toBe(true);
     expect(isMediaHeader("document")).toBe(true);
+    expect(isMediaHeader("video")).toBe(true);
     expect(isMediaHeader("text")).toBe(false);
     expect(isMediaHeader("none")).toBe(false);
   });
@@ -86,5 +90,18 @@ describe("missingHeaderMedia", () => {
     expect(missingHeaderMedia({ headerType: "none", headerMediaUrl: null })).toBe(
       false
     );
+  });
+});
+
+describe("WHATSAPP_MEDIA_HEADERS", () => {
+  it("só aceita extensão que /uploads sabe servir", () => {
+    // A Meta baixa o arquivo do cabeçalho por /uploads a cada envio. Extensão
+    // fora de SERVED_UPLOAD_TYPES é recusada por sanitizeUploadName: o modelo
+    // nem salva, e o que passasse voltaria 404 para a Meta.
+    for (const spec of Object.values(WHATSAPP_MEDIA_HEADERS)) {
+      for (const [ext, mime] of Object.entries(spec.types)) {
+        expect(SERVED_UPLOAD_TYPES[ext]).toBe(mime);
+      }
+    }
   });
 });

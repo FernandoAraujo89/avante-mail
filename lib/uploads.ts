@@ -14,14 +14,15 @@ export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
 };
 
 /**
- * Tudo que /uploads entrega: as imagens do e-mail mais o PDF do cabeçalho de
- * modelo de WhatsApp (a Meta baixa esse arquivo a cada envio). A listagem do
- * editor de e-mail segue filtrando só ALLOWED_UPLOAD_TYPES — PDF não aparece
- * como imagem para inserir no e-mail.
+ * Tudo que /uploads entrega: as imagens do e-mail mais o PDF e o vídeo do
+ * cabeçalho de modelo de WhatsApp (a Meta baixa esse arquivo a cada envio). A
+ * listagem do editor de e-mail segue filtrando só ALLOWED_UPLOAD_TYPES — PDF e
+ * MP4 não aparecem como imagem para inserir no e-mail.
  */
 export const SERVED_UPLOAD_TYPES: Record<string, string> = {
   ...ALLOWED_UPLOAD_TYPES,
   pdf: "application/pdf",
+  mp4: "video/mp4",
 };
 
 /**

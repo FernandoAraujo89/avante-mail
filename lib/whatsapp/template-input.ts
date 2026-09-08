@@ -90,14 +90,11 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
       return fail("Variáveis no cabeçalho não são suportadas.");
     }
   } else if (isMediaHeader(headerType)) {
+    const spec = WHATSAPP_MEDIA_HEADERS[headerType];
     const rawUrl =
       typeof data.headerMediaUrl === "string" ? data.headerMediaUrl.trim() : "";
     if (!rawUrl) {
-      return fail(
-        headerType === "image"
-          ? "Envie a imagem do cabeçalho (ou remova o cabeçalho)."
-          : "Envie o PDF do cabeçalho (ou remova o cabeçalho)."
-      );
+      return fail(spec.missingError);
     }
     // Só arquivos que passaram pelo nosso upload: é deles que sai a amostra
     // mandada à análise da Meta, com os mesmos bytes que ela baixa no envio.
@@ -106,12 +103,8 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
       return fail("Arquivo do cabeçalho inválido — envie o arquivo novamente.");
     }
     const ext = uploadName.split(".").pop()!.toLowerCase();
-    if (!WHATSAPP_MEDIA_HEADERS[headerType].types[ext]) {
-      return fail(
-        headerType === "image"
-          ? "No cabeçalho de imagem a Meta aceita só JPG ou PNG."
-          : "No cabeçalho de documento a Meta aceita só PDF."
-      );
+    if (!spec.types[ext]) {
+      return fail(spec.formatError);
     }
     headerMediaUrl = rawUrl;
     headerMediaFilename =

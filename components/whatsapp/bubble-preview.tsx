@@ -4,14 +4,18 @@ import {
   parseWhatsAppFormatting,
   type WhatsAppTextNode,
 } from "@/lib/whatsapp/format";
-import { isMediaHeader, type WhatsAppHeaderType } from "@/lib/whatsapp/types";
+import {
+  isMediaHeader,
+  type WhatsAppHeaderType,
+  type WhatsAppMediaHeaderType,
+} from "@/lib/whatsapp/types";
 
 // Balão de prévia no estilo do WhatsApp (cores fixas, independentes do tema).
 // Usado no editor de modelos e no wizard de campanhas.
 
-/** Cabeçalho de arquivo do modelo: imagem exibida ou card de PDF. */
+/** Cabeçalho de arquivo do modelo: imagem, vídeo ou card de PDF. */
 export type BubbleHeaderMedia = {
-  kind: "image" | "document";
+  kind: WhatsAppMediaHeaderType;
   url: string;
   filename?: string | null;
 };
@@ -82,6 +86,15 @@ export function WhatsAppBubblePreview({
             src={headerMedia.url}
             alt=""
             className="mb-2 max-h-44 w-full rounded-md object-cover"
+          />
+        ) : null}
+        {headerMedia?.kind === "video" ? (
+          // Player nativo: na conversa o WhatsApp mostra a capa com o play.
+          <video
+            src={headerMedia.url}
+            controls
+            preload="metadata"
+            className="mb-2 max-h-44 w-full rounded-md bg-black"
           />
         ) : null}
         {headerMedia?.kind === "document" ? (

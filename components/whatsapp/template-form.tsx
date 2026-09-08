@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Upload, X } from "lucide-react";
+import {
+  FileText,
+  ImageIcon,
+  Plus,
+  Upload,
+  Video,
+  X,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { WhatsAppBubblePreview } from "@/components/whatsapp/bubble-preview";
@@ -41,6 +48,13 @@ import {
 // Rodapé sugerido por padrão: instrução de descadastro protege a qualidade
 // do número (menos bloqueios/denúncias — ver plano, seção de riscos).
 const DEFAULT_FOOTER = "Responda SAIR para não receber mais";
+
+/** Ícone do arquivo já enviado, por formato de cabeçalho. */
+const HEADER_ICONS: Partial<Record<WhatsAppHeaderType, typeof FileText>> = {
+  image: ImageIcon,
+  video: Video,
+  document: FileText,
+};
 
 type ButtonRow = { type: "QUICK_REPLY" | "URL"; text: string; url: string };
 
@@ -106,6 +120,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
   const mediaSpec = isMediaHeader(headerType)
     ? WHATSAPP_MEDIA_HEADERS[headerType]
     : null;
+  const MediaIcon = HEADER_ICONS[headerType] ?? FileText;
 
   useEffect(() => {
     if (!templateId) return;
@@ -218,12 +233,8 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
       if (!bodyText.trim()) {
         throw new Error("Escreva o corpo da mensagem antes de salvar.");
       }
-      if (isMediaHeader(headerType) && !headerMedia) {
-        throw new Error(
-          headerType === "image"
-            ? "Envie a imagem do cabeçalho (ou troque o cabeçalho para texto)."
-            : "Envie o PDF do cabeçalho (ou troque o cabeçalho para texto)."
-        );
+      if (mediaSpec && !headerMedia) {
+        throw new Error(mediaSpec.missingError);
       }
 
       const payload = {
@@ -384,7 +395,21 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                     <Label>Cabeçalho</Label>
                     <Select
                       value={headerType}
-                      onValueChange={(v) => setHeaderType(parseHeaderType(v))}
+                      onValueChange={(v) => {
+                        const next = parseHeaderType(v);
+                        setHeaderType(next);
+                        // O arquivo já enviado só sobrevive se o novo formato
+                        // o aceitar — trocar imagem por vídeo mantinha o PNG,
+                        // e a recusa só vinha do servidor ao salvar.
+                        setHeaderMedia((current) => {
+                          if (!current || !isMediaHeader(next)) return current;
+                          const ext =
+                            current.url.split(".").pop()?.toLowerCase() ?? "";
+                          return WHATSAPP_MEDIA_HEADERS[next].types[ext]
+                            ? current
+                            : null;
+                        });
+                      }}
                       disabled={readOnly}
                     >
                       <SelectTrigger>
@@ -393,12 +418,13 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       <SelectContent>
                         <SelectItem value="none">Sem cabeçalho</SelectItem>
                         <SelectItem value="text">Texto</SelectItem>
-                        <SelectItem value="image">
-                          Imagem (JPG ou PNG)
-                        </SelectItem>
-                        <SelectItem value="document">
-                          Documento (PDF)
-                        </SelectItem>
+                        {Object.entries(WHATSAPP_MEDIA_HEADERS).map(
+                          ([type, spec]) => (
+                            <SelectItem key={type} value={type}>
+                              {spec.label}
+                            </SelectItem>
+                          )
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -420,11 +446,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
 
                 {mediaSpec ? (
                   <div className="grid gap-2">
-                    <Label>
-                      {headerType === "image"
-                        ? "Imagem do cabeçalho *"
-                        : "PDF do cabeçalho *"}
-                    </Label>
+                    <Label>{mediaSpec.fieldLabel}</Label>
                     <input
                       ref={mediaRef}
                       type="file"
@@ -434,7 +456,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                     />
                     {headerMedia ? (
                       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
-                        <FileText className="size-4 shrink-0 text-muted-foreground" />
+                        <MediaIcon className="size-4 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 flex-1 truncate text-sm">
                           {headerMedia.filename}
                         </span>
@@ -471,20 +493,13 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                         disabled={readOnly || uploading}
                       >
                         <Upload />
-                        {uploading
-                          ? "Enviando..."
-                          : headerType === "image"
-                            ? "Enviar imagem"
-                            : "Enviar PDF"}
+                        {uploading ? "Enviando..." : mediaSpec.uploadLabel}
                       </Button>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      {headerType === "image"
-                        ? "JPG ou PNG"
-                        : "PDF (o nome do arquivo aparece no card da conversa)"}
-                      , até {Math.round(mediaSpec.maxBytes / (1024 * 1024))}MB.
-                      O arquivo fica hospedado aqui e a Meta baixa em cada
-                      envio.
+                      {mediaSpec.hint}, até{" "}
+                      {Math.round(mediaSpec.maxBytes / (1024 * 1024))}MB. O
+                      arquivo fica hospedado aqui e a Meta baixa em cada envio.
                     </p>
                   </div>
                 ) : null}

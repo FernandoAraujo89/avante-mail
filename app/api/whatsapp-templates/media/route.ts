@@ -27,8 +27,8 @@ function limitLabel(bytes: number): string {
 }
 
 /**
- * Recebe a imagem ou o PDF do cabeçalho de um modelo e guarda em /uploads —
- * é de lá que a Meta baixa o arquivo em cada envio.
+ * Recebe o arquivo do cabeçalho de um modelo (imagem, PDF ou vídeo) e guarda em
+ * /uploads — é de lá que a Meta baixa o arquivo em cada envio.
  *
  * Só grava o arquivo: a amostra exigida na análise sobe no submit do modelo,
  * então montar um rascunho continua não dependendo da conta Meta configurada.
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     const kind = parseHeaderType(form.get("kind"));
     if (!isMediaHeader(kind)) {
       return NextResponse.json(
-        { error: "Tipo de cabeçalho inválido. Use image ou document." },
+        { error: "Tipo de cabeçalho inválido. Use image, document ou video." },
         { status: 400 }
       );
     }
@@ -56,15 +56,7 @@ export async function POST(request: NextRequest) {
 
     const ext = (file.name.split(".").pop() ?? "").toLowerCase();
     if (!spec.types[ext]) {
-      return NextResponse.json(
-        {
-          error:
-            kind === "image"
-              ? "No cabeçalho de imagem a Meta aceita só JPG ou PNG."
-              : "No cabeçalho de documento a Meta aceita só PDF.",
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: spec.formatError }, { status: 400 });
     }
     if (file.size === 0) {
       return NextResponse.json(

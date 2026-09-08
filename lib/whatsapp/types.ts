@@ -21,20 +21,21 @@ export const WHATSAPP_TEMPLATE_CATEGORIES = [
 export type WhatsAppTemplateCategory =
   (typeof WHATSAPP_TEMPLATE_CATEGORIES)[number];
 
-// O cabeçalho aceita UM componente: texto OU um arquivo. Vídeo e localização
-// existem na Meta, mas o editor não oferece.
+// O cabeçalho aceita UM componente: texto OU um arquivo. Localização existe na
+// Meta, mas o editor não oferece.
 export const WHATSAPP_HEADER_TYPES = [
   "none",
   "text",
   "image",
   "document",
+  "video",
 ] as const;
 export type WhatsAppHeaderType = (typeof WHATSAPP_HEADER_TYPES)[number];
 
 /** Cabeçalhos que carregam arquivo em vez de texto. */
 export type WhatsAppMediaHeaderType = Extract<
   WhatsAppHeaderType,
-  "image" | "document"
+  "image" | "document" | "video"
 >;
 
 /**
@@ -51,11 +52,13 @@ export function parseHeaderType(value: unknown): WhatsAppHeaderType {
 export function isMediaHeader(
   type: WhatsAppHeaderType
 ): type is WhatsAppMediaHeaderType {
-  return type === "image" || type === "document";
+  // Lista explícita de propósito: um formato novo em WHATSAPP_MEDIA_HEADERS
+  // esquecido aqui é o que types.test.ts pega.
+  return type === "image" || type === "document" || type === "video";
 }
 
 export interface WhatsAppMediaHeaderSpec {
-  /** Nome do formato na interface. */
+  /** Nome do formato na lista de cabeçalhos. */
   label: string;
   maxBytes: number;
   /** Extensões aceitas → content-type. */
@@ -63,23 +66,44 @@ export interface WhatsAppMediaHeaderSpec {
   /** Valor do accept do seletor de arquivo. */
   accept: string;
   /** Formato correspondente no template da Meta. */
-  metaFormat: "IMAGE" | "DOCUMENT";
+  metaFormat: "IMAGE" | "DOCUMENT" | "VIDEO";
+  /** Rótulo do campo de arquivo no editor. */
+  fieldLabel: string;
+  /** Texto do botão que abre o seletor de arquivo. */
+  uploadLabel: string;
+  /** Formatos aceitos, exibidos sob o campo (o limite é somado ao lado). */
+  hint: string;
+  /** Resumo do cabeçalho na lista de modelos. */
+  listLabel: string;
+  // As duas mensagens abaixo ficam na especificação, e não em ternário na
+  // tela e na rota, porque cada formato novo teria de lembrar dos dois lugares.
+  /** Erro de arquivo faltando. */
+  missingError: string;
+  /** Erro de formato recusado. */
+  formatError: string;
 }
 
 /**
  * Formatos aceitos pela Meta NO CABEÇALHO DE TEMPLATE — mais estreitos que os
- * da mensagem avulsa: imagem só JPEG/PNG (sem GIF, sem SVG) e documento só PDF.
+ * da mensagem avulsa: imagem só JPEG/PNG (sem GIF, sem SVG), documento só PDF
+ * e vídeo só MP4 (sem 3GPP), com teto de 16MB.
  */
 export const WHATSAPP_MEDIA_HEADERS: Record<
   WhatsAppMediaHeaderType,
   WhatsAppMediaHeaderSpec
 > = {
   image: {
-    label: "Imagem",
+    label: "Imagem (JPG ou PNG)",
     maxBytes: 5 * 1024 * 1024,
     types: { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" },
     accept: "image/png,image/jpeg",
     metaFormat: "IMAGE",
+    fieldLabel: "Imagem do cabeçalho *",
+    uploadLabel: "Enviar imagem",
+    hint: "JPG ou PNG",
+    listLabel: "Imagem no cabeçalho",
+    missingError: "Envie a imagem do cabeçalho (ou remova o cabeçalho).",
+    formatError: "No cabeçalho de imagem a Meta aceita só JPG ou PNG.",
   },
   document: {
     label: "Documento (PDF)",
@@ -87,6 +111,28 @@ export const WHATSAPP_MEDIA_HEADERS: Record<
     types: { pdf: "application/pdf" },
     accept: "application/pdf",
     metaFormat: "DOCUMENT",
+    fieldLabel: "PDF do cabeçalho *",
+    uploadLabel: "Enviar PDF",
+    hint: "PDF (o nome do arquivo aparece no card da conversa)",
+    listLabel: "PDF no cabeçalho",
+    missingError: "Envie o PDF do cabeçalho (ou remova o cabeçalho).",
+    formatError: "No cabeçalho de documento a Meta aceita só PDF.",
+  },
+  video: {
+    // O codec não dá para conferir aqui (só extensão e tamanho): um MP4 com
+    // vídeo fora do H.264 ou áudio fora do AAC sobe normal e só é recusado na
+    // análise da Meta — daí o aviso na dica.
+    label: "Vídeo (MP4)",
+    maxBytes: 16 * 1024 * 1024,
+    types: { mp4: "video/mp4" },
+    accept: "video/mp4",
+    metaFormat: "VIDEO",
+    fieldLabel: "Vídeo do cabeçalho *",
+    uploadLabel: "Enviar vídeo",
+    hint: "MP4 com vídeo H.264 e áudio AAC (outros codecs são recusados na análise da Meta)",
+    listLabel: "Vídeo no cabeçalho",
+    missingError: "Envie o vídeo do cabeçalho (ou remova o cabeçalho).",
+    formatError: "No cabeçalho de vídeo a Meta aceita só MP4.",
   },
 };
 

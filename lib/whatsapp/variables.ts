@@ -1,17 +1,18 @@
 import { getBaseUrl } from "../base-url";
-import type { TemplateMessageComponent } from "./client";
+import type { TemplateMessageComponent, TemplateParameter } from "./client";
 import {
   extractVariables,
   isMediaHeader,
   type WhatsAppHeaderType,
+  type WhatsAppMediaHeaderType,
   type WhatsAppVariableExamples,
   type WhatsAppVariableMap,
 } from "./types";
 
 // Monta os componentes de um envio: o cabeçalho de mídia (quando o modelo tem
-// imagem ou PDF) e o corpo com as variáveis {{n}} resolvidas — cada índice vem
-// do mapeamento da campanha (campo do contato ou texto fixo). Usado pelo worker
-// e pelo envio de teste.
+// imagem, PDF ou vídeo) e o corpo com as variáveis {{n}} resolvidas — cada
+// índice vem do mapeamento da campanha (campo do contato ou texto fixo). Usado
+// pelo worker e pelo envio de teste.
 
 export interface VariableContact {
   name: string;
@@ -50,6 +51,24 @@ export interface SendTemplate {
   headerMediaFilename: string | null;
 }
 
+/** O arquivo do cabeçalho no formato que a Cloud API espera para cada tipo. */
+function headerParameter(
+  type: WhatsAppMediaHeaderType,
+  link: string,
+  filename: string | null
+): TemplateParameter {
+  if (type === "image") return { type: "image", image: { link } };
+  if (type === "video") return { type: "video", video: { link } };
+  return {
+    type: "document",
+    document: {
+      link,
+      // Nome que aparece no card do PDF na conversa.
+      ...(filename ? { filename } : {}),
+    },
+  };
+}
+
 /**
  * Componentes do payload de envio: cabeçalho de mídia (se houver) e corpo com
  * as variáveis (vazio quando o modelo não tem nem um nem outro).
@@ -72,18 +91,11 @@ export function buildSendComponents(args: {
     components.push({
       type: "header",
       parameters: [
-        template.headerType === "image"
-          ? { type: "image", image: { link } }
-          : {
-              type: "document",
-              document: {
-                link,
-                // Nome que aparece no card do PDF na conversa.
-                ...(template.headerMediaFilename
-                  ? { filename: template.headerMediaFilename }
-                  : {}),
-              },
-            },
+        headerParameter(
+          template.headerType,
+          link,
+          template.headerMediaFilename
+        ),
       ],
     });
   }

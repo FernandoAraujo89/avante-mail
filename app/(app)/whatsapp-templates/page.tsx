@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Send,
   Trash2,
+  Video,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
@@ -38,9 +39,17 @@ import {
 import { formatDate } from "@/lib/format";
 import {
   isMediaHeader,
+  WHATSAPP_MEDIA_HEADERS,
   type WhatsAppHeaderType,
   type WhatsAppTemplateStatus,
 } from "@/lib/whatsapp/types";
+
+/** Ícone do cabeçalho de arquivo, por formato. */
+const HEADER_ICONS: Partial<Record<WhatsAppHeaderType, typeof FileText>> = {
+  image: ImageIcon,
+  video: Video,
+  document: FileText,
+};
 
 type TemplateDto = {
   id: string;
@@ -243,16 +252,20 @@ export default function WhatsAppTemplatesPage() {
                       </p>
                       {isMediaHeader(template.headerType) ? (
                         <p className="mt-0.5 flex max-w-md items-center gap-1 text-xs text-muted-foreground">
-                          {template.headerType === "image" ? (
-                            <ImageIcon className="size-3 shrink-0" />
-                          ) : (
-                            <FileText className="size-3 shrink-0" />
-                          )}
+                          {(() => {
+                            const Icon =
+                              HEADER_ICONS[template.headerType] ?? FileText;
+                            return <Icon className="size-3 shrink-0" />;
+                          })()}
                           <span className="truncate">
-                            {template.headerType === "image"
-                              ? "Imagem no cabeçalho"
-                              : (template.headerMediaFilename ??
-                                "PDF no cabeçalho")}
+                            {/* Só o documento mostra o nome do arquivo: é o
+                                único formato em que ele aparece na conversa. */}
+                            {template.headerType === "document"
+                              ? (template.headerMediaFilename ??
+                                WHATSAPP_MEDIA_HEADERS[template.headerType]
+                                  .listLabel)
+                              : WHATSAPP_MEDIA_HEADERS[template.headerType]
+                                  .listLabel}
                           </span>
                         </p>
                       ) : null}

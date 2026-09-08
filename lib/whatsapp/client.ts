@@ -108,11 +108,13 @@ async function graphRequest<T>(path: string, init?: RequestInit): Promise<T> {
 /**
  * Parâmetro de um componente no envio. No cabeçalho de mídia vai o arquivo em
  * si: `link` público (a Meta baixa na hora) e, no documento, o `filename` que
- * aparece no card — sem ele o WhatsApp mostra um nome genérico.
+ * aparece no card — sem ele o WhatsApp mostra um nome genérico. O vídeo não
+ * tem `filename`: na conversa ele aparece como player, não como card.
  */
 export type TemplateParameter =
   | { type: "text"; text: string }
   | { type: "image"; image: { link: string } }
+  | { type: "video"; video: { link: string } }
   | { type: "document"; document: { link: string; filename?: string } };
 
 export interface TemplateMessageComponent {
