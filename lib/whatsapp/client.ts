@@ -1,3 +1,4 @@
+import { RESTRICTION_ERROR_CODES } from "./errors";
 import {
   extractVariables,
   isMediaHeader,
@@ -401,11 +402,28 @@ export function isWhatsAppConfigured(): boolean {
 
 // Erros em que vale tentar de novo (backoff): sobrecarga/limite de vazão.
 const TRANSIENT_ERROR_CODES = new Set([
+  80007, // Rate limit da WABA (volume de chamadas à API)
   130429, // Rate limit hit (vazão da Cloud API)
   131000, // Something went wrong (genérico)
   131016, // Service overloaded
   131056, // Pair rate limit (muitas mensagens ao mesmo destinatário)
 ]);
+
+/**
+ * Erro que derruba a campanha inteira, não só este envio: restrição do número
+ * ou da conta. Quando uma aparece, todos os próximos envios falhariam igual —
+ * o worker interrompe o resto da fila em vez de martelar a API centenas de
+ * vezes justamente enquanto a Meta está medindo a qualidade do número.
+ */
+export function isCircuitBreakerError(
+  error: unknown
+): error is WhatsAppApiError {
+  return (
+    error instanceof WhatsAppApiError &&
+    error.code !== null &&
+    RESTRICTION_ERROR_CODES.includes(error.code)
+  );
+}
 
 // Erros em que reenviar NÃO resolve — o envio falha de vez, com o código
 // gravado em campaign_sends.error_code (o relatório distingue os motivos).

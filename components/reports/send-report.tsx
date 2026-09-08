@@ -44,7 +44,10 @@ import {
 } from "@/lib/format";
 import { campaignSenderLabel } from "@/lib/campaign-author";
 import { campaignCost } from "@/lib/pricing";
-import { isResendableErrorCode } from "@/lib/whatsapp/errors";
+import {
+  isResendableErrorCode,
+  isRestrictionErrorCode,
+} from "@/lib/whatsapp/errors";
 
 /**
  * Relatório de um disparo (campanha ou edição do Avante News). É o mesmo
@@ -123,10 +126,20 @@ export async function SendReport({
   const isWhatsApp = campaign.channel === "whatsapp";
   const isSms = campaign.channel === "sms";
   const isNews = campaign.kind === "news";
-  // Envios que a Meta segurou por frequência/vazão: dá para reenviar depois.
-  const resendable = sends.filter(
-    (s) => s.status === "failed" && isResendableErrorCode(s.errorCode)
+  // Envios reenviáveis, separados por gravidade: a Meta segurar a mensagem de
+  // UM contato por frequência (131049) não tem gravidade nenhuma; o NÚMERO ser
+  // restringido (131048) interrompeu a campanha inteira e pede ação antes de
+  // reenviar. O mesmo botão serve aos dois — o texto é que não pode ser igual.
+  const heldByMeta = sends.filter(
+    (s) =>
+      s.status === "failed" &&
+      isResendableErrorCode(s.errorCode) &&
+      !isRestrictionErrorCode(s.errorCode)
   ).length;
+  const restricted = sends.filter(
+    (s) => s.status === "failed" && isRestrictionErrorCode(s.errorCode)
+  ).length;
+  const resendable = heldByMeta + restricted;
   const pending = sends.filter((s) => s.status === "pending").length;
   const failed = sends.filter((s) => s.status === "failed").length;
 
@@ -258,16 +271,39 @@ export async function SendReport({
         </div>
 
         {resendable > 0 ? (
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-accent/50 px-4 py-3">
+          <div
+            className={`mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+              restricted > 0
+                ? "border-destructive/40 bg-destructive/10"
+                : "border-border bg-accent/50"
+            }`}
+          >
             <p className="text-sm">
-              <span className="font-medium">
-                {resendable === 1
-                  ? "1 contato não recebeu"
-                  : `${resendable} contatos não receberam`}
-              </span>{" "}
-              porque a Meta segurou a mensagem por limite de frequência. Não é
-              falha técnica e não houve cobrança — dá para reenviar só para
-              eles quando o limite liberar.
+              {restricted > 0 ? (
+                <>
+                  <span className="font-medium">
+                    {restricted === 1
+                      ? "1 contato não recebeu"
+                      : `${restricted} contatos não receberam`}
+                  </span>{" "}
+                  porque a Meta restringiu o número durante o disparo e o
+                  restante da campanha foi interrompido para proteger a
+                  qualidade. Não houve cobrança. Confira a qualidade do número
+                  no Gerenciador do WhatsApp Business e só reenvie depois que
+                  ela normalizar.
+                </>
+              ) : (
+                <>
+                  <span className="font-medium">
+                    {heldByMeta === 1
+                      ? "1 contato não recebeu"
+                      : `${heldByMeta} contatos não receberam`}
+                  </span>{" "}
+                  porque a Meta segurou a mensagem por limite de frequência.
+                  Não é falha técnica e não houve cobrança — dá para reenviar
+                  só para eles quando o limite liberar.
+                </>
+              )}
             </p>
             <ResendButton
               endpoint={`/api/campaigns/${campaign.id}/resend`}

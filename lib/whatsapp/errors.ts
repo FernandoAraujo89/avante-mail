@@ -105,8 +105,8 @@ const ERRORS: Record<number, WhatsAppErrorInfo> = {
   368: {
     label: "Conta bloqueada",
     explanation:
-      "A conta está temporariamente bloqueada pela Meta por violação de política.",
-    retriableLater: false,
+      "A conta está temporariamente bloqueada pela Meta por violação de política. Regularize no Gerenciador da Meta e reenvie depois do desbloqueio.",
+    retriableLater: true,
     tone: "destructive",
   },
   100: {
@@ -136,8 +136,8 @@ const ERRORS: Record<number, WhatsAppErrorInfo> = {
   131031: {
     label: "Conta bloqueada",
     explanation:
-      "A conta do WhatsApp Business está bloqueada pela Meta.",
-    retriableLater: false,
+      "A conta do WhatsApp Business está bloqueada pela Meta. Regularize no Gerenciador da Meta e reenvie depois do desbloqueio.",
+    retriableLater: true,
     tone: "destructive",
   },
   131042: {
@@ -163,8 +163,8 @@ const ERRORS: Record<number, WhatsAppErrorInfo> = {
   131048: {
     label: "Limite por qualidade",
     explanation:
-      "O número de envio atingiu o limite da Meta por qualidade ou denúncias de spam.",
-    retriableLater: false,
+      "O número de envio atingiu o limite da Meta por qualidade ou denúncias de spam. A campanha foi interrompida para proteger o número — confira a qualidade no Gerenciador do WhatsApp e reenvie quando normalizar.",
+    retriableLater: true,
     tone: "destructive",
   },
   131051: {
@@ -250,6 +250,18 @@ export const RESENDABLE_ERROR_CODES = Object.entries(ERRORS)
 
 export function isResendableErrorCode(code: string | null): boolean {
   return code !== null && RESENDABLE_ERROR_CODES.includes(code);
+}
+
+/**
+ * Restrição do NÚMERO ou da CONTA, não deste destinatário: enquanto durar,
+ * nenhum envio passa. Fonte única — o worker interrompe a campanha nesses
+ * códigos (circuit breaker) e o relatório precisa distingui-los do "a Meta
+ * segurou por frequência", que é por contato e não tem gravidade nenhuma.
+ */
+export const RESTRICTION_ERROR_CODES = [131048, 368, 131031];
+
+export function isRestrictionErrorCode(code: string | null): boolean {
+  return code !== null && RESTRICTION_ERROR_CODES.includes(Number(code));
 }
 
 /**

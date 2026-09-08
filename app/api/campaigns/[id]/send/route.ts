@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   and,
   arrayOverlaps,
+  count,
   eq,
+  gte,
   inArray,
   isNotNull,
+  or,
   type SQL,
 } from "drizzle-orm";
 
@@ -26,6 +29,7 @@ import { countSms, sanitizeGsm7 } from "@/lib/sms/gsm7";
 import { resolveNewsList, resolveTeamList } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
+import { planBatchDelays, whatsappDailyLimit } from "@/lib/whatsapp/pacing";
 import { missingVariableSources } from "@/lib/whatsapp/variables";
 
 export const dynamic = "force-dynamic";
@@ -170,6 +174,32 @@ async function dispatchWhatsApp(
     );
   }
 
+  // Janela móvel de 24h da Meta: o que já saiu há menos de 24h e o que ainda
+  // está na fila (de qualquer campanha ou automação) consome o limite do
+  // tier. Contado ANTES do insert abaixo, senão a própria campanha entraria
+  // na conta. Envio com falha fica de fora: não foi entregue, não consumiu.
+  const dailyLimit = whatsappDailyLimit();
+  let usedLast24h = 0;
+  if (dailyLimit !== null) {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [row] = await db
+      .select({ used: count() })
+      .from(campaignSends)
+      .where(
+        and(
+          eq(campaignSends.channel, "whatsapp"),
+          or(
+            eq(campaignSends.status, "pending"),
+            and(
+              isNotNull(campaignSends.sentAt),
+              gte(campaignSends.sentAt, cutoff)
+            )
+          )
+        )
+      );
+    usedLast24h = row.used;
+  }
+
   const sends = await db
     .insert(campaignSends)
     .values(
@@ -185,10 +215,20 @@ async function dispatchWhatsApp(
     ? Math.max(campaign.scheduledAt.getTime() - Date.now(), 0)
     : 0;
 
+  // Parcelamento pelo limite diário: o que não cabe na janela de hoje entra
+  // na fila com atraso de 24h por lote, em vez de estourar o tier na Meta.
+  const delays = planBatchDelays({
+    total: sends.length,
+    dailyLimit,
+    usedLast24h,
+    baseDelayMs: delay,
+  });
+  const deferred = delays.filter((d) => d > delay).length;
+
   const queue = getWhatsAppQueue();
   await enfileirarOuDesfazer(db, campaign.id, () =>
     queue.addBulk(
-      sends.map((send) => ({
+      sends.map((send, index) => ({
         name: "send-whatsapp",
         data: {
           sendId: send.id,
@@ -196,7 +236,11 @@ async function dispatchWhatsApp(
           contactId: send.contactId,
         },
         opts: {
-          delay,
+          // JobId determinístico: permite ao reenvio descartar o job antigo
+          // antes de criar o novo, sem risco de dois jobs vivos pro mesmo
+          // envio (o esquema espelha o `auto__` da automação).
+          jobId: `camp__${send.id}`,
+          delay: delays[index],
           attempts: 3,
           backoff: { type: "exponential" as const, delay: 3000 },
           removeOnComplete: true,
@@ -211,7 +255,12 @@ async function dispatchWhatsApp(
     .set({ status: delay > 0 ? "scheduled" : "sending" })
     .where(eq(campaigns.id, campaign.id));
 
-  return NextResponse.json({ queued: sends.length, scheduled: delay > 0 });
+  return NextResponse.json({
+    queued: sends.length,
+    scheduled: delay > 0,
+    deferred,
+    batchDays: new Set(delays).size,
+  });
 }
 
 // Disparo do canal SMS: valida o canal ligado e o texto (não vazio e inteiro

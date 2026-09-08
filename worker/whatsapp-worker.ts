@@ -18,9 +18,12 @@ import {
   WHATSAPP_QUEUE_NAME,
   type WhatsAppJobData,
 } from "../lib/queue";
+import { sendEmail } from "../lib/ses";
 import {
+  isCircuitBreakerError,
   isPermanentSendError,
   sendTemplateMessage,
+  type WhatsAppApiError,
 } from "../lib/whatsapp/client";
 import {
   missingHeaderMedia,
@@ -214,12 +217,69 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
         error.code !== null ? String(error.code) : null,
         error.message
       );
+      if (send.campaignId && isCircuitBreakerError(error)) {
+        await tripCircuitBreaker(db, send.campaignId, error);
+      }
       return;
     }
     console.log(
       `[WORKER-WA] Enviando para ${contact.phone}... ✗ (${errorMessage(error)}) — nova tentativa em instantes`
     );
     throw error; // transitório: BullMQ reagenda com backoff
+  }
+}
+
+/**
+ * Circuit breaker (docs/plano-campanhas-whatsapp.md, tratamento do 131048):
+ * restrição do número/conta derruba TODOS os envios seguintes — interromper o
+ * resto da campanha evita centenas de tentativas inúteis contra a API
+ * justamente enquanto a Meta está medindo a qualidade do número. Os envios
+ * interrompidos ficam como "failed" com o mesmo código, então o relatório
+ * explica o que houve e o botão de reenvio retoma quando a conta normalizar.
+ * Envio de automação não passa por aqui: é um por contato, sem fila a cortar.
+ */
+async function tripCircuitBreaker(
+  db: ReturnType<typeof getDb>,
+  campaignId: string,
+  error: WhatsAppApiError
+): Promise<void> {
+  const code = String(error.code);
+  const stopped = await db
+    .update(campaignSends)
+    .set({
+      status: "failed",
+      errorCode: code,
+      errorMessage: `Interrompido sem tentativa: o erro ${code} atingiu o número durante a campanha.`,
+    })
+    .where(
+      and(
+        eq(campaignSends.campaignId, campaignId),
+        eq(campaignSends.status, "pending")
+      )
+    )
+    .returning({ id: campaignSends.id });
+
+  if (stopped.length === 0) return;
+  console.warn(
+    `[WORKER-WA] Circuit breaker: erro ${code} no número — ${stopped.length} envios da campanha ${campaignId} interrompidos.`
+  );
+
+  // Alerta por e-mail, como o webhook de qualidade (best-effort).
+  const to = process.env.WHATSAPP_ALERT_EMAIL || process.env.SES_FROM_EMAIL;
+  if (!to || !process.env.SES_FROM_EMAIL) return;
+  try {
+    await sendEmail({
+      to,
+      subject: `Alerta WhatsApp: campanha interrompida (erro ${code})`,
+      html: `<p>A Meta restringiu o número durante uma campanha e o restante do disparo foi interrompido para proteger a qualidade.</p>
+             <ul><li>Erro: <b>${code}</b> — ${error.message}</li><li>Envios interrompidos: <b>${stopped.length}</b></li></ul>
+             <p>Verifique a qualidade no Gerenciador do WhatsApp Business; quando normalizar, use o botão de reenvio no relatório da campanha.</p>`,
+    });
+  } catch (emailError) {
+    console.error(
+      "[WORKER-WA] Falha ao enviar alerta do circuit breaker:",
+      errorMessage(emailError)
+    );
   }
 }
 
