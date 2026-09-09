@@ -6,6 +6,7 @@ import {
   AlignLeft,
   AlignRight,
   ArrowLeft,
+  Blocks,
   ChevronDown,
   Image as ImageIcon,
   Images,
@@ -25,6 +26,7 @@ import {
   type DragState,
   type Selection,
 } from "@/components/builder/canvas";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -706,6 +708,8 @@ export function BuilderSidebar({
   onUpdateSettings,
   onUpdateRowHtml,
   onUpdateBlockHtml,
+  onConvertRowHtml,
+  onConvertBlockHtml,
   onClearSelection,
   onDragChange,
 }: {
@@ -723,6 +727,10 @@ export function BuilderSidebar({
   onUpdateRowHtml: (rowId: string, html: string) => void;
   /** Idem para o HTML próprio de um bloco. */
   onUpdateBlockHtml: (blockId: string, html: string) => void;
+  /** Transformar o HTML próprio da estrutura em blocos editáveis. */
+  onConvertRowHtml: (rowId: string) => void;
+  /** Idem para o HTML próprio de um bloco. */
+  onConvertBlockHtml: (blockId: string) => void;
   onClearSelection: () => void;
   onDragChange: (drag: DragState | null) => void;
 }) {
@@ -834,7 +842,10 @@ export function BuilderSidebar({
             </button>
             <div className="p-4">
               {selectedBlock.block.customHtml?.trim() ? (
-                <AvisoDeCodigoProprio o="bloco" />
+                <AvisoDeCodigoProprio
+                  o="bloco"
+                  onConverter={() => onConvertBlockHtml(selectedBlock.block.id)}
+                />
               ) : null}
               <BlockInspector
                 block={selectedBlock.block}
@@ -864,7 +875,10 @@ export function BuilderSidebar({
             </button>
             <div className="p-4">
               {selectedRow.customHtml?.trim() ? (
-                <AvisoDeCodigoProprio o="estrutura" />
+                <AvisoDeCodigoProprio
+                  o="estrutura"
+                  onConverter={() => onConvertRowHtml(selectedRow.id)}
+                />
               ) : null}
               <RowInspector
                 row={selectedRow}
@@ -1014,10 +1028,17 @@ export function BuilderSidebar({
  * Dica acima dos controles quando o pedaço tem HTML próprio.
  *
  * Nada fica travado: os ajustes abaixo são aplicados direto no código, e o
- * texto continua editável no e-mail. A dica só explica onde mexer no que os
- * controles não cobrem (a estrutura do código em si).
+ * texto continua editável no e-mail. A dica explica onde mexer no que os
+ * controles não cobrem — e oferece a saída de verdade: transformar o código
+ * em blocos do criador.
  */
-function AvisoDeCodigoProprio({ o }: { o: "bloco" | "estrutura" }) {
+function AvisoDeCodigoProprio({
+  o,
+  onConverter,
+}: {
+  o: "bloco" | "estrutura";
+  onConverter: () => void;
+}) {
   const rotulo = o === "bloco" ? "Código do bloco" : "Código da estrutura";
   return (
     <div className="mb-4 rounded-lg border border-info/30 bg-info/10 px-3 py-2.5 text-xs text-muted-foreground">
@@ -1026,6 +1047,10 @@ function AvisoDeCodigoProprio({ o }: { o: "bloco" | "estrutura" }) {
       aplicados direto no código, e o texto segue editável no e-mail. Para
       mudar a estrutura do código — ou voltar ao gerado — use o botão{" "}
       <span className="font-medium">{rotulo}</span>, acima do e-mail.
+      <Button size="sm" className="mt-2.5 w-full" onClick={onConverter}>
+        <Blocks />
+        Transformar em blocos editáveis
+      </Button>
     </div>
   );
 }

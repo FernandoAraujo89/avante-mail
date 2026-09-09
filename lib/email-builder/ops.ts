@@ -150,6 +150,41 @@ export function setRowCustomHtml(
   );
 }
 
+/**
+ * Troca uma linha por outras (o HTML próprio dela que virou estruturas).
+ * Sem linhas novas, a linha fica — apagar sem pôr nada no lugar seria perda.
+ */
+export function replaceRow(
+  design: EmailDesign,
+  rowId: string,
+  rows: Row[]
+): EmailDesign {
+  if (rows.length === 0) return design;
+  return replaceRows(
+    design,
+    design.rows.flatMap((r) => (r.id === rowId ? rows : [r]))
+  );
+}
+
+/** Idem para um bloco, no lugar em que ele estava na coluna. */
+export function replaceBlock(
+  design: EmailDesign,
+  blockId: string,
+  blocks: Block[]
+): EmailDesign {
+  if (blocks.length === 0) return design;
+  return replaceRows(
+    design,
+    design.rows.map((row) => ({
+      ...row,
+      columns: row.columns.map((col) => ({
+        ...col,
+        blocks: col.blocks.flatMap((b) => (b.id === blockId ? blocks : [b])),
+      })),
+    }))
+  );
+}
+
 /** Idem para um bloco. */
 export function setBlockCustomHtml(
   design: EmailDesign,

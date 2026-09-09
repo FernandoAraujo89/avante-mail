@@ -34,10 +34,12 @@ const TITULOS = {
  * caminho do envio. Mostrar um HTML aproximado seria pior que não mostrar:
  * a pessoa ajustaria um código que não é o que chega na caixa de entrada.
  *
- * Enquanto houver HTML próprio, os controles visuais daquele pedaço não valem
- * mais — e é isso que o aviso diz, no lugar onde a escolha é feita. Voltar é
- * apagar o campo, e o visual assume de novo; por isso o botão de voltar fica
- * aqui do lado, e não escondido.
+ * Aplicar tem dois destinos, e a escolha é feita aqui, onde se vê o código:
+ * transformar em blocos editáveis (o padrão — o HTML vira estruturas e blocos
+ * do criador) ou guardar como HTML próprio. Neste segundo caso os controles
+ * visuais daquele pedaço param de valer, e é isso que o texto do controle diz.
+ * Voltar é apagar o campo, e o visual assume de novo; por isso o botão de
+ * voltar fica aqui do lado, e não escondido.
  */
 export function CodePanel({
   alvo,
@@ -51,7 +53,8 @@ export function CodePanel({
   design: EmailDesign;
   /** HTML já salvo para este alvo, se houver. */
   htmlProprio: string | null;
-  onAplicar: (html: string) => void;
+  /** `emBlocos`: transformar o HTML em blocos editáveis, em vez de guardá-lo como próprio. */
+  onAplicar: (html: string, emBlocos: boolean) => void;
   onVoltarAoGerado: () => void;
   onFechar: () => void;
 }) {
@@ -59,9 +62,11 @@ export function CodePanel({
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
   const [avisos, setAvisos] = useState<string[]>([]);
+  const [emBlocos, setEmBlocos] = useState(true);
 
   useEffect(() => {
     if (!alvo) return;
+    setEmBlocos(true);
     // Com HTML próprio salvo, é ELE que abre — senão a tela ofereceria o código
     // gerado para quem já escreveu o seu, e salvar apagaria o trabalho.
     if (htmlProprio) {
@@ -105,15 +110,18 @@ export function CodePanel({
   // próprio bloco) — os controles seguem valendo. Os demais alvos viram
   // override: o código passa a mandar e os controles daquele pedaço param.
   const absorve = alvo.tipo === "bloco" && alvo.blockType === "text";
+  // Texto absorve sempre; os demais escolhem entre blocos e HTML próprio.
+  const podeConverter = !absorve;
+  const converte = podeConverter && emBlocos;
 
   const descricao =
     alvo.tipo === "documento"
-      ? "O e-mail inteiro, como sai do compilador. Editar aqui faz o criador visual parar de mandar no que é enviado."
+      ? "O e-mail inteiro, como sai do compilador."
       : alvo.tipo === "linha"
-        ? "A tabela desta estrutura. Editar aqui faz os blocos dentro dela pararem de valer."
+        ? "A tabela desta estrutura."
         : absorve
           ? "O <td> deste bloco. Ao aplicar, o bloco absorve o código — o conteúdo vira o texto do bloco e os controles visuais continuam valendo."
-          : "O <td> deste bloco. Editar aqui faz os controles do bloco pararem de valer.";
+          : "O <td> deste bloco.";
 
   return (
     <Dialog
@@ -141,7 +149,7 @@ export function CodePanel({
           <p className="rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2 text-xs text-warning-dark">
             {absorve
               ? "Este bloco está com HTML próprio de uma versão antiga. Ao aplicar, ele volta a ser um bloco comum, com o código absorvido."
-              : "Este pedaço já está com HTML próprio. Os controles visuais dele estão desligados até você voltar ao gerado."}
+              : "Este pedaço já está com HTML próprio: os controles visuais dele estão desligados. Aplique como blocos para voltar a editá-lo no visual, ou volte ao gerado."}
           </p>
         ) : null}
 
@@ -157,6 +165,31 @@ export function CodePanel({
             aria-label={titulo}
           />
         )}
+
+        {podeConverter ? (
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={emBlocos}
+              onChange={(e) => setEmBlocos(e.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+            />
+            <span>
+              <span className="font-medium">Transformar em blocos editáveis</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Ao aplicar, o HTML vira{" "}
+                {alvo.tipo === "bloco"
+                  ? "blocos do criador"
+                  : "estruturas e blocos do criador"}
+                , com texto editável e imagens trocáveis. Desmarque para
+                guardar o código como está: aí ele passa a mandar no que é
+                enviado, e os controles visuais{" "}
+                {alvo.tipo === "documento" ? "do e-mail" : "deste pedaço"} param
+                de valer.
+              </span>
+            </span>
+          </label>
+        ) : null}
 
         {avisos.length > 0 ? (
           <p className="text-xs text-muted-foreground">
@@ -182,10 +215,10 @@ export function CodePanel({
               Cancelar
             </Button>
             <Button
-              onClick={() => onAplicar(limparHtmlDoUsuario(codigo))}
+              onClick={() => onAplicar(limparHtmlDoUsuario(codigo), converte)}
               disabled={carregando || !codigo.trim()}
             >
-              Aplicar código
+              {converte ? "Aplicar como blocos" : "Aplicar código"}
             </Button>
           </div>
         </DialogFooter>

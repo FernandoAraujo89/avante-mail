@@ -15,7 +15,7 @@ import {
 } from "@/components/builder/code-panel";
 import { BuilderSidebar } from "@/components/builder/sidebar";
 import { Button } from "@/components/ui/button";
-import { Code2, Redo2, RotateCcw, Undo2 } from "lucide-react";
+import { Blocks, Code2, Redo2, RotateCcw, Undo2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -32,12 +32,21 @@ import {
   aplicarAttrsNoBloco,
 } from "@/lib/email-builder/absorver";
 import {
+  converterHtmlEmBlocos,
+  converterHtmlEmLinhas,
+} from "@/lib/email-builder/blocos-do-html";
+import {
+  descreverImportacao,
+  importarHtmlParaDesign,
+} from "@/lib/email-builder/importar";
+import {
   addBlock,
   addRow,
   cloneRowWithNewIds,
   createRow,
   duplicateBlock,
   duplicateRow,
+  findBlock,
   insertBlockAt,
   insertRowAt,
   moveBlock,
@@ -47,6 +56,8 @@ import {
   comCustomHtml,
   removeBlock,
   removeRow,
+  replaceBlock,
+  replaceRow,
   setBlockCustomHtml,
   setRowCustomHtml,
   updateBlock,
@@ -88,6 +99,9 @@ export function DesignEditor({
   const [drag, setDrag] = useState<DragState | null>(null);
 
   const [alvoDoCodigo, setAlvoDoCodigo] = useState<AlvoDoCodigo | null>(null);
+  // O que a última transformação de HTML em blocos conseguiu — fica na tela
+  // até a pessoa fechar, porque diz onde conferir o resultado.
+  const [avisoConversao, setAvisoConversao] = useState("");
 
   const [moduleRowId, setModuleRowId] = useState<string | null>(null);
   const [moduleName, setModuleName] = useState("");
@@ -421,7 +435,103 @@ export function DesignEditor({
     );
   };
 
-  function aplicarCodigo(alvo: AlvoDoCodigo, html: string | null) {
+  // ─── HTML → blocos editáveis ─────────────────────────────────
+  //
+  // O caminho de volta que o override não tinha: o HTML — colado, importado ou
+  // já guardado como próprio — é lido pela renderização e vira estruturas e
+  // blocos de verdade, com imagem trocável e texto editável. O que não couber
+  // fica como HTML próprio, e desfazer (Ctrl+Z) devolve o código como estava.
+
+  const CONFERIR =
+    "Confira a pré-visualização: detalhe sem equivalente nos blocos (borda, canto arredondado, fundo interno) pode ter mudado. Desfazer volta ao código.";
+
+  function contarBlocos(rows: Row[]): string {
+    const blocos = rows.reduce(
+      (total, r) => total + r.columns.reduce((c, col) => c + col.blocks.length, 0),
+      0
+    );
+    return `${rows.length} ${rows.length === 1 ? "estrutura" : "estruturas"} com ${blocos} ${blocos === 1 ? "bloco editável" : "blocos editáveis"}`;
+  }
+
+  function converterDocumento(html: string): boolean {
+    const resultado = importarHtmlParaDesign(html);
+    if (resultado.convertidas === 0) {
+      setAvisoConversao(
+        "Não deu para dividir este HTML em blocos: ele continua como HTML próprio, com o texto editável na tela e as imagens trocáveis no painel."
+      );
+      return false;
+    }
+    apply(() => resultado.design);
+    setSelection(null);
+    setAvisoConversao(`${descreverImportacao(resultado)} ${CONFERIR}`);
+    return true;
+  }
+
+  function converterLinha(rowId: string, html: string): boolean {
+    const resultado = converterHtmlEmLinhas(html, valueRef.current.settings);
+    if (resultado.convertidas === 0) {
+      setAvisoConversao(
+        "Não deu para dividir o HTML desta estrutura em blocos: ela continua como HTML próprio, com o texto editável na tela e as imagens trocáveis no painel."
+      );
+      return false;
+    }
+    apply((d) => replaceRow(d, rowId, resultado.rows));
+    setSelection({ rowId: resultado.rows[0].id });
+    const sobra =
+      resultado.cruas > 0
+        ? `; ${resultado.cruas === 1 ? "um trecho ficou" : `${resultado.cruas} trechos ficaram`} como HTML próprio`
+        : "";
+    setAvisoConversao(
+      `O HTML da estrutura virou ${contarBlocos(resultado.rows)}${sobra}. ${CONFERIR}`
+    );
+    return true;
+  }
+
+  function converterBloco(blockId: string, html: string): boolean {
+    const onde = findBlock(valueRef.current, blockId);
+    const blocos = converterHtmlEmBlocos(html, valueRef.current.settings);
+    if (!blocos || !onde) {
+      setAvisoConversao(
+        "Não deu para ler o HTML deste bloco como blocos do criador: ele continua como HTML próprio, com o texto editável na tela e as imagens trocáveis no painel."
+      );
+      return false;
+    }
+    apply((d) => replaceBlock(d, blockId, blocos));
+    setSelection({ rowId: onde.row.id, colId: onde.column.id, blockId: blocos[0].id });
+    setAvisoConversao(
+      `O HTML do bloco virou ${blocos.length === 1 ? "1 bloco editável" : `${blocos.length} blocos editáveis`}. ${CONFERIR}`
+    );
+    return true;
+  }
+
+  /** Transforma o HTML do alvo em blocos; false quando não deu (o código fica). */
+  function converterAlvo(alvo: AlvoDoCodigo, html: string): boolean {
+    try {
+      if (alvo.tipo === "documento") return converterDocumento(html);
+      if (alvo.tipo === "linha") return converterLinha(alvo.id, html);
+      return converterBloco(alvo.id, html);
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
+  function converterHtmlProprio(alvo: AlvoDoCodigo) {
+    const html = htmlProprioDoAlvo(alvo);
+    if (html) converterAlvo(alvo, html);
+  }
+
+  function aplicarCodigo(
+    alvo: AlvoDoCodigo,
+    html: string | null,
+    emBlocos = false
+  ) {
+    if (html && emBlocos && converterAlvo(alvo, html)) {
+      setAlvoDoCodigo(null);
+      return;
+    }
+    // Sem conversão (pedida ou conseguida), o código fica como HTML próprio —
+    // que é o que se tinha antes: nada se perde.
     if (alvo.tipo === "documento") {
       apply((d) => comCustomHtml(d, html));
     } else if (alvo.tipo === "linha") {
@@ -474,8 +584,16 @@ export function DesignEditor({
           <span>
             Este e-mail está com <strong>HTML próprio</strong>. O criador visual
             continua guardando o que você monta, mas quem é enviado é o código.
+            Transforme o código em blocos para editá-lo aqui, no visual.
           </span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => converterHtmlProprio({ tipo: "documento" })}
+            >
+              <Blocks />
+              Transformar em blocos editáveis
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -493,6 +611,20 @@ export function DesignEditor({
               Voltar ao visual
             </Button>
           </div>
+        </div>
+      ) : null}
+
+      {avisoConversao ? (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 text-sm text-primary">
+          <span>{avisoConversao}</span>
+          <button
+            type="button"
+            onClick={() => setAvisoConversao("")}
+            aria-label="Fechar aviso"
+            className="shrink-0 rounded p-0.5 hover:bg-primary/10"
+          >
+            <X className="size-4" />
+          </button>
         </div>
       ) : null}
 
@@ -579,6 +711,20 @@ export function DesignEditor({
             onUpdateBlockHtml={(blockId, html) =>
               apply((d) => setBlockCustomHtml(d, blockId, html))
             }
+            onConvertRowHtml={(rowId) =>
+              converterHtmlProprio({ tipo: "linha", id: rowId })
+            }
+            onConvertBlockHtml={(blockId) => {
+              const bloco = acharBloco(blockId);
+              if (bloco) {
+                converterHtmlProprio({
+                  tipo: "bloco",
+                  id: blockId,
+                  rotulo: BLOCK_LABELS[bloco.type],
+                  blockType: bloco.type,
+                });
+              }
+            }}
             onClearSelection={() => setSelection(null)}
             onDragChange={setDrag}
           />
@@ -589,7 +735,9 @@ export function DesignEditor({
         alvo={alvoDoCodigo}
         design={value}
         htmlProprio={alvoDoCodigo ? htmlProprioDoAlvo(alvoDoCodigo) : null}
-        onAplicar={(html) => alvoDoCodigo && aplicarCodigo(alvoDoCodigo, html)}
+        onAplicar={(html, emBlocos) =>
+          alvoDoCodigo && aplicarCodigo(alvoDoCodigo, html, emBlocos)
+        }
         onVoltarAoGerado={() =>
           alvoDoCodigo && aplicarCodigo(alvoDoCodigo, null)
         }

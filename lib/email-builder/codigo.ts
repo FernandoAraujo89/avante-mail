@@ -37,6 +37,11 @@ export function limparHtmlDoUsuario(html: string): string {
   return html
     .replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
     .replace(/<script\b[^>]*\/?>/gi, "")
+    // Quadro, objeto e embed são outra porta para código (um `<iframe
+    // srcdoc>` roda script na mesma origem) e nenhum cliente de e-mail os
+    // mostra: saem inteiros.
+    .replace(/<(iframe|object|embed)\b[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(iframe|object|embed)\b[^>]*\/?>/gi, "")
     .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/(href|src|background)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1="#"');
 }

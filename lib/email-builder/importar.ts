@@ -11,13 +11,24 @@
 // fato na caixa de entrada.
 //
 // Nem todo HTML cabe no modelo, e forçar seria pior que não converter: o que
-// não é reconhecido desce um degrau de cada vez — a seção inteira vira uma
-// estrutura com HTML próprio (ainda editável no canvas, ainda movível) e, se
-// nem isso der, o e-mail inteiro fica como HTML do documento. Nenhum caminho
-// perde conteúdo.
+// não é reconhecido desce um degrau de cada vez — a seção que não tem a
+// assinatura do MJML passa pela leitura genérica (lib/email-builder/
+// blocos-do-html.ts, que lê o HTML renderizado), a que nem assim vira blocos
+// fica como estrutura com HTML próprio (ainda editável no canvas, ainda
+// movível) e, se nem isso der, o e-mail inteiro fica como HTML do documento.
+// Nenhum caminho perde conteúdo.
 //
-// Roda só no navegador (DOMParser), como o resto do criador.
+// Roda só no navegador (o HTML é renderizado num iframe invisível para ser
+// lido), como o resto do criador.
 
+import {
+  amostrarTipografia,
+  aplicarTipografia,
+  comDocumentoRenderizado,
+  converterElementosEmLinhas,
+  criarPalco,
+  fundoDaPagina,
+} from "./blocos-do-html";
 import { limparHtmlDoUsuario } from "./codigo";
 import { createColumn, createRow, uid } from "./ops";
 import { DEFAULT_SETTINGS, ENTRELINHA_PADRAO } from "./presets";
@@ -485,9 +496,16 @@ function acharContainer(body: HTMLElement): Element {
  * diferentes e quebraria o e-mail no Outlook — por isso o grupo só fecha no
  * comentário seguinte ao próximo elemento.
  */
-function agruparSecoes(container: Element): string[] {
-  const grupos: string[] = [];
+interface Grupo {
+  html: string;
+  /** Os elementos do grupo, vivos no documento renderizado. */
+  elementos: Element[];
+}
+
+function agruparSecoes(container: Element): Grupo[] {
+  const grupos: Grupo[] = [];
   let atual: string[] = [];
+  let elementos: Element[] = [];
   let temElemento = false;
 
   for (const no of Array.from(container.childNodes)) {
@@ -506,15 +524,19 @@ function agruparSecoes(container: Element): string[] {
     if (estaEscondido(el)) continue;
 
     if (temElemento) {
-      grupos.push(atual.join(""));
+      grupos.push({ html: atual.join(""), elementos });
       atual = [];
+      elementos = [];
     }
     atual.push(el.outerHTML);
+    elementos.push(el);
     temElemento = true;
   }
 
-  if (temElemento) grupos.push(atual.join(""));
-  return grupos.map((g) => g.trim()).filter(Boolean);
+  if (temElemento) grupos.push({ html: atual.join(""), elementos });
+  return grupos
+    .map((g) => ({ ...g, html: g.html.trim() }))
+    .filter((g) => g.html);
 }
 
 function linhaComHtml(html: string): Row {
@@ -541,60 +563,98 @@ export interface ResultadoDaImportacao {
  */
 export function importarHtmlParaDesign(html: string): ResultadoDaImportacao {
   const limpo = limparHtmlDoUsuario(html);
-  const doc = new DOMParser().parseFromString(limpo, "text/html");
+  return comDocumentoRenderizado(limpo, (doc, win) => {
+    const p = criarPalco(doc, win);
+    const settings: DesignSettings = { ...DEFAULT_SETTINGS };
 
-  const settings: DesignSettings = { ...DEFAULT_SETTINGS };
-  const fundoDoCorpo = estilo(doc.body, "background-color");
-  if (ehHex(fundoDoCorpo)) settings.bodyBackground = fundoDoCorpo.trim();
+    const grupos = agruparSecoes(acharContainer(doc.body));
 
-  const secoes = agruparSecoes(acharContainer(doc.body));
+    if (grupos.length === 0) {
+      // Nada reconhecível para quebrar: guarda o e-mail inteiro como HTML
+      // próprio do documento — o aviso do editor explica que quem manda ali é
+      // o código.
+      return {
+        design: { version: 1, settings, rows: [], customHtml: limpo },
+        convertidas: 0,
+        cruas: 0,
+      };
+    }
 
-  if (secoes.length === 0) {
-    // Nada reconhecível para quebrar: guarda o e-mail inteiro como HTML
-    // próprio do documento — o aviso do editor explica que quem manda ali é
-    // o código.
+    const rows: Row[] = [];
+    const familias = new Map<string, string>();
+    let convertidas = 0;
+    let cruas = 0;
+    for (const grupo of grupos) {
+      // Primeiro a leitura exata do MJML; o que ela não reconhece vai para a
+      // leitura pela renderização; só o que nem esta consegue fica como código.
+      const linha = converterSecao(grupo.html);
+      if (linha) {
+        rows.push(linha);
+        convertidas += 1;
+        continue;
+      }
+      const generica = converterElementosEmLinhas(p, grupo.elementos);
+      if (generica.rows.length > 0) {
+        rows.push(...generica.rows);
+        convertidas += generica.convertidas;
+        cruas += generica.cruas;
+        generica.familias.forEach((familia, id) => familias.set(id, familia));
+      } else {
+        rows.push(linhaComHtml(grupo.html));
+        cruas += 1;
+      }
+    }
+
+    // As configurações do e-mail vêm do próprio e-mail: o fundo da página, a
+    // tipografia que domina e, como fundo do conteúdo, a cor mais comum entre
+    // as seções — para o canvas e o e-mail combinarem já na abertura.
+    settings.bodyBackground = fundoDaPagina(p) ?? settings.bodyBackground;
+    const tipografia = amostrarTipografia(p, doc.body);
+    if (tipografia) Object.assign(settings, tipografia);
+    const fundos = new Map<string, number>();
+    for (const row of rows) {
+      const cor = row.attrs.backgroundColor;
+      if (cor) fundos.set(cor, (fundos.get(cor) ?? 0) + 1);
+    }
+    let maior = 0;
+    for (const [cor, n] of fundos) {
+      if (n > maior) {
+        maior = n;
+        settings.contentBackground = cor;
+      }
+    }
+
+    // Seção da cor do conteúdo passa a herdar (""): o controle global vale
+    // para ela. O mesmo vale para a cor e a fonte dos blocos de texto.
+    const rowsFinais = aplicarTipografia(
+      rows.map((row) =>
+        row.attrs.backgroundColor === settings.contentBackground
+          ? { ...row, attrs: { ...row.attrs, backgroundColor: "" } }
+          : row
+      ),
+      settings,
+      familias
+    );
+
+    // O `<style>` do cabeçalho (media queries do MJML) só faz falta enquanto
+    // sobrar seção crua: o que virou bloco é recompilado e ganha as regras de
+    // novo. Guardá-lo à toa duplicaria CSS dentro do e-mail.
+    if (cruas > 0) {
+      const estilos = Array.from(doc.querySelectorAll("style"))
+        .map((el) => el.outerHTML)
+        .join("\n");
+      const primeiraCrua = rowsFinais.find((r) => r.customHtml);
+      if (estilos && primeiraCrua) {
+        primeiraCrua.customHtml = `${estilos}\n${primeiraCrua.customHtml}`;
+      }
+    }
+
     return {
-      design: { version: 1, settings, rows: [], customHtml: limpo },
-      convertidas: 0,
-      cruas: 0,
+      design: { version: 1, settings, rows: rowsFinais },
+      convertidas,
+      cruas,
     };
-  }
-
-  const rows: Row[] = [];
-  let convertidas = 0;
-  let cruas = 0;
-  for (const secao of secoes) {
-    const linha = converterSecao(secao);
-    if (linha) {
-      rows.push(linha);
-      convertidas += 1;
-    } else {
-      rows.push(linhaComHtml(secao));
-      cruas += 1;
-    }
-  }
-
-  // A primeira seção convertida dá o fundo do conteúdo, para o canvas e o
-  // e-mail combinarem já na abertura.
-  const primeiraComFundo = rows.find((r) => r.attrs.backgroundColor);
-  if (primeiraComFundo) {
-    settings.contentBackground = primeiraComFundo.attrs.backgroundColor;
-  }
-
-  // O `<style>` do cabeçalho (media queries do MJML) só faz falta enquanto
-  // sobrar seção crua: o que virou bloco é recompilado e ganha as regras de
-  // novo. Guardá-lo à toa duplicaria CSS dentro do e-mail.
-  if (cruas > 0) {
-    const estilos = Array.from(doc.querySelectorAll("style"))
-      .map((el) => el.outerHTML)
-      .join("\n");
-    const primeiraCrua = rows.find((r) => r.customHtml);
-    if (estilos && primeiraCrua) {
-      primeiraCrua.customHtml = `${estilos}\n${primeiraCrua.customHtml}`;
-    }
-  }
-
-  return { design: { version: 1, settings, rows }, convertidas, cruas };
+  });
 }
 
 /**
@@ -619,7 +679,7 @@ export function descreverImportacao(
       : `As ${convertidas} seções do e-mail viraram estruturas com blocos editáveis.`;
   }
   if (convertidas === 0) {
-    return `${cruas === 1 ? "A seção" : `As ${cruas} seções`} do e-mail ${cruas === 1 ? "ficou" : "ficaram"} como HTML próprio: o formato não corresponde aos blocos do criador. O texto continua editável na tela.`;
+    return `${cruas === 1 ? "A seção" : `As ${cruas} seções`} do e-mail ${cruas === 1 ? "ficou" : "ficaram"} como HTML próprio: o formato não corresponde aos blocos do criador. O texto continua editável na tela, e as imagens são trocáveis no painel.`;
   }
   return `${convertidas} de ${convertidas + cruas} seções viraram blocos editáveis; ${cruas === 1 ? "a outra ficou" : `as outras ${cruas} ficaram`} como HTML próprio, com o texto ainda editável na tela.`;
 }
