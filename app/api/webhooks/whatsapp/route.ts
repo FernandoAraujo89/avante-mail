@@ -17,6 +17,7 @@ import {
 import {
   applyConversationMessageStatus,
   recordInboundMessage,
+  sendAutoReplyIfNeeded,
   sendTextInConversation,
 } from "@/lib/whatsapp/conversations";
 import {
@@ -233,6 +234,18 @@ async function handleInboundMessage(
   // Reentrega de um evento já gravado: tudo abaixo já aconteceu uma vez.
   if (!record) return;
 
+  // "Este número não é canal de atendimento" — vale também para quem não está
+  // na base. As regras (SAIR, toque de botão, equipe atendendo, uma vez a cada
+  // 24h) moram em lib/whatsapp/auto-reply.ts.
+  const autoReply = await sendAutoReplyIfNeeded({
+    conversationId: record.conversationId,
+    to: message.waId,
+    message,
+  });
+  if (autoReply === "failed") {
+    console.error("[WEBHOOK-WA] Resposta automática não foi entregue à Meta.");
+  }
+
   const { contact, send } = record;
   if (!contact || message.isReaction) return;
 
@@ -270,6 +283,7 @@ async function handleInboundMessage(
         to: message.waId,
         text: "Pronto! Você não vai mais receber nossas mensagens por aqui. Se mudar de ideia, é só responder.",
         sentBy: { id: null, name: "Resposta automática (descadastro)" },
+        automatic: true,
       });
       if (error) {
         console.error("[WEBHOOK-WA] Falha ao confirmar opt-out:", error);

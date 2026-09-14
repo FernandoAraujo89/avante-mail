@@ -40,6 +40,8 @@ export interface ThreadMessage {
   errorCode: string | null;
   errorMessage: string | null;
   sentByName: string | null;
+  /** Botão de link da mensagem (a resposta automática leva um). */
+  cta: { text: string; url: string } | null;
   at: string;
   /** Texto da mensagem citada, quando ela está nesta conversa. */
   quoted: string | null;

@@ -206,6 +206,46 @@ export async function sendTextMessage(args: {
 }
 
 /**
+ * Mensagem interativa com UM botão de link (cta_url) — como a texto livre, só
+ * dentro da janela de 24h aberta pelo contato. Usada na resposta automática:
+ * o botão abre a conversa com o atendimento.
+ * Limites da Meta: corpo até 1024 caracteres, rótulo do botão até 20.
+ */
+export async function sendCtaUrlMessage(args: {
+  to: string;
+  body: string;
+  buttonText: string;
+  url: string;
+}): Promise<{ wamid: string }> {
+  const json = await graphRequest<{ messages?: { id: string }[] }>(
+    `${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: args.to,
+        type: "interactive",
+        interactive: {
+          type: "cta_url",
+          body: { text: args.body },
+          action: {
+            name: "cta_url",
+            parameters: { display_text: args.buttonText, url: args.url },
+          },
+        },
+      }),
+    }
+  );
+
+  const wamid = json.messages?.[0]?.id;
+  if (!wamid) {
+    throw new Error("Resposta da Cloud API sem o id da mensagem (wamid).");
+  }
+  return { wamid };
+}
+
+/**
  * Confirmação de leitura: o contato vê os dois tiques azuis na mensagem dele
  * (e em todas as anteriores). Marca a mais recente e vale para a conversa.
  */

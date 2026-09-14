@@ -541,6 +541,39 @@ async function main() {
     check("read_at e delivered_at preenchidos", msg?.read_at !== null && msg?.delivered_at !== null);
   }
 
+  // 16. Resposta automática — só com o servidor configurado para enviar (a
+  // Graph API falsa de WHATSAPP_GRAPH_BASE_URL serve). Rode com
+  // ESPERA_RESPOSTA_AUTOMATICA=1 para conferir; sem isso a seção é pulada.
+  if (process.env.ESPERA_RESPOSTA_AUTOMATICA === "1") {
+    console.log("16) Resposta automática: uma por conversa, nunca para toque de botão");
+    const automaticas = async (phone: string) => {
+      const r = await db.query(
+        `select m.type, m.status from whatsapp_messages m
+           join whatsapp_conversations w on w.id = m.conversation_id
+          where w.phone = $1 and m.direction = 'outbound' and m.sent_by_name = 'Resposta automática'`,
+        [phone]
+      );
+      return r.rows;
+    };
+    // O número desconhecido já escreveu uma vez (seção 14); escreve de novo.
+    await postSigned(
+      messagesPayload(PHONE_DESCONHECIDO.slice(1), {
+        id: uniqueWamid("desconhecido2"),
+        timestamp: nowUnix(),
+        type: "text",
+        text: { body: "Alguém aí?" },
+      })
+    );
+    const doDesconhecido = await automaticas(PHONE_DESCONHECIDO);
+    check("duas mensagens, uma resposta automática", doDesconhecido.length === 1, JSON.stringify(doDesconhecido));
+    check("vai com botão (interactive)", doDesconhecido[0]?.type === "interactive", JSON.stringify(doDesconhecido));
+    // C tocou botões (8 e 10) e escreveu texto (11): só o texto gera o aviso.
+    const doC = await automaticas(PHONE_C);
+    check("toque de botão não gera aviso; o texto seguinte gera um", doC.length === 1, JSON.stringify(doC));
+  } else {
+    console.log("16) Resposta automática: pulada (defina ESPERA_RESPOSTA_AUTOMATICA=1 com o servidor configurado)");
+  }
+
   await cleanup();
   await db.end();
 

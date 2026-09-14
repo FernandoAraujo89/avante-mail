@@ -184,6 +184,7 @@ export function ConversationThread({
       errorCode: null,
       errorMessage: null,
       sentByName: null,
+      cta: null,
       at: new Date().toISOString(),
       quoted: null,
     });

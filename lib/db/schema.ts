@@ -947,6 +947,12 @@ export const whatsappConversations = pgTable(
       .$type<WhatsAppMessageDirection>(),
     /** Mensagens do contato ainda não abertas por ninguém da equipe. */
     unreadCount: integer("unread_count").notNull().default(0),
+    /**
+     * Última resposta automática ("aqui não é atendimento"). É a trava de uma
+     * por conversa a cada 24h, reservada com UPDATE condicional: duas
+     * mensagens chegando juntas não mandam o aviso duas vezes.
+     */
+    autoRepliedAt: timestamp("auto_replied_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

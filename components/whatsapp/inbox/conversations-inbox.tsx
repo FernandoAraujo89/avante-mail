@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MessagesSquare } from "lucide-react";
 
+import { AutoReplySettingsButton } from "@/components/whatsapp/inbox/auto-reply-settings";
 import { ConversationList } from "@/components/whatsapp/inbox/conversation-list";
 import { ConversationThread } from "@/components/whatsapp/inbox/conversation-thread";
 import { UNREAD_CHANGED_EVENT } from "@/lib/whatsapp/inbox-events";
@@ -81,12 +82,20 @@ export function ConversationsInbox() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Na tela estreita, com uma conversa aberta, o título cede o espaço. */}
-      <div className={cn("mb-4", selectedId && "hidden md:block")}>
-        <h1 className="text-2xl font-bold tracking-tight">Conversas</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          O que os contatos respondem no WhatsApp. Até 24h depois da última
-          mensagem do contato, dá para responder por aqui.
-        </p>
+      <div
+        className={cn(
+          "mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2",
+          selectedId && "hidden md:flex"
+        )}
+      >
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight">Conversas</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            O que os contatos respondem no WhatsApp. Até 24h depois da última
+            mensagem do contato, dá para responder por aqui.
+          </p>
+        </div>
+        <AutoReplySettingsButton />
       </div>
 
       <div className="@container flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card shadow-sm">

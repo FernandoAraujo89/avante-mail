@@ -6,7 +6,8 @@ import { Client } from "pg";
 // - whatsapp_conversations: uma por número, com os resumos da lista;
 // - whatsapp_messages: o que o contato escreve e o que a equipe responde;
 // - campaign_sends.reply_button(_at): o botão de resposta rápida tocado, que é
-//   o que o relatório da campanha apura.
+//   o que o relatório da campanha apura;
+// - whatsapp_conversations.auto_replied_at: a trava da resposta automática.
 // Nada aqui altera dado existente. Rode: `npx tsx scripts/migrate-whatsapp-conversas.ts`
 
 config({ path: ".env.local" });
@@ -57,6 +58,11 @@ async function main() {
   await client.query(
     `CREATE INDEX IF NOT EXISTS whatsapp_conversations_contato_idx
        ON whatsapp_conversations (contact_id)`
+  );
+
+  console.log("[MIGRATE] whatsapp_conversations: trava da resposta automática...");
+  await client.query(
+    `ALTER TABLE whatsapp_conversations ADD COLUMN IF NOT EXISTS auto_replied_at timestamptz`
   );
 
   console.log("[MIGRATE] Criando tabela whatsapp_messages...");

@@ -7,6 +7,7 @@ import {
   CheckCheck,
   CircleAlert,
   Clock,
+  ExternalLink,
   FileText,
   Megaphone,
   MousePointerClick,
@@ -168,7 +169,9 @@ function MessageBubble({ item }: { item: ThreadMessage }) {
     );
   }
 
-  const isButton = item.type === "button" || item.type === "interactive";
+  // Toque de botão é do contato; "interactive" nosso é a resposta automática.
+  const isButton =
+    !outbound && (item.type === "button" || item.type === "interactive");
   const fallback =
     !item.body && !item.hasMedia ? messagePreview({ type: item.type, body: null }) : null;
 
@@ -212,6 +215,18 @@ function MessageBubble({ item }: { item: ThreadMessage }) {
           <time dateTime={item.at}>{formatTime(item.at)}</time>
           {outbound ? <StatusIcon status={item.status} /> : null}
         </p>
+        {item.cta ? (
+          // Como o WhatsApp mostra o botão de link: uma faixa no pé do balão.
+          <a
+            href={item.cta.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="-mx-2.5 -mb-1.5 mt-1 flex items-center justify-center gap-1 border-t border-black/10 px-2.5 py-2 text-sm font-medium text-[#027eb5] hover:bg-black/5"
+          >
+            <ExternalLink className="size-3.5" aria-hidden="true" />
+            {item.cta.text}
+          </a>
+        ) : null}
         {outbound && item.status === "failed" ? (
           <FailureNote errorCode={item.errorCode} errorMessage={item.errorMessage} />
         ) : null}

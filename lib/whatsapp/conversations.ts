@@ -8,7 +8,9 @@ import {
   ilike,
   inArray,
   isNotNull,
+  isNull,
   lte,
+  max,
   ne,
   or,
   sql,
@@ -30,9 +32,24 @@ import {
   type WhatsAppTemplate,
 } from "@/lib/db";
 import { formatPhone } from "@/lib/phone";
+import { getSetting } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
 
-import { isWhatsAppConfigured, sendTextMessage, WhatsAppApiError } from "./client";
+import {
+  AUTO_REPLY_INTERVAL_MS,
+  AUTO_REPLY_SENDER_NAME,
+  AUTO_REPLY_SETTING_KEY,
+  autoReplyDecision,
+  buildAutoReply,
+  readAutoReplySettings,
+  type AutoReplySkipReason,
+} from "./auto-reply";
+import {
+  isWhatsAppConfigured,
+  sendCtaUrlMessage,
+  sendTextMessage,
+  WhatsAppApiError,
+} from "./client";
 import {
   attributionStrategy,
   messagePreview,
@@ -54,7 +71,11 @@ import {
   type WhatsAppVariableMap,
 } from "./types";
 import { resolveVariables } from "./variables";
-import { whatsappStatusPatch, type StatusEvent } from "./webhook";
+import {
+  isOptOutMessage,
+  whatsappStatusPatch,
+  type StatusEvent,
+} from "./webhook";
 
 // A caixa de conversas no banco: gravar o que chega, mandar o que a equipe
 // responde e montar a conversa para a tela. A interpretação da mensagem (tipo,
@@ -300,6 +321,11 @@ export async function sendTextInConversation(args: {
   to: string;
   text: string;
   sentBy: { id: string | null; name: string };
+  /**
+   * Mensagem do sistema (confirmação de descadastro): não troca o resumo da
+   * lista de conversas — ali importa o que o contato disse por último.
+   */
+  automatic?: boolean;
 }): Promise<{ message: WhatsAppMessage; error: string | null }> {
   const db = getDb();
   const now = new Date();
@@ -318,14 +344,16 @@ export async function sendTextInConversation(args: {
     })
     .returning();
 
-  await db
-    .update(whatsappConversations)
-    .set({
-      lastMessageAt: sql`greatest(${whatsappConversations.lastMessageAt}, ${now}::timestamptz)`,
-      lastMessagePreview: messagePreview({ type: "text", body: args.text }),
-      lastMessageDirection: "outbound",
-    })
-    .where(eq(whatsappConversations.id, args.conversationId));
+  if (!args.automatic) {
+    await db
+      .update(whatsappConversations)
+      .set({
+        lastMessageAt: sql`greatest(${whatsappConversations.lastMessageAt}, ${now}::timestamptz)`,
+        lastMessagePreview: messagePreview({ type: "text", body: args.text }),
+        lastMessageDirection: "outbound",
+      })
+      .where(eq(whatsappConversations.id, args.conversationId));
+  }
 
   try {
     const { wamid } = await sendTextMessage({
@@ -350,6 +378,152 @@ export async function sendTextInConversation(args: {
       .where(eq(whatsappMessages.id, pending.id))
       .returning();
     return { message: failed ?? pending, error: errorMessage(error) };
+  }
+}
+
+export type AutoReplyOutcome =
+  | "sent"
+  | "failed"
+  | "not_configured"
+  | AutoReplySkipReason;
+
+/**
+ * Resposta automática ao que o contato acabou de mandar ("este número não é
+ * canal de atendimento", com o botão para o Sucesso do Cliente). As regras de
+ * quando responder são puras e testadas em lib/whatsapp/auto-reply.ts; aqui
+ * ficam a leitura do banco, a reserva e o envio.
+ *
+ * Não lança: resposta automática que falha não pode fazer o webhook falhar.
+ * A falha fica gravada na conversa, onde a equipe vê.
+ */
+export async function sendAutoReplyIfNeeded(args: {
+  conversationId: string;
+  /** wa_id de quem escreveu. */
+  to: string;
+  message: ParsedInboundMessage;
+}): Promise<AutoReplyOutcome> {
+  if (!isWhatsAppConfigured()) return "not_configured";
+  const db = getDb();
+  const now = new Date();
+
+  const settings = readAutoReplySettings(await getSetting(AUTO_REPLY_SETTING_KEY));
+  const [conversation] = await db
+    .select({ autoRepliedAt: whatsappConversations.autoRepliedAt })
+    .from(whatsappConversations)
+    .where(eq(whatsappConversations.id, args.conversationId));
+  // Resposta de gente da equipe (com usuário) — a automática não conta.
+  const [team] = await db
+    .select({ at: max(whatsappMessages.createdAt) })
+    .from(whatsappMessages)
+    .where(
+      and(
+        eq(whatsappMessages.conversationId, args.conversationId),
+        eq(whatsappMessages.direction, "outbound"),
+        isNotNull(whatsappMessages.sentByUserId)
+      )
+    );
+
+  const decision = autoReplyDecision({
+    settings,
+    message: args.message,
+    isOptOut: isOptOutMessage(args.message.body),
+    lastTeamReplyAt: team?.at ?? null,
+    lastAutoReplyAt: conversation?.autoRepliedAt ?? null,
+    now,
+  });
+  if (!decision.send) return decision.reason;
+
+  // Reserva condicional: com duas mensagens do mesmo contato processadas ao
+  // mesmo tempo, só uma passa daqui.
+  const claimed = await db
+    .update(whatsappConversations)
+    .set({ autoRepliedAt: now })
+    .where(
+      and(
+        eq(whatsappConversations.id, args.conversationId),
+        or(
+          isNull(whatsappConversations.autoRepliedAt),
+          lte(
+            whatsappConversations.autoRepliedAt,
+            new Date(now.getTime() - AUTO_REPLY_INTERVAL_MS)
+          )
+        )
+      )
+    )
+    .returning({ id: whatsappConversations.id });
+  if (claimed.length === 0) return "recent";
+
+  const content = buildAutoReply(settings, formatPhone);
+  let outcome: {
+    type: string;
+    body: string;
+    raw: Record<string, unknown> | null;
+    wamid: string | null;
+    error: unknown;
+  } = {
+    type: "interactive",
+    body: content.body,
+    // Guardado para a conversa desenhar o botão como o contato o viu.
+    raw: { cta: { text: content.buttonText, url: content.url } },
+    wamid: null,
+    error: null,
+  };
+
+  try {
+    outcome.wamid = (
+      await sendCtaUrlMessage({
+        to: args.to,
+        body: content.body,
+        buttonText: content.buttonText,
+        url: content.url,
+      })
+    ).wamid;
+  } catch (error) {
+    outcome.error = error;
+    // A Meta recusou a mensagem com botão (parâmetro, versão do aplicativo):
+    // o aviso vai em texto, com o link no fim — o contato não fica sem saber
+    // para onde ir. Falha de rede não tem segunda tentativa aqui.
+    if (error instanceof WhatsAppApiError) {
+      try {
+        const { wamid } = await sendTextMessage({
+          to: args.to,
+          text: content.fallbackText,
+          previewUrl: true,
+        });
+        outcome = { type: "text", body: content.fallbackText, raw: null, wamid, error: null };
+      } catch (fallbackError) {
+        outcome.error = fallbackError;
+      }
+    }
+  }
+
+  try {
+    const failed = outcome.error !== null;
+    await db.insert(whatsappMessages).values({
+      conversationId: args.conversationId,
+      direction: "outbound",
+      type: outcome.type,
+      body: outcome.body,
+      raw: outcome.raw,
+      wamid: outcome.wamid,
+      status: failed ? "failed" : "sent",
+      sentAt: failed ? null : new Date(),
+      errorCode:
+        outcome.error instanceof WhatsAppApiError && outcome.error.code !== null
+          ? String(outcome.error.code)
+          : null,
+      errorMessage: failed ? errorMessage(outcome.error) : null,
+      sentByUserId: null,
+      sentByName: AUTO_REPLY_SENDER_NAME,
+      createdAt: now,
+    });
+    return failed ? "failed" : "sent";
+  } catch (error) {
+    console.error(
+      "[WHATSAPP] Resposta automática sem registro na conversa:",
+      errorMessage(error)
+    );
+    return outcome.error !== null ? "failed" : "sent";
   }
 }
 
@@ -546,6 +720,15 @@ export async function conversationIdsByContact(
   return map;
 }
 
+/** O botão de link de uma mensagem nossa (a resposta automática), se tiver. */
+function ctaOf(message: WhatsAppMessage): { text: string; url: string } | null {
+  if (message.direction !== "outbound") return null;
+  const cta = message.raw?.cta as { text?: unknown; url?: unknown } | undefined;
+  return typeof cta?.text === "string" && typeof cta?.url === "string"
+    ? { text: cta.text, url: cta.url }
+    : null;
+}
+
 /** Quantas mensagens a conversa carrega de uma vez (as mais recentes). */
 const THREAD_MESSAGE_LIMIT = 500;
 /** Modelos de campanha/automação mostrados na conversa (os mais recentes). */
@@ -735,6 +918,7 @@ export async function loadConversationThread(
     errorCode: m.errorCode,
     errorMessage: m.errorMessage,
     sentByName: m.sentByName,
+    cta: ctaOf(m),
     at: m.createdAt.toISOString(),
     // O toque de botão já diz a que respondeu pelo próprio balão do modelo.
     quoted:
