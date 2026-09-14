@@ -8,6 +8,7 @@ import {
   Download,
   MessagesSquare,
   Search,
+  Send,
 } from "lucide-react";
 
 import { SendStatusBadge, sendStatusLabel } from "@/components/status-badge";
@@ -41,7 +42,13 @@ import {
   describeWhatsAppError,
 } from "@/lib/whatsapp/errors";
 import { plainWhatsAppText } from "@/lib/whatsapp/format";
-import { reachedRecipient, replyOf } from "@/lib/whatsapp/replies";
+import {
+  isReplyGroup,
+  REPLY_GROUP,
+  replyGroupLabel,
+  replyGroupOf,
+  replyGroupSentence,
+} from "@/lib/whatsapp/replies";
 import type { SendStatus } from "@/lib/db";
 
 type Data = Date | string | null;
@@ -75,42 +82,15 @@ const PAGE_SIZES = [50, 100];
 const TODOS = "todos";
 const POR_STATUS = "status:";
 const POR_MOTIVO = "motivo:";
-const POR_RESPOSTA = "resposta:";
 
-/**
- * Valor do filtro "Resposta". Exportado para a apuração dos botões, acima da
- * tabela, filtrar a lista pelo mesmo critério quando alguém clica numa linha.
- */
-export const REPLY_FILTER = {
-  button: (text: string) => `${POR_RESPOSTA}botao:${text}`,
-  text: `${POR_RESPOSTA}texto`,
-  none: `${POR_RESPOSTA}nenhuma`,
-};
-
-/** Em que valor do filtro "Resposta" o envio cai (null = não recebeu). */
+/** O grupo de resposta do envio (lib/whatsapp/replies.ts), com a linha da tabela. */
 function replyFilterOf(send: SendTableRow): string | null {
-  const reply = replyOf({
+  return replyGroupOf({
     status: send.status,
     deliveredAt: send.deliveredAt,
     repliedAt: send.repliedAt,
     replyButton: send.replyButton ?? null,
   });
-  if (reply.kind === "button") return REPLY_FILTER.button(reply.text);
-  if (reply.kind === "text") return REPLY_FILTER.text;
-  return reachedRecipient({
-    status: send.status,
-    deliveredAt: send.deliveredAt,
-    repliedAt: send.repliedAt,
-    replyButton: send.replyButton ?? null,
-  })
-    ? REPLY_FILTER.none
-    : null;
-}
-
-function replyFilterLabel(value: string): string {
-  if (value === REPLY_FILTER.text) return "Respondeu com mensagem";
-  if (value === REPLY_FILTER.none) return "Recebeu e não respondeu";
-  return value.slice(REPLY_FILTER.button("").length);
 }
 
 function tempo(valor: Data): number {
@@ -179,6 +159,7 @@ export function SendsTable({
   channel,
   vazio,
   nomeDoDisparo,
+  campaignId,
   filtro: filtroControlado,
   onFiltroChange,
 }: {
@@ -187,6 +168,8 @@ export function SendsTable({
   vazio: string;
   /** Nome da campanha — vira o nome do arquivo exportado. */
   nomeDoDisparo?: string;
+  /** Campanha do relatório: habilita a campanha nova para um grupo de resposta. */
+  campaignId?: string;
   /** Filtro controlado de fora (a apuração dos botões filtra a tabela). */
   filtro?: string;
   onFiltroChange?: (valor: string) => void;
@@ -241,7 +224,7 @@ export function SendsTable({
     }
     // Botões primeiro (mais tocado no topo); escrever e não responder no fim.
     const peso = (valor: string) =>
-      valor === REPLY_FILTER.text ? 1 : valor === REPLY_FILTER.none ? 2 : 0;
+      valor === REPLY_GROUP.text ? 1 : valor === REPLY_GROUP.none ? 2 : 0;
     return {
       respostaOpcoes: [...respostas.entries()]
         .map(([value, count]) => ({ value, count }))
@@ -263,7 +246,7 @@ export function SendsTable({
       } else if (filtro.startsWith(POR_MOTIVO)) {
         const { motivo } = describeSendForExport(s, channel);
         if (motivo !== filtro.slice(POR_MOTIVO.length)) return false;
-      } else if (filtro.startsWith(POR_RESPOSTA)) {
+      } else if (isReplyGroup(filtro)) {
         if (replyFilterOf(s) !== filtro) return false;
       }
       if (!termo) return true;
@@ -314,8 +297,8 @@ export function SendsTable({
       ? "todos"
       : filtro.startsWith(POR_STATUS)
         ? sendStatusLabel(filtro.slice(POR_STATUS.length))
-        : filtro.startsWith(POR_RESPOSTA)
-          ? replyFilterLabel(filtro)
+        : isReplyGroup(filtro)
+          ? replyGroupLabel(filtro)
           : filtro.slice(POR_MOTIVO.length);
 
   function exportarCsv() {
@@ -326,6 +309,20 @@ export function SendsTable({
       "text/csv;charset=utf-8;"
     );
   }
+
+  // Grupo de resposta filtrado: dá para mandar uma campanha nova só para ele
+  // (o lembrete para quem confirmou, o reforço para quem não respondeu). O
+  // tamanho é o do GRUPO, não o da busca — a campanha vai para o grupo inteiro.
+  const grupoFiltrado =
+    isWhats && campaignId && isReplyGroup(filtro)
+      ? {
+          count: respostaOpcoes.find((o) => o.value === filtro)?.count ?? 0,
+          href: `/campaigns/new?${new URLSearchParams({
+            origem: campaignId,
+            grupo: filtro,
+          }).toString()}`,
+        }
+      : null;
 
   const totalPages = Math.max(1, Math.ceil(ordenadas.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -368,7 +365,7 @@ export function SendsTable({
                 <SelectLabel>Resposta</SelectLabel>
                 {respostaOpcoes.map(({ value, count }) => (
                   <SelectItem key={value} value={value}>
-                    {replyFilterLabel(value)} ({count})
+                    {replyGroupLabel(value)} ({count})
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -421,6 +418,18 @@ export function SendsTable({
           <Download />
           Exportar {ordenadas.length}
         </Button>
+
+        {grupoFiltrado && grupoFiltrado.count > 0 ? (
+          <Button
+            asChild
+            title={`Abre uma campanha nova já com os ${grupoFiltrado.count} contatos ${replyGroupSentence(filtro)}`}
+          >
+            <Link href={grupoFiltrado.href}>
+              <Send />
+              Nova campanha para este grupo ({grupoFiltrado.count})
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       {/* Altura limitada: sem isto a página rola sem fim em disparos grandes. */}

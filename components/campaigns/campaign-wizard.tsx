@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -10,6 +11,7 @@ import {
   LayoutTemplate,
   Mail,
   MessageCircle,
+  MessageSquareReply,
   MessageSquareText,
   Plus,
   RotateCcw,
@@ -162,9 +164,16 @@ function toLocalInputValue(iso: string | null): string {
 export function CampaignWizard({
   editId,
   duplicateId,
+  replyGroup,
 }: {
   editId?: string;
   duplicateId?: string;
+  /**
+   * Campanha nova para um grupo de resposta de outra campanha (o botão do
+   * relatório): os destinatários vêm escolhidos, e a mensagem fica em branco —
+   * o grupo de quem confirmou presença pede um lembrete, não o convite de novo.
+   */
+  replyGroup?: { campaignId: string; group: string };
 }) {
   const router = useRouter();
 
@@ -175,8 +184,16 @@ export function CampaignWizard({
   const [savedId, setSavedId] = useState<string | null>(editId ?? null);
   const [data, setData] = useState<WizardData>(EMPTY_DATA);
   const [initializing, setInitializing] = useState(
-    Boolean(editId || duplicateId)
+    Boolean(editId || duplicateId || replyGroup)
   );
+  // De onde vieram os destinatários, quando a campanha nasce de um grupo de
+  // resposta — o aviso no topo diz isso enquanto a pessoa monta a mensagem.
+  const [groupOrigin, setGroupOrigin] = useState<{
+    campaignId: string;
+    campaignName: string;
+    sentence: string;
+    count: number;
+  } | null>(null);
   const [templates, setTemplates] = useState<TemplateDto[] | null>(null);
   const [waTemplates, setWaTemplates] = useState<WaTemplateOption[] | null>(
     null
@@ -333,6 +350,57 @@ export function CampaignWizard({
       }
     })();
   }, [editId, duplicateId]);
+
+  // Carrega o grupo de resposta que dá origem à campanha nova.
+  useEffect(() => {
+    if (!replyGroup) return;
+    (async () => {
+      try {
+        const params = new URLSearchParams({ resposta: replyGroup.group });
+        const res = await fetch(
+          `/api/campaigns/${replyGroup.campaignId}/reply-group?${params.toString()}`
+        );
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar o grupo.");
+
+        const origin = json.campaign as {
+          id: string;
+          name: string;
+          channel: string;
+          lists: string[] | null;
+          tagsFilter: string[] | null;
+        };
+        const contactIds: string[] = Array.isArray(json.contactIds)
+          ? json.contactIds
+          : [];
+        setData({
+          ...EMPTY_DATA,
+          name: `${origin.name} · ${json.label}`,
+          // Mesmo canal e mesmo público de antes: o grupo só existe dentro
+          // dele. A mensagem não é copiada de propósito.
+          channel: origin.channel === "sms" ? "sms" : "whatsapp",
+          lists: origin.lists ?? [],
+          tagsFilter: (origin.tagsFilter ?? []).join(", "),
+          recipientIds: contactIds,
+        });
+        setGroupOrigin({
+          campaignId: origin.id,
+          campaignName: origin.name,
+          sentence: json.sentence,
+          count: contactIds.length,
+        });
+        if (contactIds.length === 0) {
+          setError("Ninguém está neste grupo de resposta — não há para quem enviar.");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setInitializing(false);
+      }
+    })();
+    // O grupo vem da URL e a página remonta o assistente quando ela muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const originTemplate = useMemo(
     () => templates?.find((t) => t.id === data.templateId) ?? null,
@@ -900,6 +968,27 @@ export function CampaignWizard({
               : "Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
         }
       />
+
+      {groupOrigin ? (
+        <div className="mb-6 flex max-w-3xl items-start gap-3 rounded-lg border border-info/30 bg-info-light/40 px-4 py-3 text-sm">
+          <MessageSquareReply className="mt-0.5 size-4 shrink-0 text-info-dark" aria-hidden="true" />
+          <p className="min-w-0">
+            Campanha para os{" "}
+            <span className="font-semibold">
+              {groupOrigin.count} contato{groupOrigin.count === 1 ? "" : "s"}
+            </span>{" "}
+            {groupOrigin.sentence} em{" "}
+            <Link
+              href={`/campaigns/${groupOrigin.campaignId}/report`}
+              className="font-semibold text-primary underline-offset-2 hover:underline"
+            >
+              {groupOrigin.campaignName}
+            </Link>
+            . Eles já estão escolhidos no passo Destinatários — falta escolher a
+            mensagem.
+          </p>
+        </div>
+      ) : null}
 
       {/* Stepper */}
       <div className="mb-8 flex flex-wrap items-center gap-2">

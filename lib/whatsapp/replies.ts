@@ -61,6 +61,51 @@ export interface ReplyBreakdown {
   reached: number;
 }
 
+// ─── Grupos de resposta ────────────────────────────────────────────────────
+// Cada envio que chegou ao contato cai em UM grupo: o botão que ele tocou,
+// "respondeu com mensagem" ou "não respondeu". O valor do grupo é o mesmo no
+// filtro da tabela do relatório e no link da nova campanha para o grupo — é o
+// que garante que a campanha nova vai exatamente para quem a tabela mostrou.
+
+const GROUP_PREFIX = "resposta:";
+
+export const REPLY_GROUP = {
+  button: (text: string) => `${GROUP_PREFIX}botao:${text}`,
+  text: `${GROUP_PREFIX}texto`,
+  none: `${GROUP_PREFIX}nenhuma`,
+};
+
+export function isReplyGroup(value: string): boolean {
+  return (
+    value === REPLY_GROUP.text ||
+    value === REPLY_GROUP.none ||
+    (value.startsWith(REPLY_GROUP.button("")) &&
+      value.length > REPLY_GROUP.button("").length)
+  );
+}
+
+/** O grupo do envio; null = a mensagem não chegou, e o envio fica fora de todos. */
+export function replyGroupOf(send: ReplySend): string | null {
+  const reply = replyOf(send);
+  if (reply.kind === "button") return REPLY_GROUP.button(reply.text);
+  if (reply.kind === "text") return REPLY_GROUP.text;
+  return reachedRecipient(send) ? REPLY_GROUP.none : null;
+}
+
+/** Rótulo curto do grupo, para o filtro e o nome da campanha nova. */
+export function replyGroupLabel(value: string): string {
+  if (value === REPLY_GROUP.text) return "Respondeu com mensagem";
+  if (value === REPLY_GROUP.none) return "Recebeu e não respondeu";
+  return value.slice(REPLY_GROUP.button("").length);
+}
+
+/** O grupo numa frase: "que responderam “Sim, vou participar”". */
+export function replyGroupSentence(value: string): string {
+  if (value === REPLY_GROUP.text) return "que responderam com mensagem, sem tocar em botão";
+  if (value === REPLY_GROUP.none) return "que receberam e não responderam";
+  return `que responderam “${replyGroupLabel(value)}”`;
+}
+
 /** Os textos dos botões de resposta rápida, na ordem do modelo. */
 export function quickReplyTexts(buttons: WhatsAppButton[] | null): string[] {
   return (buttons ?? [])

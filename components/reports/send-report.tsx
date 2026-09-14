@@ -359,6 +359,7 @@ export async function SendReport({
         ) : null}
 
         <WhatsAppReplies
+          campaignId={campaign.id}
           sends={sendsWithReplies}
           templateButtons={whatsappButtons}
           nomeDoDisparo={campaign.name}

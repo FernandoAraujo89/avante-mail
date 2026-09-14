@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { replyBreakdown, replyOf, type ReplySend } from "./replies";
+import {
+  isReplyGroup,
+  REPLY_GROUP,
+  replyBreakdown,
+  replyGroupLabel,
+  replyGroupOf,
+  replyGroupSentence,
+  replyOf,
+  type ReplySend,
+} from "./replies";
 import type { WhatsAppButton } from "./types";
 
 const BUTTONS: WhatsAppButton[] = [
@@ -81,5 +90,34 @@ describe("replyBreakdown", () => {
     const result = replyBreakdown([send({ repliedAt: "x" }), send()], null);
     expect(result.buttons).toEqual([]);
     expect(result).toMatchObject({ textOnly: 1, noReply: 1 });
+  });
+});
+
+describe("grupos de resposta", () => {
+  it("cada envio que chegou cai em um grupo só", () => {
+    expect(
+      replyGroupOf(send({ replyButton: "Sim, vou participar", repliedAt: "x" }))
+    ).toBe(REPLY_GROUP.button("Sim, vou participar"));
+    expect(replyGroupOf(send({ repliedAt: "x" }))).toBe(REPLY_GROUP.text);
+    expect(replyGroupOf(send())).toBe(REPLY_GROUP.none);
+  });
+
+  it("mensagem que não chegou fica fora de todos os grupos", () => {
+    expect(replyGroupOf(send({ status: "failed", deliveredAt: null }))).toBeNull();
+  });
+
+  it("rótulo e frase do grupo", () => {
+    const sim = REPLY_GROUP.button("Sim, vou participar");
+    expect(replyGroupLabel(sim)).toBe("Sim, vou participar");
+    expect(replyGroupSentence(sim)).toBe("que responderam “Sim, vou participar”");
+    expect(replyGroupLabel(REPLY_GROUP.none)).toBe("Recebeu e não respondeu");
+  });
+
+  it("reconhece só valor de grupo válido (o link da campanha nova vem de fora)", () => {
+    expect(isReplyGroup(REPLY_GROUP.button("Não poderei participar"))).toBe(true);
+    expect(isReplyGroup(REPLY_GROUP.text)).toBe(true);
+    expect(isReplyGroup(REPLY_GROUP.button(""))).toBe(false);
+    expect(isReplyGroup("status:read")).toBe(false);
+    expect(isReplyGroup("")).toBe(false);
   });
 });

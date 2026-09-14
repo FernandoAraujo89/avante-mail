@@ -4,13 +4,12 @@ import { useMemo, useRef, useState } from "react";
 import { ListFilter, MessageSquareReply } from "lucide-react";
 
 import {
-  REPLY_FILTER,
   SendsTable,
   type SendTableRow,
 } from "@/components/reports/sends-table";
 import { Card } from "@/components/ui/card";
 import { formatInt, formatPercent } from "@/lib/format";
-import { replyBreakdown } from "@/lib/whatsapp/replies";
+import { REPLY_GROUP, replyBreakdown } from "@/lib/whatsapp/replies";
 import type { WhatsAppButton } from "@/lib/whatsapp/types";
 import { cn } from "@/lib/utils";
 
@@ -38,10 +37,12 @@ interface Row {
  * procurar uma legenda que não diz nada. O cinza marca o que é contexto.
  */
 export function WhatsAppReplies({
+  campaignId,
   sends,
   templateButtons,
   nomeDoDisparo,
 }: {
+  campaignId: string;
   sends: SendTableRow[];
   templateButtons: WhatsAppButton[] | null;
   nomeDoDisparo: string;
@@ -70,7 +71,7 @@ export function WhatsAppReplies({
       label: b.text,
       hint: b.inTemplate ? undefined : "botão que não está mais no modelo",
       count: b.count,
-      filter: REPLY_FILTER.button(b.text),
+      filter: REPLY_GROUP.button(b.text),
       tone: "answer" as const,
     })),
     {
@@ -78,14 +79,14 @@ export function WhatsAppReplies({
       // "Mensagem" e não "escrevendo": áudio, foto e documento contam aqui.
       label: hasButtons ? "Responderam com mensagem, sem botão" : "Responderam com mensagem",
       count: breakdown.textOnly,
-      filter: REPLY_FILTER.text,
+      filter: REPLY_GROUP.text,
       tone: "answer",
     },
     {
       key: "nenhuma",
       label: "Receberam e não responderam",
       count: breakdown.noReply,
-      filter: REPLY_FILTER.none,
+      filter: REPLY_GROUP.none,
       tone: "context",
     },
   ];
@@ -118,7 +119,8 @@ export function WhatsAppReplies({
           {breakdown.reached > 0 ? (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <ListFilter className="size-3.5" aria-hidden="true" />
-              Clique numa resposta para ver quem respondeu
+              Clique numa resposta para ver quem respondeu e mandar uma
+              campanha só para esse grupo
             </p>
           ) : null}
         </div>
@@ -190,6 +192,7 @@ export function WhatsAppReplies({
             sends={sends}
             channel="whatsapp"
             nomeDoDisparo={nomeDoDisparo}
+            campaignId={campaignId}
             vazio="Nenhum envio registrado para esta campanha."
             filtro={filtro}
             onFiltroChange={setFiltro}
