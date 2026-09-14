@@ -14,13 +14,14 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { RefreshButton } from "@/components/reports/refresh-button";
 import { ResendButton } from "@/components/reports/resend-button";
 import { SendsTable } from "@/components/reports/sends-table";
+import { WhatsAppReplies } from "@/components/reports/whatsapp-replies";
 import { CampaignStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ import {
   getDb,
   lists as listsTable,
   users,
+  whatsappMessages,
   whatsappTemplates,
   type CampaignKind,
 } from "@/lib/db";
@@ -44,10 +46,13 @@ import {
 } from "@/lib/format";
 import { campaignSenderLabel } from "@/lib/campaign-author";
 import { campaignCost } from "@/lib/pricing";
+import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
 import {
   isResendableErrorCode,
   isRestrictionErrorCode,
 } from "@/lib/whatsapp/errors";
+import { messagePreview } from "@/lib/whatsapp/inbound";
+import type { WhatsAppButton } from "@/lib/whatsapp/types";
 
 /**
  * Relatório de um disparo (campanha ou edição do Avante News). É o mesmo
@@ -102,6 +107,8 @@ export async function SendReport({
       deliveredAt: campaignSends.deliveredAt,
       readAt: campaignSends.readAt,
       repliedAt: campaignSends.repliedAt,
+      replyButton: campaignSends.replyButton,
+      replyButtonAt: campaignSends.replyButtonAt,
       errorCode: campaignSends.errorCode,
       errorMessage: campaignSends.errorMessage,
       bounceType: campaignSends.bounceType,
@@ -143,14 +150,20 @@ export async function SendReport({
   const pending = sends.filter((s) => s.status === "pending").length;
   const failed = sends.filter((s) => s.status === "failed").length;
 
-  // Categoria do modelo define a tarifa do WhatsApp (marketing × utility).
+  // Categoria do modelo define a tarifa do WhatsApp (marketing × utility); os
+  // botões são a base da apuração das respostas.
   let whatsappCategory: string | null = null;
+  let whatsappButtons: WhatsAppButton[] | null = null;
   if (isWhatsApp && campaign.whatsappTemplateId) {
     const [tpl] = await db
-      .select({ category: whatsappTemplates.category })
+      .select({
+        category: whatsappTemplates.category,
+        buttons: whatsappTemplates.buttons,
+      })
       .from(whatsappTemplates)
       .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
     whatsappCategory = tpl?.category ?? null;
+    whatsappButtons = tpl?.buttons ?? null;
   }
 
   const header = (
@@ -187,6 +200,36 @@ export async function SendReport({
   );
 
   if (isWhatsApp) {
+    // O que cada contato escreveu em resposta a este envio (a última mensagem
+    // que não é toque de botão nem reação) e o atalho para a conversa dele.
+    const writtenReplies = await db
+      .selectDistinctOn([whatsappMessages.campaignSendId], {
+        sendId: whatsappMessages.campaignSendId,
+        type: whatsappMessages.type,
+        body: whatsappMessages.body,
+      })
+      .from(whatsappMessages)
+      .innerJoin(campaignSends, eq(campaignSends.id, whatsappMessages.campaignSendId))
+      .where(
+        and(
+          eq(campaignSends.campaignId, id),
+          eq(whatsappMessages.direction, "inbound"),
+          notInArray(whatsappMessages.type, ["button", "interactive", "reaction"])
+        )
+      )
+      .orderBy(whatsappMessages.campaignSendId, desc(whatsappMessages.createdAt));
+    const replyTextBySend = new Map(
+      writtenReplies.map((r) => [r.sendId, messagePreview(r)])
+    );
+    const conversationByContact = await conversationIdsByContact(
+      sends.filter((s) => s.repliedAt !== null).map((s) => s.contactId)
+    );
+    const sendsWithReplies = sends.map((s) => ({
+      ...s,
+      replyText: replyTextBySend.get(s.id) ?? null,
+      conversationId: conversationByContact.get(s.contactId) ?? null,
+    }));
+
     const sent = sends.filter((s) =>
       ["sent", "delivered", "read"].includes(s.status)
     ).length;
@@ -315,14 +358,11 @@ export async function SendReport({
           </div>
         ) : null}
 
-        <Card className="mt-6">
-          <SendsTable
-            sends={sends}
-            channel="whatsapp"
-            nomeDoDisparo={campaign.name}
-            vazio="Nenhum envio registrado para esta campanha."
-          />
-        </Card>
+        <WhatsAppReplies
+          sends={sendsWithReplies}
+          templateButtons={whatsappButtons}
+          nomeDoDisparo={campaign.name}
+        />
       </>
     );
   }

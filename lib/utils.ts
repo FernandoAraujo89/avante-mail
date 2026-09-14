@@ -11,6 +11,10 @@ export function errorMessage(error: unknown): string {
 
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Id de linha (uuid). Conferir antes de consultar evita o 500 do Postgres. */
+export const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Normaliza tags vindas de string ("a, b") ou array para string[]. */
 export function normalizeTags(value: unknown): string[] {
   if (Array.isArray(value)) {

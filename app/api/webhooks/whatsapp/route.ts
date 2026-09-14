@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import {
   campaignSends,
@@ -8,14 +8,22 @@ import {
   whatsappTemplates,
 } from "@/lib/db";
 import { emitContactEvent } from "@/lib/events";
-import { phoneToWaId } from "@/lib/phone";
 import { sendEmail } from "@/lib/ses";
 import { errorMessage } from "@/lib/utils";
 import {
   isWhatsAppConfigured,
   mapMetaTemplateStatus,
-  sendTextMessage,
 } from "@/lib/whatsapp/client";
+import {
+  applyConversationMessageStatus,
+  recordInboundMessage,
+  sendTextInConversation,
+} from "@/lib/whatsapp/conversations";
+import {
+  parseInboundMessage,
+  shouldEmitRepliedEvent,
+  type WebhookInboundMessage,
+} from "@/lib/whatsapp/inbound";
 import {
   isOptOutMessage,
   parseWebhookTimestamp,
@@ -33,9 +41,10 @@ export const runtime = "nodejs";
  * GET  — handshake de verificação: a Meta chama com hub.verify_token e espera
  *        o hub.challenge de volta em texto puro. Confere WHATSAPP_WEBHOOK_VERIFY_TOKEN.
  * POST — eventos: status de mensagem (sent/delivered/read/failed), mensagens
- *        recebidas (respostas e opt-out "SAIR"), status de template e
- *        qualidade do número. Assinado com HMAC-SHA256 (X-Hub-Signature-256)
- *        do corpo cru com o App Secret — verificação timing-safe, fail-closed.
+ *        recebidas (gravadas na conversa, com o botão tocado e o opt-out
+ *        "SAIR"), status de template e qualidade do número. Assinado com
+ *        HMAC-SHA256 (X-Hub-Signature-256) do corpo cru com o App Secret —
+ *        verificação timing-safe, fail-closed.
  *
  * Testável sem a conta Meta: defina WHATSAPP_APP_SECRET e
  * WHATSAPP_WEBHOOK_VERIFY_TOKEN (valores fictícios) no .env.local e rode
@@ -77,24 +86,13 @@ interface WebhookStatus {
   errors?: { code?: number; title?: string; message?: string }[];
 }
 
-interface WebhookMessage {
-  from?: string;
-  id?: string;
-  timestamp?: string;
-  type?: string;
-  text?: { body?: string };
-  button?: { text?: string };
-  interactive?: {
-    button_reply?: { title?: string };
-    list_reply?: { title?: string };
-  };
-}
-
 interface WebhookChange {
   field?: string;
   value?: {
     statuses?: WebhookStatus[];
-    messages?: WebhookMessage[];
+    messages?: WebhookInboundMessage[];
+    /** Perfis de quem escreveu: o nome que a pessoa usa no WhatsApp. */
+    contacts?: { wa_id?: string; profile?: { name?: string } }[];
     // message_template_status_update
     message_template_id?: number | string;
     message_template_name?: string;
@@ -143,7 +141,7 @@ export async function POST(request: NextRequest) {
               await handleStatus(status);
             }
             for (const message of change.value?.messages ?? []) {
-              await handleInboundMessage(message);
+              await handleInboundMessage(message, change.value?.contacts ?? []);
             }
           } else if (change.field === "message_template_status_update") {
             await handleTemplateStatus(change);
@@ -187,15 +185,22 @@ async function handleStatus(status: WebhookStatus): Promise<void> {
     .from(campaignSends)
     .where(eq(campaignSends.providerMessageId, wamid));
 
-  if (!send) return; // status de uma mensagem que não é do sistema
-
   const firstError = status.errors?.[0];
-  const patch = whatsappStatusPatch(send as CurrentSendState, {
+  const event = {
     status: status.status,
     timestamp: parseWebhookTimestamp(status.timestamp),
     errorCode: firstError?.code != null ? String(firstError.code) : null,
     errorMessage: firstError?.message ?? firstError?.title ?? null,
-  });
+  };
+
+  if (!send) {
+    // Não é envio de campanha/automação: pode ser resposta da equipe na
+    // conversa. Se também não for, é mensagem de fora do sistema.
+    await applyConversationMessageStatus(wamid, event);
+    return;
+  }
+
+  const patch = whatsappStatusPatch(send as CurrentSendState, event);
 
   if (patch) {
     await db
@@ -205,63 +210,51 @@ async function handleStatus(status: WebhookStatus): Promise<void> {
   }
 }
 
-/** Extrai o texto de uma mensagem recebida, seja qual for o tipo. */
-function inboundText(message: WebhookMessage): string | null {
-  if (message.type === "text") return message.text?.body ?? null;
-  if (message.type === "button") return message.button?.text ?? null;
-  if (message.type === "interactive") {
-    return (
-      message.interactive?.button_reply?.title ??
-      message.interactive?.list_reply?.title ??
-      null
-    );
-  }
-  return null;
-}
+/**
+ * Mensagem recebida: grava na conversa, liga ao envio a que responde (o botão
+ * tocado vai para o relatório da campanha) e trata o opt-out por palavra.
+ */
+async function handleInboundMessage(
+  raw: WebhookInboundMessage,
+  profiles: { wa_id?: string; profile?: { name?: string } }[]
+): Promise<void> {
+  const message = parseInboundMessage(raw);
+  if (!message) return;
 
-/** Mensagem recebida: registra a resposta e trata o opt-out por palavra-chave. */
-async function handleInboundMessage(message: WebhookMessage): Promise<void> {
-  if (!message.from) return;
-  const db = getDb();
-  const phone = `+${phoneToWaId(message.from)}`;
+  const profileName =
+    profiles
+      .find((p) => (p.wa_id ?? "").replace(/\D/g, "") === message.waId)
+      ?.profile?.name?.trim() || null;
 
-  const [contact] = await db
-    .select({
-      id: contacts.id,
-      whatsappSubscribed: contacts.whatsappSubscribed,
-    })
-    .from(contacts)
-    .where(eq(contacts.phone, phone));
-
-  if (!contact) return; // resposta de um número que não está na base
-
-  // Marca a resposta no envio mais recente deste contato (para o relatório).
-  const [lastSend] = await db
-    .select({ id: campaignSends.id, campaignId: campaignSends.campaignId })
-    .from(campaignSends)
-    .where(
-      and(
-        eq(campaignSends.contactId, contact.id),
-        isNull(campaignSends.repliedAt)
-      )
-    )
-    .orderBy(desc(campaignSends.sentAt))
-    .limit(1);
-
-  if (lastSend) {
-    await db
-      .update(campaignSends)
-      .set({ repliedAt: new Date() })
-      .where(eq(campaignSends.id, lastSend.id));
-  }
-
-  await emitContactEvent("whatsapp_replied", contact.id, {
-    campaignId: lastSend?.campaignId ?? null,
-    sendId: lastSend?.id ?? null,
+  const record = await recordInboundMessage(message, {
+    profileName,
+    raw: raw as Record<string, unknown>,
   });
+  // Reentrega de um evento já gravado: tudo abaixo já aconteceu uma vez.
+  if (!record) return;
 
-  if (isOptOutMessage(inboundText(message)) && contact.whatsappSubscribed) {
-    await db
+  const { contact, send } = record;
+  if (!contact || message.isReaction) return;
+
+  if (
+    shouldEmitRepliedEvent({
+      isButtonReply: message.isButtonReply,
+      firstReplyToSend: send?.firstReply ?? false,
+      previousInboundAt: record.previousInboundAt,
+      at: message.at,
+    })
+  ) {
+    await emitContactEvent("whatsapp_replied", contact.id, {
+      campaignId: send?.campaignId ?? null,
+      sendId: send?.id ?? null,
+      // O botão no payload deixa gatilho e pontuação distinguirem "vou" de
+      // "não vou" (a condição casa pelas chaves do payload).
+      ...(message.isButtonReply && message.body ? { button: message.body } : {}),
+    });
+  }
+
+  if (isOptOutMessage(message.body) && contact.whatsappSubscribed) {
+    await getDb()
       .update(contacts)
       .set({ whatsappSubscribed: false, whatsappOptOutAt: new Date() })
       .where(eq(contacts.id, contact.id));
@@ -269,18 +262,17 @@ async function handleInboundMessage(message: WebhookMessage): Promise<void> {
     await emitContactEvent("whatsapp_unsubscribed", contact.id);
 
     // Confirmação em texto livre (grátis, dentro da janela de 24h aberta pela
-    // própria mensagem do contato). Best-effort — não bloqueia o opt-out.
+    // própria mensagem do contato). Best-effort — não bloqueia o opt-out. Vai
+    // pela conversa para a equipe ver o que o contato recebeu.
     if (isWhatsAppConfigured()) {
-      try {
-        await sendTextMessage({
-          to: phoneToWaId(message.from),
-          text: "Pronto! Você não vai mais receber nossas mensagens por aqui. Se mudar de ideia, é só responder.",
-        });
-      } catch (error) {
-        console.error(
-          "[WEBHOOK-WA] Falha ao confirmar opt-out:",
-          errorMessage(error)
-        );
+      const { error } = await sendTextInConversation({
+        conversationId: record.conversationId,
+        to: message.waId,
+        text: "Pronto! Você não vai mais receber nossas mensagens por aqui. Se mudar de ideia, é só responder.",
+        sentBy: { id: null, name: "Resposta automática (descadastro)" },
+      });
+      if (error) {
+        console.error("[WEBHOOK-WA] Falha ao confirmar opt-out:", error);
       }
     }
   }

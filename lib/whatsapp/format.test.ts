@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseWhatsAppFormatting, type WhatsAppTextNode } from "./format";
+import {
+  parseWhatsAppFormatting,
+  plainWhatsAppText,
+  type WhatsAppTextNode,
+} from "./format";
 
 // A prévia mostrava `*Mais agilidade*` com os asteriscos à mostra, enquanto o
 // WhatsApp esconde os marcadores e aplica o negrito. Quem escreve o modelo
@@ -81,5 +85,17 @@ describe("parseWhatsAppFormatting", () => {
 
   it("fecha no marcador válido mesmo com candidato inválido no meio", () => {
     expect(resumo(parseWhatsAppFormatting("*a * b*"))).toBe("bold(texto(a * b))");
+  });
+});
+
+describe("plainWhatsAppText", () => {
+  it("tira os marcadores e mantém o texto", () => {
+    expect(plainWhatsAppText("Ele cuida da parte *comercial* e do _suporte_")).toBe(
+      "Ele cuida da parte comercial e do suporte"
+    );
+  });
+
+  it("não mexe no que não é formatação", () => {
+    expect(plainWhatsAppText("2 * 3 * 4")).toBe("2 * 3 * 4");
   });
 });

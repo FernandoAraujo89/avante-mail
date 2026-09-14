@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  MessagesSquare,
+  Search,
+} from "lucide-react";
 
 import { SendStatusBadge, sendStatusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +40,8 @@ import {
   describeSendOutcome,
   describeWhatsAppError,
 } from "@/lib/whatsapp/errors";
+import { plainWhatsAppText } from "@/lib/whatsapp/format";
+import { reachedRecipient, replyOf } from "@/lib/whatsapp/replies";
 import type { SendStatus } from "@/lib/db";
 
 type Data = Date | string | null;
@@ -55,12 +63,55 @@ export interface SendTableRow {
   contactEmail: string;
   contactPhone: string | null;
   contactCompany: string | null;
+  // Só no WhatsApp (ver lib/send-export.ts).
+  replyButton?: string | null;
+  replyButtonAt?: Data;
+  replyText?: string | null;
+  /** Conversa do contato na caixa de entrada, quando existe. */
+  conversationId?: string | null;
 }
 
 const PAGE_SIZES = [50, 100];
 const TODOS = "todos";
 const POR_STATUS = "status:";
 const POR_MOTIVO = "motivo:";
+const POR_RESPOSTA = "resposta:";
+
+/**
+ * Valor do filtro "Resposta". Exportado para a apuração dos botões, acima da
+ * tabela, filtrar a lista pelo mesmo critério quando alguém clica numa linha.
+ */
+export const REPLY_FILTER = {
+  button: (text: string) => `${POR_RESPOSTA}botao:${text}`,
+  text: `${POR_RESPOSTA}texto`,
+  none: `${POR_RESPOSTA}nenhuma`,
+};
+
+/** Em que valor do filtro "Resposta" o envio cai (null = não recebeu). */
+function replyFilterOf(send: SendTableRow): string | null {
+  const reply = replyOf({
+    status: send.status,
+    deliveredAt: send.deliveredAt,
+    repliedAt: send.repliedAt,
+    replyButton: send.replyButton ?? null,
+  });
+  if (reply.kind === "button") return REPLY_FILTER.button(reply.text);
+  if (reply.kind === "text") return REPLY_FILTER.text;
+  return reachedRecipient({
+    status: send.status,
+    deliveredAt: send.deliveredAt,
+    repliedAt: send.repliedAt,
+    replyButton: send.replyButton ?? null,
+  })
+    ? REPLY_FILTER.none
+    : null;
+}
+
+function replyFilterLabel(value: string): string {
+  if (value === REPLY_FILTER.text) return "Respondeu com mensagem";
+  if (value === REPLY_FILTER.none) return "Recebeu e não respondeu";
+  return value.slice(REPLY_FILTER.button("").length);
+}
 
 function tempo(valor: Data): number {
   return valor ? new Date(valor).getTime() : 0;
@@ -79,6 +130,45 @@ function baixarArquivo(nome: string, conteudo: string, tipo: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** A resposta do contato: o botão tocado, ou o que ele escreveu, e o atalho para a conversa. */
+function WhatsAppReplyCell({ send }: { send: SendTableRow }) {
+  if (!send.repliedAt && !send.replyButton) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <div className="grid min-w-0 gap-1">
+      {send.replyButton ? (
+        <Badge
+          variant="info"
+          className="max-w-full justify-self-start"
+          title={`Tocou no botão "${send.replyButton}"`}
+        >
+          <span className="truncate">{send.replyButton}</span>
+        </Badge>
+      ) : null}
+      {send.replyText ? (
+        <p className="line-clamp-2 break-words text-xs" title={send.replyText}>
+          “{plainWhatsAppText(send.replyText)}”
+        </p>
+      ) : !send.replyButton ? (
+        <p className="text-xs">Respondeu com mensagem</p>
+      ) : null}
+      <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+        {formatDateTime(send.replyButtonAt ?? send.repliedAt)}
+        {send.conversationId ? (
+          <Link
+            href={`/conversations?c=${send.conversationId}`}
+            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+          >
+            <MessagesSquare className="size-3.5" aria-hidden="true" />
+            Conversa
+          </Link>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
 /**
  * Tabela de envios do relatório: busca, filtro, ordenação, paginação e
  * exportação, tudo no cliente — os envios de um disparo já vêm todos do
@@ -89,15 +179,22 @@ export function SendsTable({
   channel,
   vazio,
   nomeDoDisparo,
+  filtro: filtroControlado,
+  onFiltroChange,
 }: {
   sends: SendTableRow[];
   channel: "email" | "whatsapp" | "sms";
   vazio: string;
   /** Nome da campanha — vira o nome do arquivo exportado. */
   nomeDoDisparo?: string;
+  /** Filtro controlado de fora (a apuração dos botões filtra a tabela). */
+  filtro?: string;
+  onFiltroChange?: (valor: string) => void;
 }) {
   const [busca, setBusca] = useState("");
-  const [filtro, setFiltro] = useState(TODOS);
+  const [filtroInterno, setFiltroInterno] = useState(TODOS);
+  const filtro = filtroControlado ?? filtroInterno;
+  const setFiltro = onFiltroChange ?? setFiltroInterno;
   const [ordem, setOrdem] = useState("nome-az");
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
   const [page, setPage] = useState(1);
@@ -127,17 +224,28 @@ export function SendsTable({
    * WhatsApp com o que a Meta segurou por frequência, e são conversas
    * diferentes com o cliente.
    */
-  const { statusOpcoes, motivoOpcoes } = useMemo(() => {
+  const { statusOpcoes, motivoOpcoes, respostaOpcoes } = useMemo(() => {
     const status = new Map<string, number>();
     const motivos = new Map<string, number>();
+    const respostas = new Map<string, number>();
     for (const s of sends) {
       status.set(s.status, (status.get(s.status) ?? 0) + 1);
       // O próprio rótulo do motivo é a chave: serve para WhatsApp, SMS e
       // e-mail sem o filtro precisar conhecer código de provedor nenhum.
       const { motivo } = describeSendForExport(s, channel);
       if (motivo) motivos.set(motivo, (motivos.get(motivo) ?? 0) + 1);
+      if (isWhats) {
+        const resposta = replyFilterOf(s);
+        if (resposta) respostas.set(resposta, (respostas.get(resposta) ?? 0) + 1);
+      }
     }
+    // Botões primeiro (mais tocado no topo); escrever e não responder no fim.
+    const peso = (valor: string) =>
+      valor === REPLY_FILTER.text ? 1 : valor === REPLY_FILTER.none ? 2 : 0;
     return {
+      respostaOpcoes: [...respostas.entries()]
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => peso(a.value) - peso(b.value) || b.count - a.count),
       statusOpcoes: [...status.entries()]
         .map(([value, count]) => ({ value, count }))
         .sort((a, b) => compareSendStatus(a.value, b.value)),
@@ -145,7 +253,7 @@ export function SendsTable({
         .map(([value, count]) => ({ value, count }))
         .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
     };
-  }, [sends, channel]);
+  }, [sends, channel, isWhats]);
 
   const filtradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
@@ -155,6 +263,8 @@ export function SendsTable({
       } else if (filtro.startsWith(POR_MOTIVO)) {
         const { motivo } = describeSendForExport(s, channel);
         if (motivo !== filtro.slice(POR_MOTIVO.length)) return false;
+      } else if (filtro.startsWith(POR_RESPOSTA)) {
+        if (replyFilterOf(s) !== filtro) return false;
       }
       if (!termo) return true;
       return [
@@ -162,6 +272,8 @@ export function SendsTable({
         s.contactEmail,
         s.contactPhone ?? "",
         s.contactCompany ?? "",
+        s.replyButton ?? "",
+        s.replyText ?? "",
       ].some((campo) => campo.toLowerCase().includes(termo));
     });
   }, [sends, busca, filtro, channel]);
@@ -202,7 +314,9 @@ export function SendsTable({
       ? "todos"
       : filtro.startsWith(POR_STATUS)
         ? sendStatusLabel(filtro.slice(POR_STATUS.length))
-        : filtro.slice(POR_MOTIVO.length);
+        : filtro.startsWith(POR_RESPOSTA)
+          ? replyFilterLabel(filtro)
+          : filtro.slice(POR_MOTIVO.length);
 
   function exportarCsv() {
     // Exporta o recorte inteiro, não só a página à vista.
@@ -242,13 +356,23 @@ export function SendsTable({
         </div>
 
         <Select value={filtro} onValueChange={setFiltro}>
-          <SelectTrigger className="w-60">
+          <SelectTrigger className="w-60" aria-label="Filtrar envios">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={TODOS}>
               Todos os envios ({sends.length})
             </SelectItem>
+            {respostaOpcoes.length > 0 ? (
+              <SelectGroup>
+                <SelectLabel>Resposta</SelectLabel>
+                {respostaOpcoes.map(({ value, count }) => (
+                  <SelectItem key={value} value={value}>
+                    {replyFilterLabel(value)} ({count})
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ) : null}
             <SelectGroup>
               <SelectLabel>Status</SelectLabel>
               {statusOpcoes.map(({ value, count }) => (
@@ -311,7 +435,9 @@ export function SendsTable({
               {mostraEngajamento ? (
                 <TableHead>{rotuloEngajamento}</TableHead>
               ) : null}
-              {porTelefone ? (
+              {isWhats ? (
+                <TableHead>Resposta</TableHead>
+              ) : porTelefone ? (
                 <TableHead>Respondeu</TableHead>
               ) : (
                 <TableHead>Clicado em</TableHead>
@@ -398,11 +524,17 @@ export function SendsTable({
                       {formatDateTime(engajamento(send))}
                     </TableCell>
                   ) : null}
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(
-                      porTelefone ? send.repliedAt : send.clickedAt
-                    )}
-                  </TableCell>
+                  {isWhats ? (
+                    <TableCell className="max-w-64">
+                      <WhatsAppReplyCell send={send} />
+                    </TableCell>
+                  ) : (
+                    <TableCell className="text-muted-foreground">
+                      {formatDateTime(
+                        porTelefone ? send.repliedAt : send.clickedAt
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               );
             })}

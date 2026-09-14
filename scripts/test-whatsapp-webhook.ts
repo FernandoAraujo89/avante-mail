@@ -25,9 +25,18 @@ const WEBHOOK = `${BASE}/api/webhooks/whatsapp`;
 const MARK = "zz_webhook_test";
 const PHONE_A = "+5548900000001";
 const PHONE_B = "+5548900000002";
+// Cadastrado COM o nono dígito; o WhatsApp informa o wa_id SEM ele — o caso
+// real de muitos celulares brasileiros.
+const PHONE_C = "+5548990000003";
+const WA_C_SEM_NONO = "554890000003";
+// Número que não está na base.
+const PHONE_DESCONHECIDO = "+5548900000099";
 const WAMID_A = `wamid.${MARK}_A`;
 const WAMID_B = `wamid.${MARK}_B`;
+const WAMID_C = `wamid.${MARK}_C`;
 const TEMPLATE_NAME = `${MARK}_tpl`;
+const BOTAO_SIM = "Sim, vou participar";
+const BOTAO_NAO = "Não poderei participar";
 
 if (!SECRET || !VERIFY_TOKEN) {
   console.error(
@@ -103,6 +112,44 @@ function statusPayload(wamid: string, status: string, error?: { code: number; me
   };
 }
 
+function messagesPayload(fromPhoneNoPlus: string, message: Record<string, unknown>) {
+  return {
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: "WABA_TEST",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              messaging_product: "whatsapp",
+              metadata: { phone_number_id: "PNID_TEST" },
+              contacts: [{ profile: { name: "Perfil Teste" }, wa_id: fromPhoneNoPlus }],
+              messages: [{ from: fromPhoneNoPlus, ...message }],
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+let seq = 0;
+function uniqueWamid(label: string): string {
+  seq++;
+  return `wamid.${MARK}_in_${label}_${Date.now()}_${seq}`;
+}
+
+function buttonMessage(text: string, contextWamid: string, opts: { wamid?: string; offsetSeconds?: number } = {}) {
+  return {
+    id: opts.wamid ?? uniqueWamid("btn"),
+    timestamp: String(Math.floor(Date.now() / 1000) + (opts.offsetSeconds ?? 0)),
+    type: "button",
+    context: { from: "5537999472264", id: contextWamid },
+    button: { text, payload: text },
+  };
+}
+
 function inboundPayload(fromPhoneNoPlus: string, text: string) {
   return {
     object: "whatsapp_business_account",
@@ -160,10 +207,23 @@ function templateStatusPayload(name: string, event: string, reason?: string) {
 
 async function sendByWamid(wamid: string) {
   const r = await db.query(
-    `select status, sent_at, delivered_at, read_at, replied_at, error_code
+    `select status, sent_at, delivered_at, read_at, replied_at, error_code, reply_button
        from campaign_sends where provider_message_id = $1`,
     [wamid]
   );
+  return r.rows[0];
+}
+
+async function conversationByContactPhone(phone: string) {
+  const r = await db.query(
+    `select w.* from whatsapp_conversations w join contacts c on c.id = w.contact_id where c.phone = $1`,
+    [phone]
+  );
+  return r.rows[0];
+}
+
+async function messageByWamid(wamid: string) {
+  const r = await db.query(`select * from whatsapp_messages where wamid = $1`, [wamid]);
   return r.rows[0];
 }
 
@@ -193,10 +253,16 @@ function check(name: string, ok: boolean, detail = "") {
 
 async function cleanup() {
   // Remove campanhas de teste (cascata apaga os campaign_sends), contatos e
-  // o template de teste.
+  // o template de teste. As conversas dos contatos saem na cascata; a do
+  // número desconhecido (sem contato) e as que ficaram com a forma sem o nono
+  // dígito saem pelo telefone.
   await db.query(`DELETE FROM campaigns WHERE name = $1`, [`${MARK} campaign`]);
-  await db.query(`DELETE FROM contacts WHERE phone IN ($1, $2)`, [PHONE_A, PHONE_B]);
+  await db.query(`DELETE FROM contacts WHERE phone IN ($1, $2, $3)`, [PHONE_A, PHONE_B, PHONE_C]);
   await db.query(`DELETE FROM whatsapp_templates WHERE name = $1`, [TEMPLATE_NAME]);
+  await db.query(
+    `DELETE FROM whatsapp_conversations WHERE phone IN ($1, $2, $3, $4, $5)`,
+    [PHONE_A, PHONE_B, PHONE_C, `+${WA_C_SEM_NONO}`, PHONE_DESCONHECIDO]
+  );
 }
 
 async function seed(): Promise<string> {
@@ -225,15 +291,28 @@ async function seed(): Promise<string> {
     [`${MARK}_b@exemplo.com`, PHONE_B]
   );
 
-  // Dois envios já "sent" (como o worker deixaria após chamar a Cloud API).
+  const contactC = await db.query(
+    `INSERT INTO contacts (name, email, phone, whatsapp_subscribed, whatsapp_opt_in_at)
+     VALUES ('Teste C', $1, $2, true, now()) RETURNING id`,
+    [`${MARK}_c@exemplo.com`, PHONE_C]
+  );
+
+  // Envios já "sent" (como o worker deixaria após chamar a Cloud API). O
+  // sent_at fica um minuto atrás: a resposta sem citação só vale para envio
+  // anterior a ela.
   await db.query(
-    `INSERT INTO campaign_sends (campaign_id, contact_id, status, provider_message_id, sent_at)
-     VALUES ($1, $2, 'sent', $3, now())`,
+    `INSERT INTO campaign_sends (campaign_id, contact_id, status, provider_message_id, sent_at, channel)
+     VALUES ($1, $2, 'sent', $3, now() - interval '1 minute', 'whatsapp')`,
+    [campaignId, contactC.rows[0].id, WAMID_C]
+  );
+  await db.query(
+    `INSERT INTO campaign_sends (campaign_id, contact_id, status, provider_message_id, sent_at, channel)
+     VALUES ($1, $2, 'sent', $3, now(), 'whatsapp')`,
     [campaignId, contactA.rows[0].id, WAMID_A]
   );
   await db.query(
-    `INSERT INTO campaign_sends (campaign_id, contact_id, status, provider_message_id, sent_at)
-     VALUES ($1, $2, 'sent', $3, now())`,
+    `INSERT INTO campaign_sends (campaign_id, contact_id, status, provider_message_id, sent_at, channel)
+     VALUES ($1, $2, 'sent', $3, now(), 'whatsapp')`,
     [campaignId, contactB.rows[0].id, WAMID_B]
   );
 
@@ -323,6 +402,143 @@ async function main() {
   {
     const r = await postSigned(statusPayload("wamid.NAO_EXISTE", "delivered"));
     check("responde 200 sem quebrar", r.status === 200, `status=${r.status}`);
+  }
+
+  // 8. Toque no botão do modelo, vindo do wa_id sem o nono dígito
+  console.log("8) Botão de resposta rápida (citação do envio + nono dígito)");
+  const botaoSim = buttonMessage(BOTAO_SIM, WAMID_C);
+  {
+    const r = await postSigned(messagesPayload(WA_C_SEM_NONO, botaoSim));
+    check("responde 200", r.status === 200, `status=${r.status}`);
+    const send = await sendByWamid(WAMID_C);
+    check("reply_button gravado no envio citado", send.reply_button === BOTAO_SIM, String(send.reply_button));
+    check("replied_at preenchido", send.replied_at !== null);
+    const conv = await conversationByContactPhone(PHONE_C);
+    check("conversa ligada ao contato, pelo telefone cadastrado", conv?.phone === PHONE_C, JSON.stringify(conv));
+    check("conversa guarda o wa_id para responder", conv?.wa_id === WA_C_SEM_NONO, String(conv?.wa_id));
+    check("uma mensagem não lida", conv?.unread_count === 1, String(conv?.unread_count));
+    const msg = await messageByWamid(botaoSim.id);
+    check("mensagem gravada como botão, ligada ao envio", msg?.type === "button" && msg?.campaign_send_id !== null, JSON.stringify(msg));
+  }
+
+  // 9. A Meta reentrega o mesmo evento
+  console.log("9) Reentrega do mesmo evento não duplica nada");
+  {
+    await postSigned(messagesPayload(WA_C_SEM_NONO, botaoSim));
+    const conv = await conversationByContactPhone(PHONE_C);
+    check("continua uma não lida", conv?.unread_count === 1, String(conv?.unread_count));
+    const total = await db.query(`select count(*)::int as n from whatsapp_messages where wamid = $1`, [botaoSim.id]);
+    check("a mensagem existe uma vez só", total.rows[0].n === 1, String(total.rows[0].n));
+  }
+
+  // 10. Mudou de ideia; e um toque antigo chegando atrasado não desfaz
+  console.log("10) Vale o último toque, pela hora do toque");
+  {
+    await postSigned(messagesPayload(WA_C_SEM_NONO, buttonMessage(BOTAO_NAO, WAMID_C, { offsetSeconds: 60 })));
+    let send = await sendByWamid(WAMID_C);
+    check("reply_button trocado para o toque mais novo", send.reply_button === BOTAO_NAO, String(send.reply_button));
+    await postSigned(messagesPayload(WA_C_SEM_NONO, buttonMessage(BOTAO_SIM, WAMID_C, { offsetSeconds: -120 })));
+    send = await sendByWamid(WAMID_C);
+    check("toque antigo atrasado não sobrescreve", send.reply_button === BOTAO_NAO, String(send.reply_button));
+  }
+
+  // 11. Texto sem citação vai para o envio recente do contato
+  console.log("11) Texto sem citação é ligado ao envio recente");
+  {
+    const wamid = uniqueWamid("txt");
+    await postSigned(
+      messagesPayload(WA_C_SEM_NONO, {
+        id: wamid,
+        timestamp: String(Math.floor(Date.now() / 1000) + 90),
+        type: "text",
+        text: { body: "Posso levar um colega?" },
+      })
+    );
+    const msg = await messageByWamid(wamid);
+    const send = await db.query(`select id from campaign_sends where provider_message_id = $1`, [WAMID_C]);
+    check("texto ligado ao envio do contato", msg?.campaign_send_id === send.rows[0].id, JSON.stringify(msg));
+    const conv = await conversationByContactPhone(PHONE_C);
+    check("quatro não lidas (3 toques + 1 texto)", conv?.unread_count === 4, String(conv?.unread_count));
+    check("resumo da lista é o texto mais recente", conv?.last_message_preview === "Posso levar um colega?", String(conv?.last_message_preview));
+    const eventos = await db.query(
+      `select payload from contact_events e join contacts c on c.id = e.contact_id
+        where c.phone = $1 and e.type = 'whatsapp_replied'`,
+      [PHONE_C]
+    );
+    check(
+      "um evento por toque de botão, nenhum pela conversa seguida",
+      eventos.rows.length === 3,
+      String(eventos.rows.length)
+    );
+    check(
+      "o botão vai no payload do evento",
+      eventos.rows.some((e) => e.payload?.button === BOTAO_NAO),
+      JSON.stringify(eventos.rows)
+    );
+  }
+
+  // 12. Reação: aparece, mas não é resposta
+  console.log("12) Reação fica na conversa sem contar como resposta");
+  {
+    const wamid = uniqueWamid("reacao");
+    await postSigned(
+      messagesPayload(WA_C_SEM_NONO, {
+        id: wamid,
+        timestamp: String(Math.floor(Date.now() / 1000) + 100),
+        type: "reaction",
+        reaction: { message_id: WAMID_C, emoji: "👍" },
+      })
+    );
+    const msg = await messageByWamid(wamid);
+    check("reação gravada", msg?.type === "reaction" && msg?.body === "👍", JSON.stringify(msg));
+    check("reação não é ligada a envio", msg?.campaign_send_id === null, String(msg?.campaign_send_id));
+    const conv = await conversationByContactPhone(PHONE_C);
+    check("reação não soma não lida", conv?.unread_count === 4, String(conv?.unread_count));
+  }
+
+  // 13. Botão de uma mensagem que não é de campanha (ex.: envio de teste)
+  console.log("13) Botão de mensagem fora de campanha não vai para envio antigo");
+  {
+    await postSigned(messagesPayload("5548900000001", buttonMessage(BOTAO_SIM, "wamid.teste_de_modelo")));
+    const send = await sendByWamid(WAMID_A);
+    check("reply_button do envio antigo continua vazio", send.reply_button === null, String(send.reply_button));
+  }
+
+  // 14. Número fora da base
+  console.log("14) Mensagem de número fora da base abre conversa sem contato");
+  {
+    const wamid = uniqueWamid("desconhecido");
+    await postSigned(
+      messagesPayload(PHONE_DESCONHECIDO.slice(1), {
+        id: wamid,
+        timestamp: nowUnix(),
+        type: "text",
+        text: { body: "Oi, quem é?" },
+      })
+    );
+    const r = await db.query(
+      `select contact_id, profile_name, unread_count from whatsapp_conversations where phone = $1`,
+      [PHONE_DESCONHECIDO]
+    );
+    check("conversa criada sem contato", r.rows[0] && r.rows[0].contact_id === null, JSON.stringify(r.rows[0]));
+    check("nome do perfil guardado", r.rows[0]?.profile_name === "Perfil Teste", String(r.rows[0]?.profile_name));
+  }
+
+  // 15. Status da resposta da equipe
+  console.log("15) Status (entregue/lida) da resposta da equipe na conversa");
+  {
+    const conv = await conversationByContactPhone(PHONE_C);
+    const wamid = `wamid.${MARK}_resposta_equipe`;
+    await db.query(
+      `INSERT INTO whatsapp_messages (conversation_id, direction, wamid, type, body, status, sent_at)
+       VALUES ($1, 'outbound', $2, 'text', 'Pode sim!', 'sent', now())`,
+      [conv.id, wamid]
+    );
+    await postSigned(statusPayload(wamid, "delivered"));
+    await postSigned(statusPayload(wamid, "read"));
+    const msg = await messageByWamid(wamid);
+    check("resposta da equipe = read", msg?.status === "read", String(msg?.status));
+    check("read_at e delivered_at preenchidos", msg?.read_at !== null && msg?.delivered_at !== null);
   }
 
   await cleanup();

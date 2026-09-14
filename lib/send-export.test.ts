@@ -135,6 +135,26 @@ describe("buildSendExport", () => {
   it("deixa vazia a data que não aconteceu, em vez de travessão", () => {
     const { headers, rows } = buildSendExport([envio()], "whatsapp");
     expect(rows[0][headers.indexOf("Respondeu em")]).toBe("");
+    expect(rows[0][headers.indexOf("Resposta (botão)")]).toBe("");
+  });
+
+  it("leva o botão tocado e a mensagem escrita para a planilha do WhatsApp", () => {
+    const { headers, rows } = buildSendExport(
+      [
+        envio({
+          status: "read",
+          repliedAt: "2026-09-15T12:01:00.000Z",
+          replyButton: "Sim, vou participar",
+          replyButtonAt: "2026-09-15T12:01:00.000Z",
+          replyText: "Posso levar um colega?",
+        }),
+      ],
+      "whatsapp"
+    );
+    const linha = rows[0];
+    expect(linha[headers.indexOf("Resposta (botão)")]).toBe("Sim, vou participar");
+    expect(linha[headers.indexOf("Botão tocado em")]).toBe("15/09/2026 09:01");
+    expect(linha[headers.indexOf("Mensagem escrita")]).toBe("Posso levar um colega?");
   });
 
   it("usa e-mail em vez de telefone no canal de e-mail", () => {

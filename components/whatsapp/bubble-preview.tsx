@@ -1,9 +1,6 @@
 import { FileText } from "lucide-react";
 
-import {
-  parseWhatsAppFormatting,
-  type WhatsAppTextNode,
-} from "@/lib/whatsapp/format";
+import { WhatsAppText } from "@/components/whatsapp/whatsapp-text";
 import {
   isMediaHeader,
   type WhatsAppHeaderType,
@@ -34,32 +31,6 @@ export function headerMediaOf(template: {
     url: template.headerMediaUrl,
     filename: template.headerMediaFilename,
   };
-}
-
-/** Aplica a formatação do WhatsApp: os marcadores viram estilo e desaparecem. */
-function FormattedText({ nodes }: { nodes: WhatsAppTextNode[] }) {
-  return (
-    <>
-      {nodes.map((node, index) => {
-        if (node.type === "text") return node.value;
-        const children = <FormattedText nodes={node.children} />;
-        if (node.type === "bold") {
-          return (
-            <strong key={index} className="font-semibold">
-              {children}
-            </strong>
-          );
-        }
-        if (node.type === "italic") return <em key={index}>{children}</em>;
-        if (node.type === "strike") return <s key={index}>{children}</s>;
-        return (
-          <code key={index} className="font-mono text-[0.9em]">
-            {children}
-          </code>
-        );
-      })}
-    </>
-  );
 }
 
 export function WhatsAppBubblePreview({
@@ -114,7 +85,7 @@ export function WhatsAppBubblePreview({
           </p>
         ) : null}
         <p className="whitespace-pre-wrap text-sm text-[#111b21]">
-          <FormattedText nodes={parseWhatsAppFormatting(bodyText)} />
+          <WhatsAppText text={bodyText} />
         </p>
         {footerText ? (
           <p className="mt-1.5 text-xs text-[#8696a0]">{footerText}</p>

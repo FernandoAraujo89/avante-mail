@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   MailCheck,
   MailOpen,
+  MessagesSquare,
   MousePointerClick,
   Pencil,
   Reply,
@@ -37,6 +38,7 @@ import {
   lists as listsTable,
 } from "@/lib/db";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +91,8 @@ export default async function ContactHistoryPage({
     .where(eq(campaignSends.contactId, id))
     .orderBy(desc(campaignSends.sentAt));
 
+  const conversationId = (await conversationIdsByContact([id])).get(id);
+
   const received = history.filter((h) =>
     ["sent", "opened", "clicked"].includes(h.status)
   ).length;
@@ -120,6 +124,14 @@ export default async function ContactHistoryPage({
           ) : (
             <Badge variant="destructive">Descadastrado</Badge>
           )}
+          {conversationId ? (
+            <Button variant="outline" asChild>
+              <Link href={`/conversations?c=${conversationId}`}>
+                <MessagesSquare />
+                Conversa no WhatsApp
+              </Link>
+            </Button>
+          ) : null}
           <Button variant="outline" asChild>
             <Link href={`/contacts/${contact.id}/edit`}>
               <Pencil />

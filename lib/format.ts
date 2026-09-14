@@ -24,6 +24,54 @@ export function formatDate(value: Date | string | null): string {
   return dateFormatter.format(new Date(value));
 }
 
+const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "America/Sao_Paulo",
+});
+
+/** Só a hora, no fuso de Brasília: "09:30". */
+export function formatTime(value: Date | string): string {
+  return timeFormatter.format(new Date(value));
+}
+
+// en-CA escreve a data como AAAA-MM-DD: serve de chave de dia e ordena.
+const dayKeyFormatter = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  timeZone: "America/Sao_Paulo",
+});
+
+/** O dia no fuso de Brasília ("2026-09-14") — para agrupar mensagens por dia. */
+export function dayKey(value: Date | string): string {
+  return dayKeyFormatter.format(new Date(value));
+}
+
+/**
+ * Rótulo do dia numa conversa: "Hoje", "Ontem" ou a data. É o dia de
+ * Brasília, e não o do navegador: a equipe e os contatos estão no Brasil, e a
+ * mensagem das 23h não pode aparecer como "amanhã" para quem abre de fora.
+ */
+export function formatDayLabel(value: Date | string, now: Date = new Date()): string {
+  const key = dayKey(value);
+  if (key === dayKey(now)) return "Hoje";
+  if (key === dayKey(new Date(now.getTime() - 86_400_000))) return "Ontem";
+  return formatDate(value);
+}
+
+/**
+ * Quando algo aconteceu, curto, para listas: a hora se foi hoje, "Ontem", ou
+ * a data sem o ano quando é do ano corrente.
+ */
+export function formatShortWhen(value: Date | string, now: Date = new Date()): string {
+  const key = dayKey(value);
+  if (key === dayKey(now)) return formatTime(value);
+  if (key === dayKey(new Date(now.getTime() - 86_400_000))) return "Ontem";
+  const [ano, mes, dia] = key.split("-");
+  return ano === dayKey(now).slice(0, 4) ? `${dia}/${mes}` : `${dia}/${mes}/${ano}`;
+}
+
 export function formatPercent(numerator: number, denominator: number): string {
   if (denominator === 0) return "—";
   return `${((numerator / denominator) * 100).toFixed(1).replace(".", ",")}%`;

@@ -14,6 +14,7 @@ import {
   Magnet,
   Menu,
   MessageCircle,
+  MessagesSquare,
   Newspaper,
   Radar,
   Send,
@@ -26,6 +27,10 @@ import {
 
 import { AvanteLogo } from "@/components/avante-logo";
 import { cn } from "@/lib/utils";
+import { UNREAD_CHANGED_EVENT } from "@/lib/whatsapp/inbox-events";
+
+/** De quanto em quanto tempo o menu confere se chegou resposta no WhatsApp. */
+const UNREAD_POLL_MS = 30_000;
 
 // O menu é agrupado por ÁREA, e não uma lista corrida, porque as áreas têm
 // públicos diferentes: "Relacionamento" fala com parceiro, cliente e
@@ -34,7 +39,13 @@ import { cn } from "@/lib/utils";
 // é o que impede alguém tratar lead como se fosse parceiro.
 const NAV_GROUPS: {
   label: string | null;
-  items: { href: string; label: string; icon: typeof LayoutDashboard }[];
+  items: {
+    href: string;
+    label: string;
+    icon: typeof LayoutDashboard;
+    /** Mostra o número de conversas com mensagem por ler. */
+    unreadBadge?: boolean;
+  }[];
 }[] = [
   {
     label: null,
@@ -44,6 +55,12 @@ const NAV_GROUPS: {
     label: "Relacionamento",
     items: [
       { href: "/campaigns", label: "Campanhas", icon: Send },
+      {
+        href: "/conversations",
+        label: "Conversas",
+        icon: MessagesSquare,
+        unreadBadge: true,
+      },
       { href: "/automations", label: "Automações", icon: Workflow },
       { href: "/news", label: "Avante News", icon: Newspaper },
       { href: "/reports", label: "Relatórios", icon: BarChart3 },
@@ -83,6 +100,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [me, setMe] = useState<{ name: string; email: string } | null>(null);
+  const [unread, setUnread] = useState(0);
   // No mobile o drawer fechado fica no DOM (deslocado): `inert` tira os ~15
   // links dele da ordem de tabulação. No desktop (md+) a sidebar é fixa.
   const [isMobile, setIsMobile] = useState(false);
@@ -118,6 +136,31 @@ export function Sidebar() {
         // sem sessão: o middleware cuida do redirecionamento
       }
     })();
+  }, []);
+
+  // Resposta nova no WhatsApp precisa ser vista de qualquer tela, não só de
+  // quem está com a caixa de conversas aberta.
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch("/api/whatsapp/unread", { cache: "no-store" });
+        if (res.ok && active) setUnread((await res.json()).unread ?? 0);
+      } catch {
+        // Sem rede: o número fica como estava até a próxima tentativa.
+      }
+    };
+    load();
+    const timer = setInterval(load, UNREAD_POLL_MS);
+    document.addEventListener("visibilitychange", load);
+    window.addEventListener(UNREAD_CHANGED_EVENT, load);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", load);
+      window.removeEventListener(UNREAD_CHANGED_EVENT, load);
+    };
   }, []);
 
   async function handleLogout() {
@@ -227,6 +270,14 @@ export function Sidebar() {
                   >
                     <item.icon className="size-4" />
                     {item.label}
+                    {item.unreadBadge && unread > 0 ? (
+                      <span
+                        className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground"
+                        aria-label={`${unread} conversa(s) com mensagem não lida`}
+                      >
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    ) : null}
                   </Link>
                 );
               })}

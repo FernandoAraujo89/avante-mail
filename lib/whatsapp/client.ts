@@ -25,7 +25,17 @@ import {
  *  - WHATSAPP_API_VERSION     opcional; padrão v23.0
  */
 
-const GRAPH_BASE = "https://graph.facebook.com";
+/**
+ * WHATSAPP_GRAPH_BASE_URL existe só para teste local contra um servidor falso
+ * (responder uma conversa sem mandar mensagem de verdade). Em produção fica
+ * vazia e vale a Graph API.
+ */
+function graphBase(): string {
+  return (
+    process.env.WHATSAPP_GRAPH_BASE_URL?.replace(/\/$/, "") ||
+    "https://graph.facebook.com"
+  );
+}
 
 function apiVersion(): string {
   return process.env.WHATSAPP_API_VERSION || "v23.0";
@@ -77,7 +87,7 @@ interface GraphErrorShape {
 }
 
 async function graphRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${GRAPH_BASE}/${apiVersion()}/${path}`, {
+  const res = await fetch(`${graphBase()}/${apiVersion()}/${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${requireEnv("WHATSAPP_ACCESS_TOKEN")}`,
@@ -163,11 +173,14 @@ export async function sendTemplateMessage(args: {
 
 /**
  * Mensagem de texto livre — só é entregue dentro da janela de 24h aberta por
- * uma mensagem do contato (usada p/ confirmar o descadastro, Fase 4).
+ * uma mensagem do contato: a confirmação do descadastro e as respostas da
+ * equipe na caixa de conversas.
  */
 export async function sendTextMessage(args: {
   to: string;
   text: string;
+  /** Mostra a prévia do primeiro link do texto na conversa. */
+  previewUrl?: boolean;
 }): Promise<{ wamid: string }> {
   const json = await graphRequest<{ messages?: { id: string }[] }>(
     `${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`,
@@ -177,7 +190,10 @@ export async function sendTextMessage(args: {
         messaging_product: "whatsapp",
         to: args.to,
         type: "text",
-        text: { body: args.text },
+        text: {
+          body: args.text,
+          ...(args.previewUrl ? { preview_url: true } : {}),
+        },
       }),
     }
   );
@@ -187,6 +203,75 @@ export async function sendTextMessage(args: {
     throw new Error("Resposta da Cloud API sem o id da mensagem (wamid).");
   }
   return { wamid };
+}
+
+/**
+ * Confirmação de leitura: o contato vê os dois tiques azuis na mensagem dele
+ * (e em todas as anteriores). Marca a mais recente e vale para a conversa.
+ */
+export async function markMessageAsRead(wamid: string): Promise<void> {
+  await graphRequest(`${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`, {
+    method: "POST",
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: wamid,
+    }),
+  });
+}
+
+// ─── Mídia recebida ──────────────────────────────────────────────
+
+const META_MEDIA_HOSTS = [".fbsbx.com", ".fbcdn.net", ".facebook.com", ".whatsapp.net"];
+
+export function isTrustedMediaUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (process.env.WHATSAPP_GRAPH_BASE_URL) {
+      return url.origin === new URL(graphBase()).origin;
+    }
+    return (
+      url.protocol === "https:" &&
+      META_MEDIA_HOSTS.some((host) => url.hostname.endsWith(host))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Baixa a mídia que o contato mandou. São dois passos: o id devolve uma URL
+ * temporária (minutos), e a URL exige o mesmo token no cabeçalho — por isso a
+ * tela não pode apontar direto para a Meta e passa pelo nosso servidor.
+ */
+export async function downloadInboundMedia(
+  mediaId: string
+): Promise<{ body: ReadableStream<Uint8Array>; mimeType: string | null }> {
+  const info = await graphRequest<{ url?: string; mime_type?: string }>(
+    encodeURIComponent(mediaId)
+  );
+  if (!info.url) {
+    throw new Error("A Meta não devolveu o endereço da mídia.");
+  }
+  // O token vai junto no download: só segue para endereço da própria Meta (ou
+  // do servidor falso de teste, quando configurado).
+  if (!isTrustedMediaUrl(info.url)) {
+    throw new Error("Endereço de mídia fora da Meta — download recusado.");
+  }
+  const res = await fetch(info.url, {
+    headers: { Authorization: `Bearer ${requireEnv("WHATSAPP_ACCESS_TOKEN")}` },
+    cache: "no-store",
+  });
+  if (!res.ok || !res.body) {
+    throw new WhatsAppApiError(
+      `A Meta não entregou a mídia (HTTP ${res.status}).`,
+      { httpStatus: res.status }
+    );
+  }
+  return {
+    body: res.body,
+    mimeType: info.mime_type ?? res.headers.get("content-type"),
+  };
 }
 
 // ─── Amostra da mídia do cabeçalho ───────────────────────────────
@@ -217,7 +302,7 @@ export async function uploadHeaderSample(args: {
   }
 
   // Envio em uma tacada: OAuth (não Bearer) e file_offset 0 — sem retomada.
-  const res = await fetch(`${GRAPH_BASE}/${apiVersion()}/${session.id}`, {
+  const res = await fetch(`${graphBase()}/${apiVersion()}/${session.id}`, {
     method: "POST",
     headers: {
       Authorization: `OAuth ${requireEnv("WHATSAPP_ACCESS_TOKEN")}`,

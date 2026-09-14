@@ -31,7 +31,7 @@
 4. **Throughput técnico:** 80 msg/s por número (auto-upgrade até 1.000). Não é o gargalo — o gargalo é o limite diário acima.
 5. **Frequency cap por destinatário (erro 131049).** A Meta limita quantas mensagens de *marketing* um usuário recebe por dia **somando todas as empresas** (≈2/dia, dinâmico por engajamento). Falhas 131049 são *esperadas* em qualquer campanha e não devem gerar retry em menos de 24h. O relatório precisa distinguir esse motivo.
 6. **Webhooks:** eventos `sent` → `delivered` → `read` / `failed` por mensagem (`wamid`), inbound de respostas, status de template e alerta de qualidade do número. Assinados com HMAC-SHA256 (`X-Hub-Signature-256`, App Secret, comparação timing-safe sobre o **raw body**). **A ordem dos eventos não é garantida** → aplicar transições de estado monotônicas.
-7. **Janela de 24h:** resposta do contato abre janela em que mensagens livres (sem template) são grátis — usada aqui só para confirmar opt-out; caixa de entrada/atendimento fica fora do escopo.
+7. **Janela de 24h:** resposta do contato abre janela em que mensagens livres (sem template) são grátis — usada para confirmar opt-out e para a equipe responder pela caixa de **Conversas** (Fase 7).
 8. **Preços Brasil (por mensagem entregue, desde jul/2025):** Marketing ≈ US$ 0,0625 (R$ 0,31–0,38); Utility ≈ US$ 0,0068 (grátis dentro da janela de 24h); Authentication ≈ US$ 0,03; Service = grátis. Marketing **não tem** desconto por volume. Conferir a tabela vigente antes do go-live. Nota: marketing para números dos **EUA** está pausado pela Meta desde abr/2025 — irrelevante para base BR, mas o worker trata como falha normal.
 9. **Qualidade do número:** rating (alto/médio/baixo) baseado em bloqueios/denúncias. Rating baixo derruba tier e pode restringir o número. Mitigação: opt-in real, frequência baixa, conteúdo relevante, warm-up gradual.
 
@@ -156,7 +156,7 @@ Decisões: **mesma tabela** `campaign_sends` (relatórios/wizard reaproveitados;
 - **GET**: handshake da Meta — confere `hub.verify_token`, devolve `hub.challenge`.
 - **POST**: valida `X-Hub-Signature-256` (HMAC-SHA256 do raw body com `WHATSAPP_APP_SECRET`, `crypto.timingSafeEqual`); processa `entry[].changes[]`:
   - `field:"messages"` → `value.statuses[]`: casa `wamid` ↔ `provider_message_id`, aplica transição monotônica; `failed` grava `errors[0].code/message`.
-  - `value.messages[]` (inbound): grava `replied_at` no último send do contato; keywords **SAIR/PARAR/CANCELAR/STOP** → `whatsapp_subscribed=false` + `whatsapp_opt_out_at` + confirmação em texto livre (grátis, dentro da janela de 24h aberta pelo contato).
+  - `value.messages[]` (inbound): grava a mensagem na conversa do número (`whatsapp_messages`), liga ao envio a que responde e grava `replied_at` (e `reply_button`, no toque de botão) — detalhes na Fase 7; keywords **SAIR/PARAR/CANCELAR/STOP** → `whatsapp_subscribed=false` + `whatsapp_opt_out_at` + confirmação em texto livre (grátis, dentro da janela de 24h aberta pelo contato).
   - `field:"message_template_status_update"` → atualiza `whatsapp_templates.status` (`APPROVED/REJECTED/PAUSED`) + motivo.
   - `field:"phone_number_quality_update"` → alerta por email ao admin (reusa `sendEmail`).
 
@@ -210,9 +210,19 @@ Decisões: **mesma tabela** `campaign_sends` (relatórios/wizard reaproveitados;
 - **Warm-up**: primeiro disparo de cada template em lote pequeno para engajados (pacing da Meta).
 - Parcelamento automático de campanha maior que o tier (dividir em dias) — v2.
 - Tabela de auditoria de eventos de webhook, se necessário.
-- Avaliar **MM Lite API** (ganho de entrega em marketing) e, se surgir demanda de atendimento/inbox, tratar como produto separado.
+- Avaliar **MM Lite API** (ganho de entrega em marketing).
 
-**Dependências:** 0 → 1 → 2 → 3 → 4 → 5 (0 pode andar em paralelo com 1–2; 3 dá para testar com o número de teste da Meta antes da verificação concluir).
+### Fase 7 — Respostas e conversas (14/09/2026)
+Motivo: campanha de confirmação de presença (webinar da Parceria de Indicação) — o relatório precisava contar quem tocou "vou" e "não vou", e a equipe precisava responder quem escreveu.
+- **Dados** (`scripts/migrate-whatsapp-conversas.ts`): `whatsapp_conversations` (uma por número, contato como vínculo, resumos da lista e `unread_count`), `whatsapp_messages` (recebidas e respostas da equipe; `wamid` único = trava contra reentrega) e `campaign_sends.reply_button(_at)`. Os modelos disparados **não** são copiados: a conversa os lê de `campaign_sends`.
+- **A que envio a mensagem responde** (`lib/whatsapp/inbound.ts`, puro e testado): com citação (todo toque de botão tem `context.id`) vale **só** o envio citado; sem citação, o envio de WhatsApp mais recente dos últimos 30 dias. Reação não é resposta. O botão guardado é o **último toque**, pela hora do toque.
+- **Telefone**: o `wa_id` de celulares brasileiros costuma chegar **sem o nono dígito** — o contato é procurado nas duas formas, e a resposta vai para o `wa_id` informado.
+- **Evento `whatsapp_replied`** (gatilho e +15 no Lead Score): um por toque de botão (com `button` no payload), pela primeira resposta a um envio ou pela volta depois da janela fechada — não um por mensagem.
+- **Tela Conversas** (`/conversations`): lista com não lidas (contador no menu), conversa com os modelos recebidos, mídia buscada na Meta pelo servidor (`/api/whatsapp/media/[id]`, atrás do login), confirmação de leitura, resposta em texto livre **só com a janela de 24h aberta** (fora dela a Cloud API aceita e recusa depois com 131047 — por isso a trava vem antes).
+- **Relatório**: apuração por botão (clicar filtra a tabela), coluna "Resposta" com atalho para a conversa, e CSV com "Resposta (botão)", "Botão tocado em" e "Mensagem escrita". Mesma apuração em `metrics.replies` da rota JSON.
+- **Teste local**: `WHATSAPP_GRAPH_BASE_URL` aponta o cliente para uma Graph API falsa (responder sem mandar mensagem de verdade). `scripts/test-whatsapp-webhook.ts` cobre botão, reentrega, nono dígito, número desconhecido, reação e status da resposta.
+
+**Dependências:** 0 → 1 → 2 → 3 → 4 → 5 (0 pode andar em paralelo com 1–2; 3 dá para testar com o número de teste da Meta antes da verificação concluir). A Fase 7 depende da 4.
 
 ---
 

@@ -868,10 +868,16 @@ export const campaignSends = pgTable("campaign_sends", {
   complainedAt: timestamp("complained_at", { withTimezone: true }),
   // Descadastro atribuído a esta campanha (clique no link deste envio).
   unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
-  // Resposta do contato a este e-mail. Coluna preparada para exibir o
-  // histórico de respostas por contato; a captura (marcação manual ou
-  // inbound automático via Resend) ainda não está ativada.
+  // Primeira resposta do contato a este envio. No WhatsApp e no SMS vem do
+  // webhook de mensagem recebida; no e-mail a captura ainda não existe.
   repliedAt: timestamp("replied_at", { withTimezone: true }),
+  // Só no WhatsApp: o botão de resposta rápida do modelo que o contato tocou,
+  // com o texto exatamente como ele viu. Guarda o ÚLTIMO toque, e não o
+  // primeiro, porque é uma decisão e decisões mudam — quem tocou "Vou
+  // participar" e depois "Não poderei ir" não vai. A sequência inteira fica
+  // na conversa (whatsapp_messages).
+  replyButton: text("reply_button"),
+  replyButtonAt: timestamp("reply_button_at", { withTimezone: true }),
 }, (t) => [
   index("campaign_sends_automacao_idx").on(t.automationRunId),
   // Um passo de envio manda UMA vez por percurso. Esta é a trava contra o job
@@ -891,6 +897,123 @@ export const campaignSends = pgTable("campaign_sends", {
     .on(t.campaignId, t.contactId)
     .where(sql`${t.campaignId} is not null`),
 ]);
+
+// ─── Conversas de WhatsApp ─────────────────────────────────────────────────
+// A caixa de entrada: o que o contato escreve de volta e o que a equipe
+// responde pelo sistema. Os modelos disparados por campanha e automação NÃO
+// são copiados para cá — eles já vivem em campaign_sends, e a conversa os
+// lê de lá. Duplicar seria ter duas verdades sobre o que foi enviado.
+
+export const WHATSAPP_MESSAGE_DIRECTIONS = ["inbound", "outbound"] as const;
+export type WhatsAppMessageDirection =
+  (typeof WHATSAPP_MESSAGE_DIRECTIONS)[number];
+
+/**
+ * Uma conversa por NÚMERO, como no próprio WhatsApp. O contato é vínculo, não
+ * chave: a mensagem de um número que não está na base também precisa chegar a
+ * alguém, e o telefone do contato pode mudar depois.
+ *
+ * Os campos "last*" e o `unreadCount` são cópias mantidas a cada mensagem —
+ * é o que deixa a lista de conversas ser uma consulta simples e ordenada, em
+ * vez de agregar a tabela de mensagens inteira a cada atualização da tela.
+ */
+export const whatsappConversations = pgTable(
+  "whatsapp_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** E.164 do contato cadastrado ou, sem contato, o número de quem escreveu. */
+    phone: text("phone").notNull().unique(),
+    /**
+     * Número como o WhatsApp o conhece (sem "+"). No Brasil pode vir sem o
+     * nono dígito do celular — é para ele que a resposta é enviada.
+     */
+    waId: text("wa_id"),
+    // Cascata como campaign_sends: excluir o contato leva o que é dele.
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "cascade",
+    }),
+    /** Nome do perfil no WhatsApp — o único nome de quem não está na base. */
+    profileName: text("profile_name"),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /**
+     * Última mensagem DO CONTATO. Abre a janela de atendimento: até 24h depois
+     * dela a Meta aceita texto livre; passado isso, só modelo aprovado.
+     */
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    lastMessagePreview: text("last_message_preview"),
+    lastMessageDirection: text("last_message_direction")
+      .$type<WhatsAppMessageDirection>(),
+    /** Mensagens do contato ainda não abertas por ninguém da equipe. */
+    unreadCount: integer("unread_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("whatsapp_conversations_recentes_idx").on(t.lastMessageAt),
+    index("whatsapp_conversations_contato_idx").on(t.contactId),
+  ]
+);
+
+export const whatsappMessages = pgTable(
+  "whatsapp_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => whatsappConversations.id, { onDelete: "cascade" }),
+    direction: text("direction").$type<WhatsAppMessageDirection>().notNull(),
+    /**
+     * Id da mensagem na Meta. Único porque a Meta reentrega o mesmo evento
+     * quando não recebe o 200 a tempo: o índice é a trava contra a mesma
+     * mensagem aparecer duas vezes e contar duas vezes. Nulo só na resposta
+     * que falhou antes de a Meta aceitá-la.
+     */
+    wamid: text("wamid").unique(),
+    /** Tipo da Cloud API: text, button, image, audio, reaction… */
+    type: text("type").notNull(),
+    /** Texto, título do botão tocado ou legenda da mídia. */
+    body: text("body"),
+    buttonPayload: text("button_payload"),
+    // Mídia recebida: o arquivo fica na Meta e é buscado sob demanda pelo id.
+    mediaId: text("media_id"),
+    mediaMimeType: text("media_mime_type"),
+    mediaFilename: text("media_filename"),
+    /** A mensagem citada. No toque de botão, é o wamid do modelo da campanha. */
+    contextWamid: text("context_wamid"),
+    /** O envio de campanha/automação a que esta mensagem responde. */
+    campaignSendId: uuid("campaign_send_id").references(
+      () => campaignSends.id,
+      { onDelete: "set null" }
+    ),
+    // Só na resposta da equipe: o ciclo de entrega, com a mesma regra
+    // monotônica dos envios de campanha (lib/whatsapp/webhook.ts).
+    status: text("status").$type<SendStatus>(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    // Quem respondeu. O nome é cópia do momento, como em campaigns.sentByName:
+    // o registro sobrevive à remoção da conta.
+    sentByUserId: uuid("sent_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    sentByName: text("sent_by_name"),
+    /** A mensagem crua da Meta — para os tipos que a tela ainda não desenha. */
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    /** Na recebida, o instante informado pela Meta (não o da chegada aqui). */
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("whatsapp_messages_conversa_idx").on(t.conversationId, t.createdAt),
+    index("whatsapp_messages_envio_idx").on(t.campaignSendId),
+  ]
+);
 
 // Configurações do sistema (chave/valor). Hoje guarda qual lista recebe o
 // Avante News; serve para qualquer preferência global futura.
@@ -1000,6 +1123,9 @@ export type WhatsAppTemplate = typeof whatsappTemplates.$inferSelect;
 export type NewWhatsAppTemplate = typeof whatsappTemplates.$inferInsert;
 export type CampaignSend = typeof campaignSends.$inferSelect;
 export type NewCampaignSend = typeof campaignSends.$inferInsert;
+export type WhatsAppConversation = typeof whatsappConversations.$inferSelect;
+export type WhatsAppMessage = typeof whatsappMessages.$inferSelect;
+export type NewWhatsAppMessage = typeof whatsappMessages.$inferInsert;
 export type Module = typeof modules.$inferSelect;
 export type NewModule = typeof modules.$inferInsert;
 export type User = typeof users.$inferSelect;

@@ -152,11 +152,6 @@ export function whatsappStatusPatch(
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
-/** Converte o timestamp do webhook (unix em segundos, string) para Date. */
-export function parseWebhookTimestamp(value: unknown): Date {
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return new Date(seconds * 1000);
-  }
-  return new Date();
-}
+// Mora em arquivo próprio para lib/whatsapp/inbound.ts poder usá-lo sem levar
+// o `crypto` deste módulo para a tela (a caixa de conversas roda no navegador).
+export { parseWebhookTimestamp } from "./timestamp";

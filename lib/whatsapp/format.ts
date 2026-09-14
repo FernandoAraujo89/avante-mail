@@ -90,3 +90,15 @@ export function parseWhatsAppFormatting(text: string): WhatsAppTextNode[] {
   flushPlain(text.length);
   return nodes;
 }
+
+/**
+ * O texto sem os marcadores — como o WhatsApp mostra o resumo da conversa na
+ * lista: "*comercial*" aparece "comercial", sem negrito e sem asteriscos.
+ */
+export function plainWhatsAppText(text: string): string {
+  const flatten = (nodes: WhatsAppTextNode[]): string =>
+    nodes
+      .map((node) => (node.type === "text" ? node.value : flatten(node.children)))
+      .join("");
+  return flatten(parseWhatsAppFormatting(text));
+}

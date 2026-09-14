@@ -10,6 +10,7 @@ import {
 } from "@/lib/db";
 import { campaignCost } from "@/lib/pricing";
 import { errorMessage } from "@/lib/utils";
+import { replyBreakdown } from "@/lib/whatsapp/replies";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         deliveredAt: campaignSends.deliveredAt,
         readAt: campaignSends.readAt,
         repliedAt: campaignSends.repliedAt,
+        replyButton: campaignSends.replyButton,
+        replyButtonAt: campaignSends.replyButtonAt,
         errorCode: campaignSends.errorCode,
         smsSegments: campaignSends.smsSegments,
         smsSegmentsBilled: campaignSends.smsSegmentsBilled,
@@ -65,12 +68,17 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         (s) => s.deliveredAt !== null || s.status === "read"
       ).length;
       let whatsappCategory: string | null = null;
+      let whatsappButtons = null;
       if (campaign.whatsappTemplateId) {
         const [tpl] = await db
-          .select({ category: whatsappTemplates.category })
+          .select({
+            category: whatsappTemplates.category,
+            buttons: whatsappTemplates.buttons,
+          })
           .from(whatsappTemplates)
           .where(eq(whatsappTemplates.id, campaign.whatsappTemplateId));
         whatsappCategory = tpl?.category ?? null;
+        whatsappButtons = tpl?.buttons ?? null;
       }
       metrics = {
         total: sends.length,
@@ -86,6 +94,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         // erro técnico). Destacado à parte no relatório.
         frequencyCapped: sends.filter((s) => s.errorCode === "131049").length,
         pending,
+        // Quantos tocaram cada botão de resposta rápida, escreveram ou não
+        // responderam — a mesma apuração da tela do relatório.
+        replies: replyBreakdown(sends, whatsappButtons),
       };
       // Meta cobra por mensagem entregue, na tarifa da categoria do modelo.
       cost = campaignCost({

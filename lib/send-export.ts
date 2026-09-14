@@ -34,6 +34,12 @@ export interface ExportableSend {
   contactEmail: string;
   contactPhone: string | null;
   contactCompany: string | null;
+  // Só no WhatsApp: o botão tocado e o que o contato escreveu. É o que a
+  // equipe leva da planilha — a lista de quem confirmou, a de quem não vai.
+  replyButton?: string | null;
+  replyButtonAt?: Date | string | null;
+  /** A última mensagem escrita (não o toque de botão) em resposta ao envio. */
+  replyText?: string | null;
 }
 
 /** Data no formato que a planilha reconhece: "17/08/2026 15:14", vazio se não houver. */
@@ -163,6 +169,9 @@ const COLUNAS: Record<ExportChannel, string[]> = {
     "Entregue em",
     "Lida em",
     "Respondeu em",
+    "Resposta (botão)",
+    "Botão tocado em",
+    "Mensagem escrita",
   ],
   sms: [
     "Nome",
@@ -215,6 +224,9 @@ export function buildSendExport(
         dataParaPlanilha(send.deliveredAt),
         dataParaPlanilha(send.readAt),
         dataParaPlanilha(send.repliedAt),
+        send.replyButton ?? "",
+        dataParaPlanilha(send.replyButtonAt),
+        send.replyText ?? "",
       ];
     }
     if (channel === "sms") {
