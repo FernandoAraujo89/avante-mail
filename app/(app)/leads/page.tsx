@@ -373,12 +373,18 @@ export default function LeadsPage() {
 
           O rótulo reserva duas linhas (min-h-8): etapa de nome longo quebra, e
           sem a reserva o número dela desceria — os números precisam dividir a
-          mesma linha de base para a comparação de relance funcionar. */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          mesma linha de base para a comparação de relance funcionar.
+
+          Com o funil inteiro do Pipedrive são uns 11 cartões: no celular, em
+          grade, eles empurravam a lista para depois de seis linhas. Lá eles
+          viram uma faixa que rola de lado, na ordem do funil; do sm para cima,
+          uma grade que decide as colunas pela largura que sobra ao lado do
+          menu (9,75rem é o mínimo que mantém em duas linhas o rótulo mais longo). */}
+      <div className="-mx-4 mb-6 flex snap-x scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(9.75rem,1fr))] sm:overflow-visible sm:px-0 sm:pb-0">
         <button
           type="button"
           onClick={() => setEstagio("todos")}
-          className={`flex flex-col rounded-lg border px-4 py-3 text-left transition-colors ${
+          className={`flex w-44 shrink-0 snap-start flex-col rounded-lg border px-4 py-3 text-left transition-colors sm:w-auto sm:px-3 ${
             estagio === "todos"
               ? "border-primary bg-accent"
               : "border-border bg-card hover:border-muted-foreground/40"
@@ -401,7 +407,7 @@ export default function LeadsPage() {
                 key={e.slug}
                 type="button"
                 onClick={() => setEstagio(e.slug)}
-                className={`flex flex-col rounded-lg border px-4 py-3 text-left transition-colors ${
+                className={`flex w-44 shrink-0 snap-start flex-col rounded-lg border px-4 py-3 text-left transition-colors sm:w-auto sm:px-3 ${
                   estagio === e.slug
                     ? "border-success-dark bg-success-light/30"
                     : "border-success-dark/30 bg-success-light/10 hover:border-success-dark/60"
@@ -422,7 +428,7 @@ export default function LeadsPage() {
                 key={e.slug}
                 type="button"
                 onClick={() => setEstagio(e.slug)}
-                className={`flex flex-col rounded-lg border px-4 py-3 text-left transition-colors ${
+                className={`flex w-44 shrink-0 snap-start flex-col rounded-lg border px-4 py-3 text-left transition-colors sm:w-auto sm:px-3 ${
                   estagio === e.slug
                     ? "border-primary bg-accent"
                     : "border-border bg-card hover:border-muted-foreground/40"

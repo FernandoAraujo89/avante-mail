@@ -19,6 +19,7 @@ import { emitListDiff, emitTagDiff } from "@/lib/events";
 
 import { avaliarCondicoes } from "./condicoes";
 import { enviarEmailDoPasso, enviarWhatsAppDoPasso } from "./envios";
+import { casaGatilho } from "./gatilho";
 import { chamarWebhookDoPasso } from "./webhook-passo";
 
 // Motor das automações (docs/plano-automacoes.md, fases 1 e 2).
@@ -43,19 +44,6 @@ const TOLERANCIA_RECONCILIACAO_MS = 60_000;
 type Passo = typeof automationSteps.$inferSelect;
 
 // ─── Gatilhos ──────────────────────────────────────────────────────────────
-
-/** O evento satisfaz a configuração do gatilho? */
-export function casaGatilho(
-  configDoGatilho: Record<string, unknown> | null,
-  payloadDoEvento: Record<string, unknown> | null
-): boolean {
-  // Gatilho sem configuração (ex.: contact_created) casa com qualquer evento
-  // do tipo. Com configuração, TODAS as chaves precisam bater.
-  if (!configDoGatilho) return true;
-  return Object.entries(configDoGatilho).every(
-    ([chave, valor]) => payloadDoEvento?.[chave] === valor
-  );
-}
 
 /**
  * Lê os eventos pendentes, cria os percursos e marca como processados.

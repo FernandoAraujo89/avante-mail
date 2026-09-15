@@ -112,13 +112,17 @@ export function LeadScoreCard({ leadId }: { leadId: string }) {
                   <span>Ação</span>
                   <span>Valia → vale hoje</span>
                 </div>
-                <ul className="grid max-h-72 gap-2 overflow-y-auto">
+                {/* minmax(0,1fr): item de grade não encolhe abaixo do próprio
+                    conteúdo, e o `truncate` da descrição não cortava nada — no
+                    celular, "Chegou em Aguardar assinatura e pagamento"
+                    empurrava os pontos para fora do cartão. */}
+                <ul className="grid max-h-72 grid-cols-[minmax(0,1fr)] gap-2 overflow-y-auto">
                   {conta.linhas.map((l, i) => (
                     <li
                       key={`${l.tipo}-${l.quando}-${i}`}
                       className="flex items-start justify-between gap-3 border-b border-border pb-2 text-sm last:border-b-0"
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0" title={l.descricao}>
                         <p className="truncate">{l.descricao}</p>
                         <p className="text-xs text-muted-foreground">
                           {formatDate(l.quando)}
@@ -143,7 +147,8 @@ export function LeadScoreCard({ leadId }: { leadId: string }) {
 
             <p className="border-t border-border pt-3 text-xs text-muted-foreground">
               Cada ação perde metade do valor a cada {conta.config.meiaVidaDias}{" "}
-              dias, para a nota refletir interesse atual.{" "}
+              dias, para a nota refletir interesse atual. Da etapa do funil e da
+              qualificação, conta só a atual.{" "}
               <Link href="/leads/pontuacao" className="underline">
                 Ajustar o modelo
               </Link>

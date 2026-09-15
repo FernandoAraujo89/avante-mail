@@ -42,10 +42,10 @@ export async function etapaPorSlug(
  * Casamento PURO, sobre uma lista já carregada — é o que a sincronização com o
  * Pipedrive usa em lote, sem uma consulta por deal.
  *
- * Três formas, nesta ordem: o slug, o rótulo por extenso, e os APELIDOS — os
- * nomes das etapas do funil no Pipedrive que traduzem para esta ("Apresentar
- * parte técnica" → apresentacao-de-produto). É nos apelidos que o funil de
- * vendas detalhado vira os marcos de marketing daqui.
+ * Três formas, nesta ordem: o slug, o rótulo por extenso, e os APELIDOS —
+ * outros nomes da mesma etapa. É por eles que o "Em análise/Agendar
+ * apresentação" do funil SDR-TESTE-NRG cai na etapa que o White Label -
+ * Inbound chama de "Agendar apresentação parte técnica".
  */
 export function casarEtapa(
   etapas: LeadStageRow[],
@@ -61,6 +61,22 @@ export function casarEtapa(
     ) ??
     null
   );
+}
+
+/**
+ * Quantos chegaram PELO MENOS até cada etapa — o funil que só desce.
+ *
+ * `alcances` traz, por contato, a posição mais funda que ele já alcançou: a
+ * etapa de agora ou qualquer "chegou em" da linha do tempo. Contar só quem
+ * chegou em cada etapa exata daria um funil que sobe e desce — quem o vendedor
+ * arrastou de "Realizar contato" direto para a proposta não teria passado,
+ * na conta, pelas etapas do meio, e a taxa de avanço passaria de 100%.
+ */
+export function passaramPorEtapa(
+  posicoes: number[],
+  alcances: number[]
+): number[] {
+  return posicoes.map((posicao) => alcances.filter((a) => a >= posicao).length);
 }
 
 /**

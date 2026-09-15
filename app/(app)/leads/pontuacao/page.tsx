@@ -139,13 +139,19 @@ export default function PontuacaoPage() {
                       onChange={(e) =>
                         mudarRegra(regra.id, { active: e.target.checked })
                       }
-                      className="size-4 accent-[#1D50DC]"
+                      className="size-4 shrink-0 accent-[#1D50DC]"
                     />
                     <span className="text-sm">
                       {regra.description ?? regra.eventType}
                       {regra.eventType.startsWith("site_") ? (
-                        <span className="ml-2 rounded bg-accent px-1.5 py-0.5 text-xs text-primary">
+                        <span className="ml-2 inline-block whitespace-nowrap rounded bg-accent px-1.5 py-0.5 text-xs text-primary">
                           site
+                        </span>
+                      ) : null}
+                      {regra.eventType === "lead_stage_changed" ||
+                      regra.eventType === "lead_qualified" ? (
+                        <span className="ml-2 inline-block whitespace-nowrap rounded bg-accent px-1.5 py-0.5 text-xs text-primary">
+                          vale a atual
                         </span>
                       ) : null}
                       {!regra.active ? (
@@ -178,6 +184,12 @@ export default function PontuacaoPage() {
               Valores negativos afastam o lead do topo — é o caso do
               descadastro. Desmarcar tira a ação da conta sem perder o número
               que estava ali.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              As marcadas com <span className="font-medium">vale a atual</span>{" "}
+              são estado, não ação: da etapa do funil e da qualificação, conta
+              só a de agora. Quem avança troca os pontos da etapa anterior pelos
+              da nova; quem é requalificado troca os da qualificação antiga.
             </p>
           </CardContent>
         </Card>

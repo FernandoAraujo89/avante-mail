@@ -531,13 +531,14 @@ export const leadStages = pgTable("lead_stages", {
    */
   stopsNurturing: boolean("stops_nurturing").notNull().default(false),
   /**
-   * Outros nomes que resolvem para esta etapa — os nomes das etapas do funil
-   * no Pipedrive ("Apresentar parte técnica", "Analisando proposta"...).
+   * Outros nomes que resolvem para esta etapa: a mesma etapa com outro nome
+   * em outro funil acompanhado ("Em análise/Agendar apresentação", no
+   * SDR-TESTE-NRG), ou o nome antigo depois de um renomear no Pipedrive.
    *
-   * É onde mora a tradução "funil de vendas detalhado → marcos de marketing":
-   * o Pipedrive tem 8 etapas, aqui interessam 3. Como coluna editável, e não
-   * numa rota do Make ou constante, porque tradução escondida é exatamente o
-   * que apodrece sem ninguém ver — e a lição das qualificações foi essa.
+   * Até 14/09/2026 era aqui que as 8 etapas do Pipedrive caíam em 3 marcos;
+   * desde então o funil daqui é o de lá, etapa por etapa. Como coluna
+   * editável, e não numa rota do Make ou constante, porque tradução escondida
+   * é exatamente o que apodrece sem ninguém ver.
    */
   aliases: text("aliases").array(),
   /**

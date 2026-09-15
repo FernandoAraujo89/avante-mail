@@ -163,11 +163,15 @@ export function TriggerEditor({
                   <SelectItem value="qualquer">
                     Qualquer etapa
                   </SelectItem>
-                  {catalogo.etapas.map((e) => (
-                    <SelectItem key={e.slug} value={e.slug}>
-                      {e.label}
-                    </SelectItem>
-                  ))}
+                  {catalogo.etapas
+                    // Etapa desativada só aparece se o gatilho já a usa —
+                    // senão o seletor sumiria com o valor salvo.
+                    .filter((e) => e.active || e.slug === trigger.config?.para)
+                    .map((e) => (
+                      <SelectItem key={e.slug} value={e.slug}>
+                        {e.label}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

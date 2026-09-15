@@ -228,7 +228,9 @@ export default function QualificacoesPage() {
           <p className="text-muted-foreground">
             Os <span className="font-medium">pontos</span> entram no Lead Score
             no momento em que o vendedor qualifica: quem chega mais maduro
-            começa mais quente. São as mesmas regras da tela de{" "}
+            começa mais quente. Vale só a qualificação atual — requalificado,
+            o lead troca os pontos da antiga pelos da nova. São as mesmas
+            regras da tela de{" "}
             <Link href="/leads/pontuacao" className="underline">
               Pontuação
             </Link>

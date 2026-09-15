@@ -12,9 +12,9 @@ import {
   sql,
 } from "drizzle-orm";
 
-import { contactEvents, contacts, getDb } from "@/lib/db";
+import { contactEvents, contacts, getDb, leadStages } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
-import { listarEtapas } from "@/lib/leads/etapas";
+import { listarEtapas, passaramPorEtapa } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { lerConfiguracao } from "@/lib/leads/score";
 import { errorMessage } from "@/lib/utils";
@@ -146,41 +146,46 @@ export async function GET() {
     ]);
 
     // Quantos PASSARAM por cada etapa — não quantos estão nela agora. É o que
-    // faz o funil ler como funil: quem avançou (ou converteu) continua contado
-    // no marco por onde passou, via linha do tempo.
-    const funil = await Promise.all(
-      etapas
-        .filter((e) => e.active)
-        .map(async (e, i) => {
-          if (i === 0) {
-            // Todo lead entra pela primeira etapa; contar eventos aqui perderia
-            // quem foi criado nela sem nunca "chegar" por mudança.
-            return {
-              slug: e.slug,
-              label: e.label,
-              converte: e.convertListId !== null,
-              passaram: (totais?.total ?? 0) + (convertidos?.total ?? 0),
-            };
-          }
-          const [{ total }] = await db
-            .select({ total: sql<number>`count(DISTINCT id)::int` })
-            .from(
-              sql`(
-                SELECT ${contactEvents.contactId} AS id FROM ${contactEvents}
-                 WHERE ${contactEvents.type} = 'lead_stage_changed'
-                   AND ${contactEvents.payload}->>'para' = ${e.slug}
-                UNION
-                SELECT ${contacts.id} FROM ${contacts} WHERE ${contacts.stage} = ${e.slug}
-              ) AS passagens`
-            );
-          return {
-            slug: e.slug,
-            label: e.label,
-            converte: e.convertListId !== null,
-            passaram: total,
-          };
-        })
+    // faz o funil ler como funil: quem avançou, pulou etapa ou converteu
+    // continua contado em todas as etapas até onde chegou, via linha do tempo.
+    //
+    // Por contato, a posição mais funda já alcançada. A etapa desativada entra
+    // pela posição dela: quem passou pelo antigo "Passou por apresentação de
+    // produto" conta até "Apresentar parte técnica".
+    const alcances = await db
+      .select({ maisFunda: sql<number>`alcance.mais_funda` })
+      .from(
+        sql`(
+          SELECT max(etapa.position)::int AS mais_funda
+            FROM (
+              SELECT ${contactEvents.contactId} AS id,
+                     ${contactEvents.payload}->>'para' AS slug
+                FROM ${contactEvents}
+               WHERE ${contactEvents.type} = 'lead_stage_changed'
+              UNION ALL
+              SELECT ${contacts.id}, ${contacts.stage}
+                FROM ${contacts}
+               WHERE ${contacts.stage} IS NOT NULL
+            ) AS passagem
+            JOIN ${leadStages} AS etapa ON etapa.slug = passagem.slug
+           GROUP BY passagem.id
+        ) AS alcance`
+      );
+
+    const ativas = etapas.filter((e) => e.active);
+    const passaram = passaramPorEtapa(
+      ativas.map((e) => e.position),
+      alcances.map((a) => a.maisFunda)
     );
+    const funil = ativas.map((e, i) => ({
+      slug: e.slug,
+      label: e.label,
+      converte: e.convertListId !== null,
+      // Todo lead entra pela primeira etapa; contar pela linha do tempo aqui
+      // perderia o convertido à mão que nunca "chegou" em etapa nenhuma.
+      passaram:
+        i === 0 ? (totais?.total ?? 0) + (convertidos?.total ?? 0) : passaram[i],
+    }));
 
     const canais = porCanal.filter((c) => c.canal);
     const semCanal = porCanal.find((c) => !c.canal)?.total ?? 0;

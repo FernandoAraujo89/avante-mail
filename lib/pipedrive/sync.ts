@@ -1,6 +1,11 @@
 import { inArray } from "drizzle-orm";
 
-import { contacts, getDb, type LeadStageRow } from "@/lib/db";
+import {
+  contacts,
+  getDb,
+  type LeadQualificationRow,
+  type LeadStageRow,
+} from "@/lib/db";
 import { casarEtapa, listarEtapas } from "@/lib/leads/etapas";
 import {
   casarQualificacao,
@@ -9,7 +14,18 @@ import {
 import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
 import { firstValidPhone } from "@/lib/phone";
 import { getSetting, setSetting } from "@/lib/settings";
-import { clientePipedrive, type PipedriveApi } from "./client";
+import {
+  clientePipedrive,
+  type DealDoPipedrive,
+  type PipedriveApi,
+} from "./client";
+import {
+  CHAVE_FUNIS,
+  CHAVE_FUNIS_DA_ULTIMA,
+  CHAVE_ULTIMA,
+  lerIdsDosFunis,
+  type FunisDaUltimaPassada,
+} from "./funis";
 
 /**
  * Reconciliação com o Pipedrive (docs/plano-webhooks-leads.md, seção
@@ -19,29 +35,38 @@ import { clientePipedrive, type PipedriveApi } from "./client";
  * — e ela ficou TRÊS SEMANAS esperando um push que nunca foi configurado no
  * Make, sem nenhum erro em lugar nenhum: só um funil parado. Integração por
  * evento falha assim, em silêncio. Este job PUXA: a cada passada, lê os deals
- * do funil que mudaram desde a última e aplica qualificação, marco do funil e
- * compra. Converge sozinho, faz o backfill do que já existia, e um push (Make)
- * por cima vira só uma questão de latência, não de correção.
+ * dos funis que mudaram desde a última e aplica qualificação, etapa e compra.
+ * Converge sozinho, faz o backfill do que já existia, e um push (Make) por
+ * cima vira só uma questão de latência, não de correção.
  *
- * A marca-d'água (`update_time` do último deal processado) fica em
- * app_settings, então a passada sobrevive a restart e não relê a base inteira.
- * A PRIMEIRA passada, sem marca, lê tudo — é o backfill.
+ * MAIS DE UM FUNIL desde 14/09/2026 ("White Label - Inbound" e
+ * "SDR-TESTE-NRG"): os dois têm as mesmas etapas, e o funil daqui é um só.
+ * Os funis acompanhados moram em app_settings POR ID — renomear um funil no
+ * Pipedrive (e um nome com "TESTE" pede para ser renomeado) não pode parar a
+ * sincronização em silêncio.
+ *
+ * Cada funil tem sua marca-d'água (`update_time` do último deal processado
+ * dele) em app_settings, então a passada sobrevive a restart e não relê a base
+ * inteira. A PRIMEIRA passada de um funil, sem marca, lê tudo — é o backfill.
  */
 
+/** Marca-d'água, uma por funil: `pipedrive_sync_desde:<id>`. */
 const CHAVE_DESDE = "pipedrive_sync_desde";
-const CHAVE_ULTIMA = "pipedrive_sync_ultima";
 
 /** Deal ganho vira esta etapa — a que encerra a nutrição e converte. */
 const ETAPA_DE_COMPRA = "comprou";
 /** Deal perdido vira esta etapa SE ela estiver cadastrada; senão, não mexe. */
 const ETAPA_DE_PERDA = "perdido";
 
-/** Páginas de 500 deals por passada — o resto fica para a próxima. */
-const PAGINAS_POR_PASSADA = 4;
+/** Páginas de 500 deals por funil a cada passada — o resto fica para a próxima. */
+const PAGINAS_POR_FUNIL = 4;
+/** Deals aplicados por vez: uma consulta de pessoas e duas de contatos por lote. */
+const TAMANHO_DO_LOTE = 500;
 
 export interface ResultadoDaSincronizacao {
   rodou: boolean;
   motivo?: string;
+  funis?: number;
   deals?: number;
   etapasAplicadas?: number;
   qualificacoesAplicadas?: number;
@@ -103,6 +128,38 @@ function rotuloDaOpcao(
   return null;
 }
 
+async function resolverFunis(
+  api: PipedriveApi
+): Promise<{ funis: { id: number; name: string }[]; ausentes: string[] }> {
+  const pipelines = await api.pipelines();
+  const ids = lerIdsDosFunis(await getSetting(CHAVE_FUNIS));
+
+  if (ids) {
+    return {
+      funis: ids
+        .map((id) => pipelines.find((p) => p.id === id))
+        .filter((p): p is { id: number; name: string } => Boolean(p)),
+      ausentes: ids
+        .filter((id) => !pipelines.some((p) => p.id === id))
+        .map((id) => `#${id}`),
+    };
+  }
+
+  const nome = process.env.PIPEDRIVE_PIPELINE ?? "White Label - Inbound";
+  const funil = pipelines.find(
+    (p) => normalizado(p.name) === normalizado(nome)
+  );
+  return { funis: funil ? [funil] : [], ausentes: funil ? [] : [`"${nome}"`] };
+}
+
+interface Contagem {
+  etapasAplicadas: number;
+  qualificacoesAplicadas: number;
+  convertidos: number;
+  semContato: number;
+  recusas: number;
+}
+
 export async function sincronizarPipedrive(args?: {
   api?: PipedriveApi;
   intervaloMin?: number;
@@ -138,33 +195,43 @@ export async function sincronizarPipedrive(args?: {
 
   // A passada se marca ANTES de trabalhar: uma falha no meio (API fora, token
   // errado) espera o intervalo como uma passada boa, em vez de martelar a API
-  // a cada ciclo de 10 segundos do worker. A marca-d'água dos deals é outra
-  // coisa — ela só avança no fim, então nada processado se perde.
+  // a cada ciclo de 10 segundos do worker. As marcas-d'água dos deals são
+  // outra coisa — elas só avançam no fim, então nada processado se perde.
   await setSetting(CHAVE_ULTIMA, agora.toISOString());
 
-  const nomeDoFunil = process.env.PIPEDRIVE_PIPELINE ?? "White Label - Inbound";
   const nomeDoCampo =
     process.env.PIPEDRIVE_CAMPO_QUALIFICACAO ?? "Lead qualificado";
 
-  const pipelines = await api.pipelines();
-  const funil = pipelines.find(
-    (p) => normalizado(p.name) === normalizado(nomeDoFunil)
+  const { funis, ausentes } = await resolverFunis(api);
+  await setSetting(
+    CHAVE_FUNIS_DA_ULTIMA,
+    JSON.stringify({
+      funis: funis.map((f) => ({ id: f.id, nome: f.name })),
+      ausentes,
+    } satisfies FunisDaUltimaPassada)
   );
-  if (!funil) {
-    const aviso = `funil "${nomeDoFunil}" não encontrado no Pipedrive`;
+  if (ausentes.length > 0) {
+    // Um funil que sumiu não para os outros — mas precisa aparecer no log.
+    const aviso = `funil ${ausentes.join(", ")} não encontrado no Pipedrive`;
     if (avisouConfig !== aviso) {
       avisouConfig = aviso;
-      console.error(`[PIPEDRIVE] ${aviso} — confira PIPEDRIVE_PIPELINE.`);
+      console.error(
+        `[PIPEDRIVE] ${aviso} — confira ${CHAVE_FUNIS} em app_settings (ou PIPEDRIVE_PIPELINE).`
+      );
     }
+  }
+  if (funis.length === 0) {
     return { rodou: false, motivo: "funil-nao-encontrado" };
   }
 
-  const [nomesDasEtapasPd, campo, etapas, qualificacoes] = await Promise.all([
-    api.stages(funil.id),
+  const [etapasPorFunil, campo, etapas, qualificacoes] = await Promise.all([
+    Promise.all(funis.map((f) => api.stages(f.id))),
     api.campoDeDeal(nomeDoCampo),
     listarEtapas(true),
     listarQualificacoes(true),
   ]);
+  // Id de etapa é único na conta inteira: um mapa só serve a todos os funis.
+  const nomesDasEtapasPd = new Map(etapasPorFunil.flatMap((m) => [...m]));
   if (!campo && avisouConfig !== "sem-campo") {
     avisouConfig = "sem-campo";
     console.error(
@@ -172,164 +239,197 @@ export async function sincronizarPipedrive(args?: {
     );
   }
 
-  const desde = (await getSetting(CHAVE_DESDE)) ?? undefined;
-
-  let cursor: string | undefined;
-  let totalDeals = 0;
-  let etapasAplicadas = 0;
-  let qualificacoesAplicadas = 0;
-  let convertidos = 0;
-  let semContato = 0;
-  let recusas = 0;
-  let maiorUpdate: string | null = null;
-
-  for (let pagina = 0; pagina < PAGINAS_POR_PASSADA; pagina++) {
-    const { deals, nextCursor } = await api.deals({
-      pipelineId: funil.id,
-      campoKey: campo?.key ?? null,
-      updatedSince: desde,
-      cursor,
-    });
-    if (deals.length === 0) break;
-    totalDeals += deals.length;
-
-    // Identidades do lote inteiro de uma vez: uma consulta por página, não
-    // duas por deal.
-    const idsDePessoas = [
-      ...new Set(deals.map((d) => d.personId).filter((id): id is number => id !== null)),
-    ];
-    const pessoas = await api.pessoas(idsDePessoas);
-
-    const emails = new Set<string>();
-    const telefones = new Set<string>();
-    for (const pessoa of pessoas.values()) {
-      for (const e of pessoa.emails) emails.add(e.toLowerCase());
-      const tel = telefoneSeguro(pessoa.phones);
-      if (tel) telefones.add(tel);
-    }
-
-    // Duas consultas por página (e-mail e telefone) em vez de duas por deal.
-    // Traz também quem tem `stage` nulo: parceiro reconhecido é "pular", que
-    // é diferente de "não achei" — os dois contam em lugares diferentes.
-    const db = getDb();
-    const colunas = {
-      id: contacts.id,
-      email: contacts.email,
-      phone: contacts.phone,
-      stage: contacts.stage,
-      qualification: contacts.qualification,
-    };
-    const linhasPorEmail =
-      emails.size > 0
-        ? await db
-            .select(colunas)
-            .from(contacts)
-            .where(inArray(contacts.email, [...emails]))
-        : [];
-    const linhasPorTelefone =
-      telefones.size > 0
-        ? await db
-            .select(colunas)
-            .from(contacts)
-            .where(inArray(contacts.phone, [...telefones]))
-        : [];
-
-    const porEmail = new Map(
-      linhasPorEmail.map((c) => [c.email.toLowerCase(), c])
-    );
-    const mapaTelefone = new Map(
-      linhasPorTelefone
-        .filter((c) => c.phone)
-        .map((c) => [c.phone as string, c])
-    );
-
-    for (const deal of deals) {
-      maiorUpdate = deal.updateTime || maiorUpdate;
-      if (deal.personId === null) continue;
-      const pessoa = pessoas.get(deal.personId);
-      if (!pessoa) continue;
-
-      let contato =
-        pessoa.emails
-          .map((e) => porEmail.get(e.toLowerCase()))
-          .find(Boolean) ?? null;
-      if (!contato) {
-        const tel = telefoneSeguro(pessoa.phones);
-        contato = (tel ? mapaTelefone.get(tel) : null) ?? null;
-      }
-      if (!contato) {
-        semContato++;
-        continue;
-      }
-      // Convertido no meio do lote (dois deals da mesma pessoa): não é mais lead.
-      if (contato.stage === null) continue;
-
-      // Qualificação: o rótulo exato da opção no Pipedrive, resolvido na
-      // tabela — as mesmas 7 formas que o webhook aceita.
-      let qualificacao: string | null = null;
-      if (campo) {
-        const rotulo = rotuloDaOpcao(deal.qualificacaoCrua, campo.opcoes);
-        if (rotulo) {
-          qualificacao = casarQualificacao(qualificacoes, rotulo)?.slug ?? null;
-          if (!qualificacao) recusas++;
-        }
-      }
-
-      // Etapa: ganho → compra; perdido → "perdido" se cadastrada; aberto →
-      // o nome da etapa do funil, traduzido pelos apelidos.
-      let etapa: LeadStageRow | null = null;
-      if (deal.status === "won") {
-        etapa = casarEtapa(etapas, ETAPA_DE_COMPRA);
-        if (!etapa) recusas++;
-      } else if (deal.status === "lost") {
-        etapa = casarEtapa(etapas, ETAPA_DE_PERDA);
-      } else if (deal.status === "open") {
-        const nome = nomesDasEtapasPd.get(deal.stageId);
-        if (nome) {
-          etapa = casarEtapa(etapas, nome);
-          if (!etapa) recusas++;
-        }
-      }
-
-      const aplicado = await aplicarMudancaDoLead(contato, {
-        qualificacao,
-        etapa,
-        origem: "pipedrive",
+  // Cada funil a partir da sua marca-d'água.
+  const lidos: DealDoPipedrive[] = [];
+  const marcas = new Map<number, string>();
+  for (const funil of funis) {
+    const desde = (await getSetting(`${CHAVE_DESDE}:${funil.id}`)) ?? undefined;
+    let cursor: string | undefined;
+    for (let pagina = 0; pagina < PAGINAS_POR_FUNIL; pagina++) {
+      const { deals, nextCursor } = await api.deals({
+        pipelineId: funil.id,
+        campoKey: campo?.key ?? null,
+        updatedSince: desde,
+        cursor,
       });
-
-      // O retrato em memória acompanha o banco: um segundo deal da mesma
-      // pessoa neste lote precisa ver o estado novo, não o da consulta.
-      if (aplicado.mudouQualificacao) {
-        qualificacoesAplicadas++;
-        contato.qualification = qualificacao;
+      for (const deal of deals) {
+        lidos.push(deal);
+        // A API devolve em ordem de update_time: o último é a marca nova.
+        if (deal.updateTime) marcas.set(funil.id, deal.updateTime);
       }
-      if (aplicado.mudouEtapa && etapa) {
-        etapasAplicadas++;
-        contato.stage = etapa.slug;
-      }
-      if (aplicado.convertidoPara) {
-        convertidos++;
-        contato.stage = null;
-      }
-      if (aplicado.conversaoRecusada) recusas++;
+      if (deals.length === 0 || !nextCursor) break;
+      cursor = nextCursor;
     }
-
-    if (!nextCursor) {
-      cursor = undefined;
-      break;
-    }
-    cursor = nextCursor;
   }
 
-  if (maiorUpdate) await setSetting(CHAVE_DESDE, maiorUpdate);
+  // Os funis misturados, na ordem em que os deals mudaram. Se a mesma pessoa
+  // tiver negócio nos dois, vale o que mudou por último — e não o do funil
+  // que por acaso foi lido depois.
+  lidos.sort((a, b) => a.updateTime.localeCompare(b.updateTime));
+
+  const contagem: Contagem = {
+    etapasAplicadas: 0,
+    qualificacoesAplicadas: 0,
+    convertidos: 0,
+    semContato: 0,
+    recusas: 0,
+  };
+  for (let i = 0; i < lidos.length; i += TAMANHO_DO_LOTE) {
+    await aplicarLote(lidos.slice(i, i + TAMANHO_DO_LOTE), {
+      api,
+      campo,
+      nomesDasEtapasPd,
+      etapas,
+      qualificacoes,
+      contagem,
+    });
+  }
+
+  for (const [funilId, marca] of marcas) {
+    await setSetting(`${CHAVE_DESDE}:${funilId}`, marca);
+  }
 
   return {
     rodou: true,
-    deals: totalDeals,
-    etapasAplicadas,
-    qualificacoesAplicadas,
-    convertidos,
-    semContato,
-    recusas,
+    funis: funis.length,
+    deals: lidos.length,
+    ...contagem,
   };
+}
+
+async function aplicarLote(
+  deals: DealDoPipedrive[],
+  ctx: {
+    api: PipedriveApi;
+    campo: { key: string; opcoes: Map<number, string> } | null;
+    nomesDasEtapasPd: Map<number, string>;
+    etapas: LeadStageRow[];
+    qualificacoes: LeadQualificationRow[];
+    contagem: Contagem;
+  }
+): Promise<void> {
+  const { api, campo, nomesDasEtapasPd, etapas, qualificacoes, contagem } =
+    ctx;
+
+  // Identidades do lote inteiro de uma vez: uma consulta por lote, não duas
+  // por deal.
+  const idsDePessoas = [
+    ...new Set(
+      deals.map((d) => d.personId).filter((id): id is number => id !== null)
+    ),
+  ];
+  const pessoas = await api.pessoas(idsDePessoas);
+
+  const emails = new Set<string>();
+  const telefones = new Set<string>();
+  for (const pessoa of pessoas.values()) {
+    for (const e of pessoa.emails) emails.add(e.toLowerCase());
+    const tel = telefoneSeguro(pessoa.phones);
+    if (tel) telefones.add(tel);
+  }
+
+  // Duas consultas por lote (e-mail e telefone) em vez de duas por deal.
+  // Traz também quem tem `stage` nulo: parceiro reconhecido é "pular", que
+  // é diferente de "não achei" — os dois contam em lugares diferentes.
+  const db = getDb();
+  const colunas = {
+    id: contacts.id,
+    email: contacts.email,
+    phone: contacts.phone,
+    stage: contacts.stage,
+    qualification: contacts.qualification,
+  };
+  const linhasPorEmail =
+    emails.size > 0
+      ? await db
+          .select(colunas)
+          .from(contacts)
+          .where(inArray(contacts.email, [...emails]))
+      : [];
+  const linhasPorTelefone =
+    telefones.size > 0
+      ? await db
+          .select(colunas)
+          .from(contacts)
+          .where(inArray(contacts.phone, [...telefones]))
+      : [];
+
+  const porEmail = new Map(
+    linhasPorEmail.map((c) => [c.email.toLowerCase(), c])
+  );
+  const mapaTelefone = new Map(
+    linhasPorTelefone
+      .filter((c) => c.phone)
+      .map((c) => [c.phone as string, c])
+  );
+
+  for (const deal of deals) {
+    if (deal.personId === null) continue;
+    const pessoa = pessoas.get(deal.personId);
+    if (!pessoa) continue;
+
+    let contato =
+      pessoa.emails
+        .map((e) => porEmail.get(e.toLowerCase()))
+        .find(Boolean) ?? null;
+    if (!contato) {
+      const tel = telefoneSeguro(pessoa.phones);
+      contato = (tel ? mapaTelefone.get(tel) : null) ?? null;
+    }
+    if (!contato) {
+      contagem.semContato++;
+      continue;
+    }
+    // Convertido no meio do lote (dois deals da mesma pessoa): não é mais lead.
+    if (contato.stage === null) continue;
+
+    // Qualificação: o rótulo exato da opção no Pipedrive, resolvido na
+    // tabela — as mesmas formas que o webhook aceita.
+    let qualificacao: string | null = null;
+    if (campo) {
+      const rotulo = rotuloDaOpcao(deal.qualificacaoCrua, campo.opcoes);
+      if (rotulo) {
+        qualificacao = casarQualificacao(qualificacoes, rotulo)?.slug ?? null;
+        if (!qualificacao) contagem.recusas++;
+      }
+    }
+
+    // Etapa: ganho → compra; perdido → "perdido" se cadastrada; aberto →
+    // o nome da etapa do funil, resolvido pelo nome ou pelos apelidos.
+    let etapa: LeadStageRow | null = null;
+    if (deal.status === "won") {
+      etapa = casarEtapa(etapas, ETAPA_DE_COMPRA);
+      if (!etapa) contagem.recusas++;
+    } else if (deal.status === "lost") {
+      etapa = casarEtapa(etapas, ETAPA_DE_PERDA);
+    } else if (deal.status === "open") {
+      const nome = nomesDasEtapasPd.get(deal.stageId);
+      if (nome) {
+        etapa = casarEtapa(etapas, nome);
+        if (!etapa) contagem.recusas++;
+      }
+    }
+
+    const aplicado = await aplicarMudancaDoLead(contato, {
+      qualificacao,
+      etapa,
+      origem: "pipedrive",
+    });
+
+    // O retrato em memória acompanha o banco: um segundo deal da mesma
+    // pessoa neste lote precisa ver o estado novo, não o da consulta.
+    if (aplicado.mudouQualificacao) {
+      contagem.qualificacoesAplicadas++;
+      contato.qualification = qualificacao;
+    }
+    if (aplicado.mudouEtapa && etapa) {
+      contagem.etapasAplicadas++;
+      contato.stage = etapa.slug;
+    }
+    if (aplicado.convertidoPara) {
+      contagem.convertidos++;
+      contato.stage = null;
+    }
+    if (aplicado.conversaoRecusada) contagem.recusas++;
+  }
 }

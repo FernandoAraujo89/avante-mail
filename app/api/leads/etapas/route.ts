@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { count, eq } from "drizzle-orm";
 
-import { contacts, getDb, leadStages, lists } from "@/lib/db";
+import {
+  contacts,
+  getDb,
+  leadScoreRules,
+  leadStages,
+  lists,
+  type LeadScoreRule,
+} from "@/lib/db";
 import { listarEtapas, slugDaEtapa } from "@/lib/leads/etapas";
+import { recalcularTodos } from "@/lib/leads/score";
+import { lerFunisDaUltimaPassada } from "@/lib/pipedrive/funis";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -13,24 +22,71 @@ export const dynamic = "force-dynamic";
  * Cadastro pela tela porque o funil é do comercial: cada etapa nova lá viraria
  * um deploy nosso se a lista morasse no código, e até o deploy sair o webhook
  * do agente chegaria com uma etapa que o sistema recusa.
+ *
+ * Os PONTOS de cada etapa são regras de `lead_score_rules` (event_type
+ * `lead_stage_changed`, condition por `para`) — esta rota as edita por
+ * conveniência, como a de qualificações faz com as dela. O mecanismo é o da
+ * tela de Pontuação.
  */
+
+function regraDaEtapa(
+  regras: LeadScoreRule[],
+  slug: string
+): LeadScoreRule | null {
+  return (
+    regras.find(
+      (r) =>
+        r.eventType === "lead_stage_changed" &&
+        (r.condition as Record<string, unknown> | null)?.para === slug
+    ) ?? null
+  );
+}
+
+async function regrasDeEtapa(): Promise<LeadScoreRule[]> {
+  return getDb()
+    .select()
+    .from(leadScoreRules)
+    .where(eq(leadScoreRules.eventType, "lead_stage_changed"));
+}
+
+/** Pontos vindos do corpo: número inteiro, ou undefined quando não veio. */
+function pontosDoCorpo(valor: unknown): number | undefined {
+  if (valor === undefined || valor === null || valor === "") return undefined;
+  const n = Number(valor);
+  return Number.isFinite(n) ? Math.round(n) : undefined;
+}
+
 export async function GET() {
   try {
-    const etapas = await listarEtapas(true);
-
-    // Quantos leads em cada etapa — é o que impede apagar uma etapa cheia sem
-    // perceber, e o que mostra se o agente está mesmo mandando as mudanças.
     const db = getDb();
-    const porEtapa = await db
-      .select({ stage: contacts.stage, total: count() })
-      .from(contacts)
-      .groupBy(contacts.stage);
+    const [etapas, porEtapa, regras, funis] = await Promise.all([
+      listarEtapas(true),
+      // Quantos leads em cada etapa — é o que impede apagar uma etapa cheia
+      // sem perceber, e o que mostra se a sincronização está mesmo trazendo.
+      db
+        .select({ stage: contacts.stage, total: count() })
+        .from(contacts)
+        .groupBy(contacts.stage),
+      regrasDeEtapa(),
+      lerFunisDaUltimaPassada(),
+    ]);
 
     return NextResponse.json({
       etapas,
       uso: Object.fromEntries(
         porEtapa.filter((r) => r.stage).map((r) => [r.stage as string, r.total])
       ),
+      pontos: Object.fromEntries(
+        etapas
+          .map((e) => [e.slug, regraDaEtapa(regras, e.slug)?.points])
+          .filter(([, pontos]) => pontos !== undefined)
+      ),
+      // Quais funis do Pipedrive alimentam esta lista. `ligada` diz se este
+      // ambiente tem o token — sem ele, nada sincroniza e a tela precisa dizer.
+      sincronizacao: {
+        ligada: Boolean(process.env.PIPEDRIVE_API_TOKEN),
+        ...(funis ?? { funis: [], ausentes: [], quando: null }),
+      },
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
@@ -87,6 +143,19 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
+    // Pontos junto da criação, como nas qualificações: mandar o operador a
+    // outra tela para dar peso ao que acabou de criar é perder o peso no
+    // caminho. Sem recálculo: etapa recém-criada não tem ninguém dentro.
+    const pontos = pontosDoCorpo(body.pontos);
+    if (pontos !== undefined) {
+      await db.insert(leadScoreRules).values({
+        eventType: "lead_stage_changed",
+        condition: { para: slug },
+        points: pontos,
+        description: `Chegou em ${label}`,
+      });
+    }
+
     return NextResponse.json({ etapa: criada });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
@@ -102,6 +171,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Etapa não informada." }, { status: 400 });
     }
 
+    const [atual] = await db
+      .select()
+      .from(leadStages)
+      .where(eq(leadStages.id, id));
+    if (!atual) {
+      return NextResponse.json(
+        { error: "Etapa não encontrada." },
+        { status: 404 }
+      );
+    }
+
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (typeof body.label === "string" && body.label.trim()) {
       patch.label = body.label.trim();
@@ -114,7 +194,8 @@ export async function PATCH(request: NextRequest) {
     }
     if (typeof body.active === "boolean") patch.active = body.active;
 
-    // Apelidos: os nomes das etapas do Pipedrive que traduzem para esta.
+    // Apelidos: outros nomes que resolvem para esta etapa — a mesma etapa com
+    // outro nome em outro funil, ou o nome antigo depois de um renomear lá.
     if (Array.isArray(body.aliases)) {
       patch.aliases = [
         ...new Set(
@@ -159,7 +240,41 @@ export async function PATCH(request: NextRequest) {
     // andar") não apontaria para cá.
     await db.update(leadStages).set(patch).where(eq(leadStages.id, id));
 
-    return NextResponse.json({ ok: true });
+    // Pontos: edita (ou cria) a regra de pontuação desta etapa, e recalcula a
+    // base na hora — a pontuação é derivada, e sem recalcular a tela mostraria
+    // o peso novo com números velhos. O nome da regra acompanha o da etapa:
+    // "Chegou em <nome antigo>" na conta aberta confundiria quem lê.
+    let recalculados: number | undefined;
+    const pontos = pontosDoCorpo(body.pontos);
+    const regra = regraDaEtapa(await regrasDeEtapa(), atual.slug);
+    const nome = (patch.label as string | undefined) ?? atual.label;
+
+    if (pontos !== undefined && regra && regra.points !== pontos) {
+      await db
+        .update(leadScoreRules)
+        .set({ points: pontos, updatedAt: new Date() })
+        .where(eq(leadScoreRules.id, regra.id));
+      recalculados = await recalcularTodos();
+    } else if (pontos !== undefined && !regra) {
+      await db.insert(leadScoreRules).values({
+        eventType: "lead_stage_changed",
+        condition: { para: atual.slug },
+        points: pontos,
+        description: `Chegou em ${nome}`,
+      });
+      recalculados = await recalcularTodos();
+    }
+    if (regra && patch.label && regra.description === `Chegou em ${atual.label}`) {
+      await db
+        .update(leadScoreRules)
+        .set({ description: `Chegou em ${nome}`, updatedAt: new Date() })
+        .where(eq(leadScoreRules.id, regra.id));
+    }
+
+    return NextResponse.json({
+      ok: true,
+      ...(recalculados !== undefined ? { recalculados } : {}),
+    });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -198,6 +313,14 @@ export async function DELETE(request: NextRequest) {
     }
 
     await db.delete(leadStages).where(eq(leadStages.id, id));
+
+    // A regra de pontos vai junto: sem a etapa, ela viraria uma linha órfã na
+    // tela de Pontuação. Ninguém está na etapa, então não há o que recalcular.
+    const regra = regraDaEtapa(await regrasDeEtapa(), etapa.slug);
+    if (regra) {
+      await db.delete(leadScoreRules).where(eq(leadScoreRules.id, regra.id));
+    }
+
     return NextResponse.json({ ok: true, apagada: true });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

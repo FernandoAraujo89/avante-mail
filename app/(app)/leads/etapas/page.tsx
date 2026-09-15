@@ -37,16 +37,48 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { slugDaEtapa, type EtapaDto } from "@/components/leads/estagios";
+import { formatDateTime } from "@/lib/format";
 
 interface Resposta {
   etapas: EtapaDto[];
   uso: Record<string, number>;
+  /** Pontos da regra de cada etapa, por slug. Sem chave = etapa sem regra. */
+  pontos: Record<string, number>;
+  sincronizacao: {
+    ligada: boolean;
+    funis: { id: number; nome: string }[];
+    ausentes: string[];
+    quando: string | null;
+  };
 }
+
+const SEM_DADOS: Resposta = {
+  etapas: [],
+  uso: {},
+  pontos: {},
+  sincronizacao: { ligada: false, funis: [], ausentes: [], quando: null },
+};
 
 interface ListaOpcao {
   id: string;
   name: string;
   kind: string | null;
+}
+
+/**
+ * Onde a etapa nova entra no funil: logo antes da etapa final (a que encerra a
+ * nutrição ou converte), e não depois dela. A tela não reordena, e o funil do
+ * relatório conta pela posição — uma etapa depois de "Comprou" viraria um
+ * degrau depois da compra.
+ */
+function posicaoDaNova(etapas: EtapaDto[]): number {
+  const finais = etapas.filter(
+    (e) => e.active && (e.stopsNurturing || e.convertListId)
+  );
+  const fim = finais.length > 0 ? Math.min(...finais.map((e) => e.position)) : null;
+  const antes = etapas.filter((e) => fim === null || e.position < fim);
+  const ultima = antes.length > 0 ? Math.max(...antes.map((e) => e.position)) : 0;
+  return fim === null ? ultima + 10 : ultima + 1;
 }
 
 /** O que o diálogo de edição mexe — apelidos como texto, um por linha. */
@@ -65,6 +97,11 @@ export default function EtapasPage() {
 
   const [nova, setNova] = useState("");
   const [novaPara, setNovaPara] = useState(false);
+  const [novosPontos, setNovosPontos] = useState("");
+
+  // Rascunho dos pontos por linha: o valor digitado só vai ao servidor no
+  // Enter/blur — cada tecla disparando um recálculo geral seria um desastre.
+  const [pontosDraft, setPontosDraft] = useState<Record<string, string>>({});
 
   const [edicao, setEdicao] = useState<Edicao | null>(null);
 
@@ -83,6 +120,7 @@ export default function EtapasPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar as etapas.");
       setDados(json);
+      setPontosDraft({});
       // Destinos possíveis da conversão automática — lista de leads fica fora.
       setListas(
         Array.isArray(listasRes)
@@ -90,7 +128,7 @@ export default function EtapasPage() {
           : []
       );
     } catch (err) {
-      setDados({ etapas: [], uso: {} });
+      setDados(SEM_DADOS);
       setErro(err instanceof Error ? err.message : String(err));
     }
   }, []);
@@ -130,15 +168,29 @@ export default function EtapasPage() {
 
   async function criar() {
     if (!nova.trim()) return;
-    const posicao = (dados?.etapas.length ?? 0) * 10 + 10;
     const ok = await chamar("POST", {
       label: nova.trim(),
-      position: posicao,
+      position: posicaoDaNova(dados?.etapas ?? []),
       stopsNurturing: novaPara,
+      ...(novosPontos.trim() !== "" ? { pontos: Number(novosPontos) } : {}),
     });
     if (ok) {
       setNova("");
       setNovaPara(false);
+      setNovosPontos("");
+    }
+  }
+
+  async function salvarPontos(e: EtapaDto) {
+    const texto = pontosDraft[e.id];
+    if (texto === undefined) return;
+    if (texto.trim() === "" || Number(texto) === dados?.pontos[e.slug]) return;
+    if (!Number.isFinite(Number(texto))) return;
+    const ok = await chamar("PATCH", { id: e.id, pontos: Number(texto) });
+    if (ok && typeof ok.recalculados === "number") {
+      setAviso(
+        `Pontos de "${e.label}" salvos — a pontuação de ${ok.recalculados} lead${ok.recalculados === 1 ? "" : "s"} foi recalculada.`
+      );
     }
   }
 
@@ -193,7 +245,7 @@ export default function EtapasPage() {
 
       <PageHeader
         title="Etapas do funil"
-        description="Espelho do funil do Pipedrive. O comercial move o deal lá; a sincronização (e o webhook) trazem a mudança por estes nomes."
+        description="Espelho dos funis do Pipedrive, etapa por etapa. O comercial move o deal lá; a sincronização (e o webhook) trazem a mudança por estes nomes."
       />
 
       {erro ? (
@@ -208,38 +260,44 @@ export default function EtapasPage() {
         </div>
       ) : null}
 
-      {/* Só as etapas que o usuário nomeou vieram semeadas. Dizer isso na tela
-          evita que uma lista curta pareça a lista completa. */}
       <Card className="mb-6">
         <CardContent className="grid gap-3 py-4 text-sm">
+          <SincronizacaoDosFunis
+            sincronizacao={dados?.sincronizacao ?? null}
+          />
           <p className="text-muted-foreground">
-            O sistema começa só com as etapas que você citou. Cadastre aqui as
-            demais do seu funil no Pipedrive — o webhook aceita tanto o nome por
-            extenso (&ldquo;Passou por apresentação de produto&rdquo;) quanto o
-            identificador gerado a partir dele.
+            Mantenha esta lista igual às etapas do Pipedrive: uma etapa que só
+            existe lá é recusada pela sincronização, e o lead fica parado na
+            anterior. Se a mesma etapa tem outro nome em outro funil — ou foi
+            renomeada lá —, cadastre o nome no lápis, como{" "}
+            <span className="font-medium">apelido</span>.
+          </p>
+          <p className="text-muted-foreground">
+            Os <span className="font-medium">pontos</span> entram no Lead Score
+            e valem só para a etapa em que o lead está agora: quem avança troca
+            os pontos da etapa anterior pelos da nova, e quem volta perde a
+            diferença. Com o tempo eles perdem valor, como toda ação — lead
+            parado numa etapa esfria. São as mesmas regras da tela de{" "}
+            <Link href="/leads/pontuacao" className="underline">
+              Pontuação
+            </Link>
+            , editadas daqui por conveniência.
           </p>
           <p className="text-muted-foreground">
             Marcar <span className="font-medium">encerra a nutrição</span> faz o
             lead sair de todos os fluxos em andamento ao chegar nessa etapa. Tudo
             mais que a etapa deva provocar — marcar tag, trocar de trilha, avisar
             alguém — se monta em Automações, com o gatilho{" "}
-            <span className="font-medium">Lead andou no funil</span>.
-          </p>
-          <p className="text-muted-foreground">
-            O funil do Pipedrive é mais detalhado que os marcos daqui. No lápis
-            de cada etapa, os <span className="font-medium">apelidos</span>{" "}
-            dizem quais etapas de lá caem neste marco — é assim que a
-            sincronização traduz &ldquo;Analisando proposta&rdquo; para
-            &ldquo;Passou por apresentação de produto&rdquo;. Lá também se liga
-            a <span className="font-medium">conversão automática</span>: ao
-            chegar na etapa, o lead vira parceiro na lista escolhida e passa a
-            receber as campanhas de parceiro.
+            <span className="font-medium">Lead andou no funil</span>. No lápis
+            também se liga a{" "}
+            <span className="font-medium">conversão automática</span>: ao chegar
+            na etapa, o lead vira parceiro na lista escolhida.
           </p>
         </CardContent>
       </Card>
 
       <Card className="mb-6">
-        <CardContent className="grid gap-3 py-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+        <CardContent className="grid gap-3 py-4 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
           <div className="grid gap-1.5">
             <Label htmlFor="nova-etapa">Nome da etapa no Pipedrive</Label>
             <Input
@@ -256,6 +314,21 @@ export default function EtapasPage() {
                 Identificador: <code>{slugDaEtapa(nova)}</code>
               </p>
             ) : null}
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="novos-pontos">Pontos</Label>
+            <Input
+              id="novos-pontos"
+              type="number"
+              inputMode="numeric"
+              className="w-full sm:w-24"
+              value={novosPontos}
+              onChange={(e) => setNovosPontos(e.target.value)}
+              placeholder="0"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") criar();
+              }}
+            />
           </div>
           <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm">
             <input
@@ -288,8 +361,14 @@ export default function EtapasPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Etapa</TableHead>
-                <TableHead>Identificador</TableHead>
+                {/* Com a coluna de pontos, a tabela deixava de caber ao lado
+                    do menu em notebook: abaixo de xl o identificador desce
+                    para baixo do nome, e as colunas de ação continuam à vista. */}
+                <TableHead className="hidden xl:table-cell">
+                  Identificador
+                </TableHead>
                 <TableHead>Leads</TableHead>
+                <TableHead>Pontos</TableHead>
                 <TableHead>Encerra a nutrição</TableHead>
                 <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
@@ -298,34 +377,65 @@ export default function EtapasPage() {
               {etapas.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell>
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{e.label}</span>
-                      {!e.active ? (
-                        <Badge variant="secondary">Desativada</Badge>
+                    {/* No celular a coluna de ações fica fixa por cima da
+                        tabela: sem o teto, o nome longo ("Agendar apresentação
+                        parte técnica") correria por baixo dela, cortado. */}
+                    <div className="max-w-44 sm:max-w-none">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{e.label}</span>
+                        {!e.active ? (
+                          <Badge variant="secondary">Desativada</Badge>
+                        ) : null}
+                      </span>
+                      <p className="mt-0.5 break-words text-xs text-muted-foreground xl:hidden">
+                        <code>{e.slug}</code>
+                      </p>
+                      {(e.aliases ?? []).length > 0 ? (
+                        <p
+                          className="mt-0.5 max-w-72 truncate text-xs text-muted-foreground"
+                          title={(e.aliases ?? []).join(" · ")}
+                        >
+                          Também: {(e.aliases ?? []).join(" · ")}
+                        </p>
                       ) : null}
-                    </span>
-                    {(e.aliases ?? []).length > 0 ? (
-                      <p
-                        className="mt-0.5 max-w-72 truncate text-xs text-muted-foreground"
-                        title={(e.aliases ?? []).join(" · ")}
-                      >
-                        No Pipedrive: {(e.aliases ?? []).join(" · ")}
-                      </p>
-                    ) : null}
-                    {e.convertListId ? (
-                      <p className="mt-0.5 text-xs text-success-dark">
-                        Ao chegar, vira parceiro em &ldquo;
-                        {listas.find((l) => l.id === e.convertListId)?.name ??
-                          "lista removida"}
-                        &rdquo;
-                      </p>
-                    ) : null}
+                      {e.convertListId ? (
+                        <p className="mt-0.5 text-xs text-success-dark">
+                          Ao chegar, vira parceiro em &ldquo;
+                          {listas.find((l) => l.id === e.convertListId)?.name ??
+                            "lista removida"}
+                          &rdquo;
+                        </p>
+                      ) : null}
+                    </div>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">
                     <code>{e.slug}</code>
                   </TableCell>
                   <TableCell className="tabular-nums">
                     {dados.uso[e.slug] ?? 0}
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      className="w-20"
+                      aria-label={`Pontos de ${e.label}`}
+                      disabled={salvando}
+                      value={pontosDraft[e.id] ?? dados.pontos[e.slug] ?? ""}
+                      placeholder="—"
+                      onChange={(ev) =>
+                        setPontosDraft((d) => ({
+                          ...d,
+                          [e.id]: ev.target.value,
+                        }))
+                      }
+                      onBlur={() => salvarPontos(e)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter") {
+                          (ev.target as HTMLInputElement).blur();
+                        }
+                      }}
+                    />
                   </TableCell>
                   <TableCell>
                     <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -422,7 +532,7 @@ export default function EtapasPage() {
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="ed-aliases">
-                  Etapas do Pipedrive que caem neste marco
+                  Outros nomes desta etapa no Pipedrive
                 </Label>
                 <Textarea
                   id="ed-aliases"
@@ -431,11 +541,12 @@ export default function EtapasPage() {
                   onChange={(e) =>
                     setEdicao({ ...edicao, aliases: e.target.value })
                   }
-                  placeholder={"Uma por linha. Ex.:\nApresentar parte técnica\nAnalisando proposta"}
+                  placeholder={"Um por linha. Ex.:\nEm análise/Agendar apresentação"}
                 />
                 <p className="text-xs text-muted-foreground">
-                  A sincronização e o webhook aceitam qualquer um destes nomes
-                  como se fosse a própria etapa.
+                  O nome que a mesma etapa tem em outro funil acompanhado, ou o
+                  nome antigo depois de renomeá-la lá. A sincronização e o
+                  webhook aceitam qualquer um deles como a própria etapa.
                 </p>
               </div>
               <div className="grid gap-1.5">
@@ -495,7 +606,7 @@ export default function EtapasPage() {
               {removerAlvo
                 ? (dados?.uso[removerAlvo.slug] ?? 0) > 0
                   ? `"${removerAlvo.label}" tem ${dados?.uso[removerAlvo.slug]} lead${(dados?.uso[removerAlvo.slug] ?? 0) === 1 ? "" : "s"} dentro, então será apenas desativada — os leads continuam contados no funil e a etapa pode ser reativada depois.`
-                  : `Remover a etapa "${removerAlvo.label}"? A sincronização e o webhook deixam de reconhecer este nome.`
+                  : `Remover a etapa "${removerAlvo.label}"? A sincronização e o webhook deixam de reconhecer este nome, e a regra de pontos dela é removida junto.`
                 : null}
             </DialogDescription>
           </DialogHeader>
@@ -522,5 +633,62 @@ export default function EtapasPage() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/**
+ * De quais funis do Pipedrive esta lista é o espelho. Sem isto a tela diria
+ * "espelho do Pipedrive" sem dizer de onde — e um funil que sumiu (excluído,
+ * ou a sincronização desligada) pararia os leads sem ninguém ver o porquê.
+ */
+function SincronizacaoDosFunis({
+  sincronizacao,
+}: {
+  sincronizacao: Resposta["sincronizacao"] | null;
+}) {
+  if (!sincronizacao) return null;
+
+  if (!sincronizacao.ligada) {
+    return (
+      <p className="rounded-lg border border-warning-dark/30 bg-warning-light/30 px-3 py-2 text-warning-dark">
+        A sincronização com o Pipedrive está desligada neste ambiente (falta o
+        token da API). As etapas só mudam pelo webhook.
+      </p>
+    );
+  }
+
+  const nomes = sincronizacao.funis.map((f) => f.nome);
+  return (
+    <div className="grid gap-2">
+      {nomes.length > 0 ? (
+        <p>
+          Acompanhando no Pipedrive:{" "}
+          {nomes.map((nome, i) => (
+            <span key={nome}>
+              {i > 0 ? (i === nomes.length - 1 ? " e " : ", ") : null}
+              <span className="font-medium">{nome}</span>
+            </span>
+          ))}
+          {sincronizacao.quando ? (
+            <span className="text-muted-foreground">
+              {" "}
+              · última leitura em {formatDateTime(sincronizacao.quando)}
+            </span>
+          ) : null}
+          . Os funis têm as mesmas etapas; a lista abaixo serve aos dois.
+        </p>
+      ) : (
+        <p className="text-muted-foreground">
+          A sincronização com o Pipedrive ainda não rodou neste ambiente.
+        </p>
+      )}
+      {sincronizacao.ausentes.length > 0 ? (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive-hover">
+          Funil {sincronizacao.ausentes.join(", ")} não foi encontrado no
+          Pipedrive — ele pode ter sido excluído. Os leads dele pararam de
+          andar aqui.
+        </p>
+      ) : null}
+    </div>
   );
 }

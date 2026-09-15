@@ -39,7 +39,10 @@ import { formatDateTime } from "@/lib/format";
  * tinta de texto, nunca na cor da série.
  */
 
-// Rampa ordinal do funil, do marco mais raso ao mais fundo (validada).
+// Rampa ordinal do funil, da etapa mais rasa à mais funda (validada no branco
+// com --ordinal). Com mais etapas que degraus, etapas vizinhas dividem o
+// degrau: esticar a rampa a 10 tons deixaria degraus que o olho não separa, e
+// quem nomeia cada barra é o rótulo ao lado dela.
 const RAMPA_FUNIL = ["#9ab8f0", "#5b82e8", "#1d50dc", "#1337a0"];
 const AZUL = "#1d50dc";
 
@@ -150,7 +153,7 @@ function BarraH({
   );
 }
 
-/** O funil: quantos PASSARAM por cada marco, com a taxa entre eles. */
+/** O funil: quantos PASSARAM por cada etapa, com a taxa entre elas. */
 function Funil({ funil }: { funil: Relatorio["funil"] }) {
   const maximo = Math.max(1, ...funil.map((f) => f.passaram));
   return (
@@ -168,10 +171,12 @@ function Funil({ funil }: { funil: Relatorio["funil"] }) {
                 ↓ {taxa}% avançam
               </p>
             ) : null}
-            <div className="grid grid-cols-[minmax(96px,180px)_1fr_auto] items-center gap-3">
-              <span className="truncate text-sm" title={f.label}>
-                {f.label}
-              </span>
+            {/* O rótulo quebra em vez de cortar: com as etapas do Pipedrive
+                ("Agendar apresentação parte técnica") os 180px de antes
+                viravam reticências até em monitor largo. O teto em 40% guarda
+                espaço para a barra no celular. */}
+            <div className="grid grid-cols-[minmax(96px,min(14rem,40%))_1fr_auto] items-center gap-3">
+              <span className="text-sm leading-snug">{f.label}</span>
               <span className="relative h-6 border-l border-border">
                 <span
                   className="absolute inset-y-0 left-0 rounded-r-[4px]"
@@ -179,7 +184,10 @@ function Funil({ funil }: { funil: Relatorio["funil"] }) {
                     width: `max(${(f.passaram / maximo) * 100}%, ${f.passaram > 0 ? "3px" : "0px"})`,
                     backgroundColor:
                       RAMPA_FUNIL[
-                        Math.min(i, RAMPA_FUNIL.length - 1)
+                        Math.min(
+                          Math.floor((i * RAMPA_FUNIL.length) / funil.length),
+                          RAMPA_FUNIL.length - 1
+                        )
                       ],
                   }}
                 />
@@ -532,9 +540,9 @@ export default function RelatorioPage() {
               <CardContent>
                 <Funil funil={dados.funil} />
                 <p className="mt-4 text-xs text-muted-foreground">
-                  Quantos leads <span className="font-medium">passaram</span>{" "}
-                  por cada marco — quem avançou ou virou parceiro continua
-                  contado por onde passou.
+                  Quantos leads <span className="font-medium">chegaram</span>{" "}
+                  pelo menos até cada etapa — quem avançou, pulou etapa ou virou
+                  parceiro conta em todas as etapas até onde chegou.
                 </p>
               </CardContent>
             </Card>

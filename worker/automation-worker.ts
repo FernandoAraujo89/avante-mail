@@ -157,7 +157,7 @@ async function ciclo(): Promise<void> {
     const pd = await sincronizarPipedrive();
     if (pd.rodou && (pd.deals ?? 0) > 0) {
       console.log(
-        `[WORKER-AUTO] pipedrive: ${pd.deals} deal(s) — ${pd.etapasAplicadas} etapa(s), ${pd.qualificacoesAplicadas} qualificação(ões), ${pd.convertidos} convertido(s), ${pd.semContato} sem contato, ${pd.recusas} recusa(s)`
+        `[WORKER-AUTO] pipedrive: ${pd.deals} deal(s) de ${pd.funis} funil(is) — ${pd.etapasAplicadas} etapa(s), ${pd.qualificacoesAplicadas} qualificação(ões), ${pd.convertidos} convertido(s), ${pd.semContato} sem contato, ${pd.recusas} recusa(s)`
       );
     }
   } catch (error) {

@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 
-import { casaGatilho } from "@/lib/automations/engine";
+import { casaGatilho } from "@/lib/automations/gatilho";
+import { ETAPA_DE_ENTRADA } from "@/components/leads/estagios";
 import {
   contactEvents,
   contacts,
@@ -36,6 +37,18 @@ export const CHAVE_FAIXA_AQUECIDO = "lead_score_faixa_aquecido";
 export const CHAVE_FAIXA_QUENTE = "lead_score_faixa_quente";
 /** Quando a passagem completa (a do decaimento) rodou pela última vez. */
 export const CHAVE_ULTIMA_PASSAGEM = "lead_score_ultima_passagem";
+/** Com qual versão da REGRA de cálculo a base foi pontuada por último. */
+export const CHAVE_VERSAO_DO_CALCULO = "lead_score_versao_do_calculo";
+
+/**
+ * Muda quando muda a REGRA de cálculo — não os pesos, que a tela de Pontuação
+ * já recalcula na hora. A primeira passagem de um worker com versão nova roda
+ * completa sem esperar o intervalo: senão a regra nova conviveria com números
+ * velhos até a madrugada, e o recálculo por evento não pega quem ficou parado.
+ *
+ * 14/09/2026: etapa e qualificação passaram a valer só a atual.
+ */
+export const VERSAO_DO_CALCULO = "2026-09-14-estado-atual";
 
 export const PADRAO_MEIA_VIDA_DIAS = 30;
 export const PADRAO_FAIXA_MORNO = 20;
@@ -262,15 +275,105 @@ export function pontosComDecaimento(
   return pontos * Math.pow(0.5, idadeDias / meiaVidaDias);
 }
 
+/** Um evento como a conta o enxerga. */
+export interface EventoPontuavel {
+  type: ContactEventType;
+  payload: Record<string, unknown> | null;
+  createdAt: Date;
+}
+
+/** O que o contato carrega de estado — a fonte de quem não tem evento. */
+export interface EstadoDoContato {
+  stage: string | null;
+  stageChangedAt: Date | null;
+  qualification: string | null;
+  qualifiedAt: Date | null;
+  /** Quando ele entrou: a data de quem não tem outra. */
+  desde: Date;
+}
+
+/**
+ * Tipos que descrevem ESTADO, e não ação: onde o lead está no funil e como o
+ * comercial o qualificou. De cada um vale só o mais recente.
+ *
+ * Somados como as ações, eles pontuariam a TRAJETÓRIA em vez da posição. Quem
+ * andou etapa por etapa até a proposta juntaria os pontos de todas; quem o
+ * vendedor arrastou direto para lá — ou que a sincronização, de 5 em 5
+ * minutos, só viu chegando — teria só os da última: a mesma posição valendo
+ * números diferentes. E o lead qualificado como "Experiente" e depois como
+ * "Não" seguiria com os pontos de experiente.
+ */
+const TIPOS_DE_ESTADO: ReadonlySet<ContactEventType> = new Set([
+  "lead_stage_changed",
+  "lead_qualified",
+]);
+
+/**
+ * Os eventos que entram na conta: todas as ações e, de cada estado, só o
+ * vigente. Pura — a regra de "o que conta" é testada sem banco.
+ *
+ * `eventos` em ordem cronológica; a devolução também.
+ */
+export function eventosQueContam(
+  eventos: EventoPontuavel[],
+  estado: EstadoDoContato
+): EventoPontuavel[] {
+  const vigentes = new Map<ContactEventType, EventoPontuavel>();
+
+  // Do mais novo para o mais velho: o primeiro de cada tipo é o que vale.
+  for (let i = eventos.length - 1; i >= 0; i--) {
+    const evento = eventos[i];
+    if (!TIPOS_DE_ESTADO.has(evento.type) || vigentes.has(evento.type)) {
+      continue;
+    }
+    // A conversão em parceiro também é `lead_stage_changed`, com `para` nulo.
+    // Ela tira o contato do funil, mas não apaga onde ele chegou: a ficha
+    // congelada de quem comprou continua mostrando a etapa de compra.
+    if (evento.type === "lead_stage_changed" && !evento.payload?.para) continue;
+    vigentes.set(evento.type, evento);
+  }
+
+  // Sem evento, o estado vem do próprio contato. Acontece quando o webhook já
+  // cria o lead numa etapa adiante: o contato nasce nela sem "andar" até ela.
+  // A etapa de entrada fica de fora — quem nunca saiu dela não chegou a lugar
+  // nenhum, e uma regra curinga de "andou no funil" pontuaria todo lead novo.
+  if (
+    !vigentes.has("lead_stage_changed") &&
+    estado.stage &&
+    estado.stage !== ETAPA_DE_ENTRADA
+  ) {
+    vigentes.set("lead_stage_changed", {
+      type: "lead_stage_changed",
+      payload: { para: estado.stage },
+      createdAt: estado.stageChangedAt ?? estado.desde,
+    });
+  }
+  if (!vigentes.has("lead_qualified") && estado.qualification) {
+    vigentes.set("lead_qualified", {
+      type: "lead_qualified",
+      payload: { qualificacao: estado.qualification },
+      createdAt: estado.qualifiedAt ?? estado.desde,
+    });
+  }
+
+  return [
+    ...eventos.filter((e) => !TIPOS_DE_ESTADO.has(e.type)),
+    ...vigentes.values(),
+  ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+}
+
 /**
  * A conta de um contato, aberta. Não grava nada — serve tanto ao recálculo
  * quanto à tela que responde "por que ele tem 47 pontos".
+ *
+ * `estado` é opcional porque o recálculo já leu o contato; a tela não.
  */
 export async function calcularConta(
   contactId: string,
   regras: LeadScoreRule[],
   config: Configuracao,
-  agora = new Date()
+  agora = new Date(),
+  estado?: EstadoDoContato
 ): Promise<ContaDoScore> {
   const db = getDb();
   const porTipo = agruparRegras(regras);
@@ -279,24 +382,86 @@ export async function calcularConta(
     return { score: 0, faixa: faixaDoScore(0, config), linhas: [] };
   }
 
-  const eventos = await db
-    .select({
-      type: contactEvents.type,
-      // O payload entra na conta desde a fase E: é ele que distingue "viu a
-      // página de preços" de "visitou o site", que são o mesmo tipo de evento
-      // com pesos diferentes.
-      payload: contactEvents.payload,
-      createdAt: contactEvents.createdAt,
-    })
-    .from(contactEvents)
-    .where(
-      and(
-        eq(contactEvents.contactId, contactId),
-        inArray(contactEvents.type, [...porTipo.keys()])
+  const [eventos, estadoDoContato] = await Promise.all([
+    db
+      .select({
+        type: contactEvents.type,
+        // O payload entra na conta desde a fase E: é ele que distingue "viu a
+        // página de preços" de "visitou o site", que são o mesmo tipo de
+        // evento com pesos diferentes.
+        payload: contactEvents.payload,
+        createdAt: contactEvents.createdAt,
+      })
+      .from(contactEvents)
+      .where(
+        and(
+          eq(contactEvents.contactId, contactId),
+          inArray(contactEvents.type, [...porTipo.keys()])
+        )
       )
-    )
-    .orderBy(asc(contactEvents.createdAt));
+      .orderBy(asc(contactEvents.createdAt)),
+    estado ?? lerEstado(contactId),
+  ]);
 
+  return montarConta(
+    eventosQueContam(eventos, estadoDoContato ?? SEM_ESTADO),
+    regras,
+    config,
+    agora
+  );
+}
+
+/** Contato que não existe mais: só os eventos, sem estado de onde completar. */
+const SEM_ESTADO: EstadoDoContato = {
+  stage: null,
+  stageChangedAt: null,
+  qualification: null,
+  qualifiedAt: null,
+  desde: new Date(0),
+};
+
+const COLUNAS_DO_ESTADO = {
+  stage: contacts.stage,
+  stageChangedAt: contacts.stageChangedAt,
+  qualification: contacts.qualification,
+  qualifiedAt: contacts.qualifiedAt,
+  acquiredAt: contacts.acquiredAt,
+  createdAt: contacts.createdAt,
+};
+
+function paraEstado(linha: {
+  stage: string | null;
+  stageChangedAt: Date | null;
+  qualification: string | null;
+  qualifiedAt: Date | null;
+  acquiredAt: Date | null;
+  createdAt: Date;
+}): EstadoDoContato {
+  return {
+    stage: linha.stage,
+    stageChangedAt: linha.stageChangedAt,
+    qualification: linha.qualification,
+    qualifiedAt: linha.qualifiedAt,
+    desde: linha.acquiredAt ?? linha.createdAt,
+  };
+}
+
+async function lerEstado(contactId: string): Promise<EstadoDoContato | null> {
+  const [linha] = await getDb()
+    .select(COLUNAS_DO_ESTADO)
+    .from(contacts)
+    .where(eq(contacts.id, contactId));
+  return linha ? paraEstado(linha) : null;
+}
+
+/** A soma, já com os eventos que contam. Pura. */
+export function montarConta(
+  eventos: EventoPontuavel[],
+  regras: LeadScoreRule[],
+  config: Configuracao,
+  agora: Date
+): ContaDoScore {
+  const porTipo = agruparRegras(regras);
   const linhas: LinhaDaConta[] = [];
   let total = 0;
 
@@ -345,11 +510,17 @@ export async function recalcularContato(
 ): Promise<{ score: number; faixa: LeadScoreBand; mudouDeFaixa: boolean }> {
   const db = getDb();
   const [antes] = await db
-    .select({ faixa: contacts.leadScoreBand })
+    .select({ faixa: contacts.leadScoreBand, ...COLUNAS_DO_ESTADO })
     .from(contacts)
     .where(eq(contacts.id, contactId));
 
-  const conta = await calcularConta(contactId, regras, config, agora);
+  const conta = await calcularConta(
+    contactId,
+    regras,
+    config,
+    agora,
+    antes ? paraEstado(antes) : undefined
+  );
 
   await db
     .update(contacts)
@@ -428,9 +599,14 @@ export async function recalcularPendentes(limite = 200): Promise<number> {
 export async function passagemDiaria(
   intervaloHoras = 20
 ): Promise<{ rodou: boolean; recalculados: number }> {
-  const ultima = await getSetting(CHAVE_ULTIMA_PASSAGEM);
+  const [ultima, versao] = await Promise.all([
+    getSetting(CHAVE_ULTIMA_PASSAGEM),
+    getSetting(CHAVE_VERSAO_DO_CALCULO),
+  ]);
   const agora = new Date();
-  if (ultima) {
+  // Regra de cálculo nova: passa já, sem esperar o intervalo.
+  const calculoMudou = versao !== VERSAO_DO_CALCULO;
+  if (ultima && !calculoMudou) {
     const horas = (agora.getTime() - new Date(ultima).getTime()) / 3_600_000;
     if (Number.isFinite(horas) && horas < intervaloHoras) {
       return { rodou: false, recalculados: 0 };
@@ -451,6 +627,7 @@ export async function passagemDiaria(
   }
 
   await setSetting(CHAVE_ULTIMA_PASSAGEM, agora.toISOString());
+  if (calculoMudou) await setSetting(CHAVE_VERSAO_DO_CALCULO, VERSAO_DO_CALCULO);
   return { rodou: true, recalculados: leads.length };
 }
 

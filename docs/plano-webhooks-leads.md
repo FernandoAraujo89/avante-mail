@@ -140,6 +140,8 @@ o time decidir o peso.
 `apresentacao-de-produto`, `comprou`). O resto do funil se cadastra na tela:
 inventar o funil dos outros é exatamente como a tela passa a mentir — já
 aconteceu com as páginas do site no rastreio, e o custo foi retrabalho.
+*(Até 14/09/2026, quando o usuário pediu o funil inteiro — lido do próprio
+Pipedrive, não inventado. Ver "Funil completo, pontuado, em dois funis".)*
 
 Três vocabulários convivem na ficha e não são a mesma coisa: **faixa** é
 temperatura (o sistema calcula), **qualificação** é quem o lead é (o agente
@@ -163,14 +165,16 @@ qualificação, marco do funil e compra. Converge sozinha, e a PRIMEIRA passada
 ambiente ela fica quieta — avisa uma vez no log e segue.
 
 **Config por env:** `PIPEDRIVE_API_TOKEN` (Preferências pessoais → API),
-`PIPEDRIVE_PIPELINE` (padrão "White Label - Inbound"),
-`PIPEDRIVE_CAMPO_QUALIFICACAO` (padrão "Lead qualificado").
+`PIPEDRIVE_PIPELINE` (padrão "White Label - Inbound" — desde 14/09/2026 só vale
+sem `pipedrive_funis` em app_settings), `PIPEDRIVE_CAMPO_QUALIFICACAO` (padrão
+"Lead qualificado").
 
-**A tradução funil de vendas → marcos de marketing mora nos APELIDOS da
+**A tradução funil de vendas → marcos de marketing morava nos APELIDOS da
 etapa** (`lead_stages.aliases`, editáveis no lápis de `/leads/etapas`): as 8
-etapas do funil de lá caem nos marcos daqui ("Analisando proposta" →
-`apresentacao-de-produto`). Deal GANHO vira `comprou` — vem do status, não de
-etapa. Deal PERDIDO só mexe se uma etapa `perdido` for cadastrada (decisão de
+etapas do funil de lá caíam nos marcos daqui ("Analisando proposta" →
+`apresentacao-de-produto`). *Até 14/09/2026 — desde então o funil daqui é o de
+lá, etapa por etapa, e o apelido serve à mesma etapa com outro nome.* Deal
+GANHO vira `comprou` — vem do status, não de etapa. Deal PERDIDO só mexe se uma etapa `perdido` for cadastrada (decisão de
 negócio em aberto: perdido pode merecer trilha de recuperação, não
 encerramento).
 
@@ -188,6 +192,101 @@ já que quem chega vira parceiro na hora.
 
 O push pelo Make (Pipedrive → Watch Deals → nossa porta de entrada) continua
 possível por cima, como redução de latência; a correção não depende dele.
+
+### Funil completo, pontuado, em dois funis (14/09/2026)
+
+Migração: `scripts/migrate-sincroniza-funil-completo.ts`. Conferência de ponta
+a ponta (banco de dev + API de mentira): `npx tsx scripts/testar-sync-funis.ts`.
+
+Pedido do usuário: trazer TODAS as etapas do funil "White Label - Inbound", com
+uma pontuação coerente — e acompanhar também o funil "SDR-TESTE-NRG".
+
+**Os funis (lidos pela API em 14/09/2026):** 8 = White Label - Inbound, 14 =
+SDR-TESTE-NRG. As mesmas 8 etapas nos dois; só a 4ª muda de nome ("Agendar
+apresentação parte técnica" × "Em análise/Agendar apresentação", que virou
+apelido). Nas amostras de 500 deals de cada um, nenhuma pessoa tinha negócio
+nos dois — por isso um funil só aqui, e não um por funil de lá. Existe um
+terceiro funil (10) com nomes quase iguais; ele NÃO é acompanhado.
+
+**O funil daqui:**
+
+| Posição | Etapa | Pontos |
+|---|---|---|
+| 10 | Lead captado (`qualificado`, a entrada) | — |
+| 20 | Pesquisa | 0 |
+| 30 | Realizar contato | 0 |
+| 40 | Qualificar lead | 10 |
+| 50 | Agendar apresentação parte técnica | 20 |
+| 60 | Apresentar parte técnica | 30 |
+| 61 | *Passou por apresentação de produto — desativada* | — |
+| 70 | Apresentar proposta comercial | 50 |
+| 80 | Analisando proposta | 70 |
+| 90 | Aguardar assinatura e pagamento | 100 |
+| 100 | Comprou | — |
+
+- **A entrada perdeu o nome "Qualificado no CRM".** Na frente de "Pesquisa" e
+  "Qualificar lead" ele dizia o contrário do que é: ali está quem só chegou,
+  sem negócio encontrado no funil. O slug `qualificado` ficou (leads, origens,
+  gatilhos), e o nome antigo virou apelido.
+- **O marco "Passou por apresentação de produto" foi desativado**, na posição
+  61: quem passou por ele no histórico conta até "Apresentar parte técnica" no
+  funil acumulado. Gatilho de automação que esperava por ele passou a esperar
+  "Apresentar parte técnica" (a migração diz quantos).
+- **Os pontos são o valor de ESTAR na etapa, não um incremento.** Pesquisa e
+  Realizar contato não pontuam: são a fila do vendedor, o lead não fez nada — e
+  pontuar ali deixaria morno quem nem respondeu. Do "Qualificar lead" em diante
+  o salto cresce perto do fechamento: a proposta já deixa o lead aquecido
+  sozinha (50), e aguardar assinatura já é quente (100). "Comprou" não pontua:
+  quem compra vira parceiro e sai da pontuação. Editáveis na coluna Pontos de
+  `/leads/etapas` (mesma regra da tela de Pontuação, recalcula na hora).
+
+**ESTADO, não ação (`lib/leads/score.ts`, `eventosQueContam`).** Etapa e
+qualificação passaram a valer só a ATUAL. Somadas como as ações, pontuariam a
+trajetória: quem andou etapa por etapa juntaria os pontos de todas, e quem o
+vendedor arrastou direto (ou que a sincronização, de 5 em 5 minutos, só viu
+chegando) teria só os da última — a mesma posição valendo números diferentes. O
+backfill põe cada lead direto na etapa exata, então a soma nasceria errada. A
+qualificação tinha o mesmo defeito: "Experiente" e depois "Não" seguia com os
+pontos de experiente. O decaimento conta da chegada na etapa atual — lead
+parado numa etapa esfria. Lead criado pelo webhook já numa etapa (sem evento)
+pontua pela coluna do contato.
+
+`VERSAO_DO_CALCULO` em app_settings força UMA passagem completa no primeiro
+ciclo do worker novo: sem ela, quem não teve evento novo ficaria com o número
+da regra antiga até a madrugada.
+
+**Sincronização com vários funis (`lib/pipedrive/sync.ts`).** Os funis moram em
+`app_settings.pipedrive_funis` POR ID (`[8,14]`) — renomear no Pipedrive não
+pode parar a leitura em silêncio, e um nome com "TESTE" pede para ser
+renomeado. Marca-d'água POR FUNIL (`pipedrive_sync_desde:<id>`). Os deals dos
+funis são aplicados juntos, na ordem de `update_time`: se a mesma pessoa tiver
+negócio nos dois, vale o que mudou por último. A passada grava os nomes que
+encontrou (`pipedrive_sync_funis`) e `/leads/etapas` mostra quais funis
+alimentam a lista — e avisa em vermelho se um sumiu.
+
+A migração apaga as marcas-d'água: a primeira passada depois do deploy relê os
+dois funis e põe cada lead na etapa exata. Efeitos esperados dessa releitura:
+automações com gatilho "Lead andou no funil" (qualquer etapa) e "Lead mudou de
+faixa" recebem de uma vez os leads re-posicionados (cada contato entra uma vez
+só); e o webhook de saída passa a mandar `estagio` com os slugs novos.
+
+**Relatório: funil ACUMULADO pela posição** (`passaramPorEtapa` em
+`lib/leads/etapas.ts`). "Passaram" = chegaram PELO MENOS até a etapa: a posição
+mais funda de cada contato (etapa atual ou qualquer "chegou em" da linha do
+tempo). Contar por etapa exata subia e descia com o vendedor pulando etapa, e a
+taxa de avanço passava de 100%. A rampa ordinal validada (4 tons) é dividida
+entre as etapas vizinhas — esticá-la a 10 tons deixaria degraus que o olho não
+separa.
+
+**Telas:** painel de `/leads` vira faixa com rolagem lateral no celular e grade
+de colunas automáticas (mín. 9,75rem) do sm para cima; a etapa nova cadastrada
+na tela entra antes da etapa final, não depois de "Comprou" (a tela não
+reordena, e o funil acumulado conta pela posição).
+
+**Ainda em aberto:** deal PERDIDO continua sem mexer (a maioria dos deals dos
+dois funis termina perdida — 356 e 368 nas amostras): o lead fica parado na
+última etapa, com os pontos dela esfriando. Cadastrar a etapa `perdido` é a
+decisão de negócio pendente.
 
 ### Rastreio anônimo e costura (fase E.2, 28/08/2026)
 

@@ -24,7 +24,13 @@ export async function GET() {
         .from(leadScoreRules)
         // Segundo critério: sem ele, as duas regras de `site_event` sairiam em
         // ordem imprevisível e a tela embaralharia a cada carga.
-        .orderBy(asc(leadScoreRules.eventType), asc(leadScoreRules.points)),
+        .orderBy(
+          asc(leadScoreRules.eventType),
+          asc(leadScoreRules.points),
+          // Terceiro critério pelo mesmo motivo: as etapas que valem 0
+          // empatam em pontos e trocariam de lugar entre uma carga e outra.
+          asc(leadScoreRules.description)
+        ),
       lerConfiguracao(),
     ]);
     return NextResponse.json({ regras, config });
@@ -120,7 +126,11 @@ export async function PUT(request: NextRequest) {
       db
         .select()
         .from(leadScoreRules)
-        .orderBy(asc(leadScoreRules.eventType), asc(leadScoreRules.points)),
+        .orderBy(
+          asc(leadScoreRules.eventType),
+          asc(leadScoreRules.points),
+          asc(leadScoreRules.description)
+        ),
       lerConfiguracao(),
     ]);
 
