@@ -13,7 +13,9 @@
 //
 // Funções puras: nada de I/O, nada de env. São o alicerce testável do canal.
 
-import { parsePhoneNumberFromString } from "libphonenumber-js";
+// A leitura passa pela tabela explícita de lib/phone.ts: pela entrada padrão da
+// biblioteca, este módulo morria sob tsx (é como o sms-worker roda).
+import { lerTelefone } from "../phone";
 
 /**
  * DDDs que existem no Plano Geral de Códigos Nacionais da Anatel. A lista é
@@ -124,7 +126,7 @@ export function parseBrazilianMobile(value: unknown): ResultadoTelefone {
   // O "BR" é obrigatório mesmo com o número já em E.164: a build `min` do
   // pacote anexa a metadata como ÚLTIMO argumento, então chamar com um
   // argumento só faz a metadata cair na vaga do país e a chamada explode.
-  const parsed = parsePhoneNumberFromString(e164, "BR");
+  const parsed = lerTelefone(e164, "BR");
   if (!parsed || !parsed.isValid()) return { ok: false, motivo: "invalido" };
 
   return { ok: true, e164 };

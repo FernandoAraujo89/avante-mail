@@ -1,13 +1,17 @@
 // Conferência da sincronização com DOIS funis do Pipedrive, de ponta a ponta.
 //
 // Roda contra o banco do .env.local (o de desenvolvimento) com uma API do
-// Pipedrive DE MENTIRA — sem token e sem rede. Cria seis contatos de teste,
+// Pipedrive DE MENTIRA — sem token e sem rede. Cria oito contatos de teste,
 // sincroniza, confere etapa, qualificação, marca-d'água e pontuação, e apaga
 // tudo no fim (inclusive as chaves de app_settings que a passada escreve).
 // Precisa das migrações scripts/migrate-sincroniza-funil-completo.ts e
 // scripts/migrate-sincroniza-funil-perdido.ts aplicadas.
 //
 //   npx tsx scripts/testar-sync-funis.ts
+//
+// Roda sob tsx DE PROPÓSITO: é o carregador dos workers, o mesmo em que a
+// biblioteca de telefone morria até 15/09/2026 — os casos G e H só passam se o
+// telefone funcionar lá.
 //
 // Não se chama migrate-* de propósito: o deploy roda todos os migrate-*.ts.
 
@@ -38,6 +42,12 @@ function ok(nome: string, real: unknown, esperado: unknown) {
 
 const MARCA = `teste-sync-funis-${Date.now()}`;
 const email = (quem: string) => `${MARCA}-${quem}@exemplo.invalid`;
+
+// Celulares de DDD 69 com final aleatório: o telefone é único na tabela de
+// contatos, e o banco de dev tem números de verdade.
+const FINAL = String(Math.floor(Math.random() * 8_000_000) + 1_000_000);
+const CELULAR_G = `+556998${FINAL}`; // cadastrado COM o nono dígito
+const CELULAR_H = `+55699${String(Number(FINAL) + 1).padStart(7, "0")}`;
 
 // Os nomes crus, como a API devolveu em 14/09/2026.
 const ETAPAS_PD: Record<number, Map<number, string>> = {
@@ -80,6 +90,9 @@ const DEALS: Record<number, DealDoPipedrive[]> = {
     deal(2, 3, 65, "2026-09-10T11:00:00Z"),
     deal(3, 4, 67, "2026-09-10T12:00:00Z", "won"),
     deal(5, 5, 62, "2026-09-10T12:30:00Z"),
+    // Casa pelo telefone: e-mail diferente no Pipedrive, e o celular do lead é
+    // o SEGUNDO número da pessoa.
+    deal(10, 7, 62, "2026-09-10T14:10:00Z"),
   ],
   14: [
     deal(4, 2, 100, "2026-09-10T09:00:00Z"),
@@ -90,6 +103,9 @@ const DEALS: Record<number, DealDoPipedrive[]> = {
     // "Perdido" e os pontos da análise saem da conta.
     deal(9, 6, 103, "2026-09-10T13:45:00Z"),
     deal(8, 6, 103, "2026-09-10T14:00:00Z", "lost"),
+    // Casa pelo telefone: no Pipedrive o número vem com o nono dígito, e o
+    // contato foi cadastrado sem ele.
+    deal(11, 8, 97, "2026-09-10T14:20:00Z"),
   ],
 };
 
@@ -100,6 +116,20 @@ const PESSOAS = new Map<number, PessoaDoPipedrive>([
   [4, { emails: [email("d")], phones: [] }],
   [5, { emails: [email("e")], phones: [] }],
   [6, { emails: [email("f")], phones: [] }],
+  [
+    7,
+    {
+      emails: [email("g-outro")],
+      phones: ["31 3241-0000", `(69) ${CELULAR_G.slice(5, 10)}-${CELULAR_G.slice(10)}`],
+    },
+  ],
+  [
+    8,
+    {
+      emails: [],
+      phones: [`+55 69 9${CELULAR_H.slice(5, 9)}-${CELULAR_H.slice(9)}`],
+    },
+  ],
   [99, { emails: [email("desconhecido")], phones: [] }],
 ]);
 
@@ -183,6 +213,8 @@ async function main() {
         // Parceiro: aparece no Pipedrive, mas não entra no funil daqui.
         { name: "Teste E", email: email("e"), stage: null },
         { name: "Teste F", email: email("f"), stage: "qualificado" },
+        { name: "Teste G", email: email("g"), phone: CELULAR_G, stage: "qualificado" },
+        { name: "Teste H", email: email("h"), phone: CELULAR_H, stage: "qualificado" },
       ])
       .returning({ id: contacts.id, email: contacts.email });
     const id = (quem: string) => criados.find((c) => c.email === email(quem))!.id;
@@ -191,7 +223,7 @@ async function main() {
     const r1 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
     ok("rodou", r1.rodou, true);
     ok("dois funis", r1.funis, 2);
-    ok("nove deals lidos", r1.deals, 9);
+    ok("onze deals lidos", r1.deals, 11);
     ok("um deal sem contato", r1.semContato, 1);
     ok("nenhuma recusa", r1.recusas, 0);
     ok("leram do zero", [pedidosDesde[8][0], pedidosDesde[14][0]], [
@@ -217,6 +249,16 @@ async function main() {
     ok("D: ganho vira compra", (await estado("d")).stage, "comprou");
     ok("E: parceiro continua parceiro", (await estado("e")).stage, null);
     ok("F: negócio perdido vai para Perdido", (await estado("f")).stage, "perdido");
+    ok(
+      "G: casou pelo segundo telefone da pessoa",
+      (await estado("g")).stage,
+      "qualificar-lead"
+    );
+    ok(
+      "H: casou com o cadastro sem o nono dígito",
+      (await estado("h")).stage,
+      "pesquisa"
+    );
 
     const passagensDeC = await db
       .select({ payload: contactEvents.payload })
@@ -242,8 +284,8 @@ async function main() {
       "uma marca-d'água por funil",
       marcas.map((m) => `${m.key}=${m.value}`).sort(),
       [
-        "pipedrive_sync_desde:14=2026-09-10T14:00:00Z",
-        "pipedrive_sync_desde:8=2026-09-10T12:30:00Z",
+        "pipedrive_sync_desde:14=2026-09-10T14:20:00Z",
+        "pipedrive_sync_desde:8=2026-09-10T14:10:00Z",
       ]
     );
     const [vistos] = await db
@@ -261,8 +303,8 @@ async function main() {
     console.log("— segunda passada (só o que mudou desde a marca):");
     const r2 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
     ok("partiu da marca de cada funil", [pedidosDesde[8][1], pedidosDesde[14][1]], [
-      "2026-09-10T12:30:00Z",
-      "2026-09-10T14:00:00Z",
+      "2026-09-10T14:10:00Z",
+      "2026-09-10T14:20:00Z",
     ]);
     ok("releitura não muda ninguém", r2.etapasAplicadas, 0);
 

@@ -303,6 +303,23 @@ usuário mandou criar. A sincronização já sabia o que fazer (deal perdido →
   e aplica os deals que já estavam perdidos. Se a mesma pessoa tiver um deal
   perdido e outro aberto, vale o que mudou por último.
 
+**Casamento por telefone (15/09/2026, `scripts/migrate-sincroniza-funil-telefone.ts`).**
+A sincronização sempre tentou o telefone quando o e-mail não batia, e nunca
+conseguiu: `libphonenumber-js` morria sob tsx (o carregador dos workers) e a
+passada caía para "só e-mail" com um aviso. Na releitura de 15/09, 1.589 dos
+1.811 deals ficaram sem contato. A causa: pela entrada padrão, a biblioteca
+carrega a própria tabela de números, e sob tsx ela chegava embrulhada em
+`{ default }`. `lib/phone.ts` passou a usar `libphonenumber-js/core` com a
+tabela entregue à mão (`lerTelefone`), e `lib/sms/phone.ts` também — funciona
+no Next, no Vitest, no tsx e no jiti. Nenhum código deve importar a entrada
+padrão da biblioteca de novo.
+
+O casamento agora tenta CADA telefone da pessoa (não só o primeiro) e cada um
+com e sem o nono dígito (`phoneCandidatesFromWaId`, a regra do WhatsApp); o
+e-mail continua vencendo quando os dois batem. `scripts/testar-sync-funis.ts`
+roda sob tsx de propósito e falha nos casos de telefone se a biblioteca voltar
+a quebrar lá (conferido revertendo a correção).
+
 ### Rastreio anônimo e costura (fase E.2, 28/08/2026)
 
 Migração: `scripts/migrate-rastreio-anonimo.ts`. Código: `lib/track/costura.ts`.

@@ -16,7 +16,8 @@ import {
   listarQualificacoes,
 } from "@/lib/leads/qualificacoes";
 import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
-import { firstValidPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
+import { phoneCandidatesFromWaId } from "@/lib/whatsapp/inbound";
 import { getSetting, setSetting } from "@/lib/settings";
 import {
   clientePipedrive,
@@ -85,26 +86,35 @@ let avisouConfig: string | null = null;
 let avisouTelefone = false;
 
 /**
- * `firstValidPhone` protegido: o libphonenumber-js MORRE sob tsx — que é como
- * os workers rodam no contêiner — com "Cannot read properties of undefined
- * (reading 'hasOwnProperty')" na carga dos metadados (gotcha conhecido do
- * projeto; os scripts de telefone usam jiti por isso). Aqui o telefone é só o
- * segundo critério de casamento, então a falha degrada para "casar só por
- * e-mail" com um aviso, em vez de derrubar a passada inteira.
+ * Todas as formas E.164 sob as quais os telefones da pessoa podem estar
+ * cadastrados aqui: CADA número dela (e cada número de um campo com dois, "37
+ * 99947-2264 / 37 3241-0000"), não só o primeiro, e cada um com e sem o nono
+ * dígito — a mesma regra que casa a resposta do WhatsApp com o contato.
+ *
+ * Até 15/09/2026 o telefone não casava nada: a biblioteca morria sob tsx, que
+ * é como o worker roda (lib/phone.ts explica e corrige). O `try` fica como rede
+ * de segurança — o telefone é o segundo critério, e se a biblioteca voltar a
+ * falhar a passada segue casando por e-mail, com um aviso, em vez de parar.
  */
-function telefoneSeguro(textos: string[]): string | null {
-  if (textos.length === 0) return null;
+function telefonesDaPessoa(textos: string[]): string[] {
+  const formas = new Set<string>();
   try {
-    return firstValidPhone(textos.join(" / "));
+    for (const texto of textos) {
+      for (const pedaco of texto.split(/[,;/|\r\n]+/)) {
+        const e164 = normalizePhone(pedaco);
+        if (!e164) continue;
+        for (const forma of phoneCandidatesFromWaId(e164)) formas.add(forma);
+      }
+    }
   } catch {
     if (!avisouTelefone) {
       avisouTelefone = true;
       console.error(
-        "[PIPEDRIVE] telefone indisponível neste runtime (libphonenumber sob tsx) — casando leads só por e-mail."
+        "[PIPEDRIVE] telefone indisponível neste runtime — casando leads só por e-mail."
       );
     }
-    return null;
   }
+  return [...formas];
 }
 
 function normalizado(texto: string): string {
@@ -325,10 +335,12 @@ async function aplicarLote(
 
   const emails = new Set<string>();
   const telefones = new Set<string>();
-  for (const pessoa of pessoas.values()) {
+  const telefonesPorPessoa = new Map<number, string[]>();
+  for (const [idDaPessoa, pessoa] of pessoas) {
     for (const e of pessoa.emails) emails.add(e.toLowerCase());
-    const tel = telefoneSeguro(pessoa.phones);
-    if (tel) telefones.add(tel);
+    const formas = telefonesDaPessoa(pessoa.phones);
+    telefonesPorPessoa.set(idDaPessoa, formas);
+    for (const forma of formas) telefones.add(forma);
   }
 
   // Duas consultas por lote (e-mail e telefone) em vez de duas por deal.
@@ -357,11 +369,17 @@ async function aplicarLote(
           .where(inArray(contacts.phone, [...telefones]))
       : [];
 
+  // Um objeto por contato, achado por e-mail ou por telefone: o estado em
+  // memória que a passada atualiza (etapa, qualificação) precisa ser o mesmo
+  // nos dois mapas, senão o segundo deal da pessoa veria o contato antigo.
+  const porId = new Map(
+    [...linhasPorEmail, ...linhasPorTelefone].map((c) => [c.id, c])
+  );
   const porEmail = new Map(
-    linhasPorEmail.map((c) => [c.email.toLowerCase(), c])
+    [...porId.values()].map((c) => [c.email.toLowerCase(), c])
   );
   const mapaTelefone = new Map(
-    linhasPorTelefone
+    [...porId.values()]
       .filter((c) => c.phone)
       .map((c) => [c.phone as string, c])
   );
@@ -376,8 +394,10 @@ async function aplicarLote(
         .map((e) => porEmail.get(e.toLowerCase()))
         .find(Boolean) ?? null;
     if (!contato) {
-      const tel = telefoneSeguro(pessoa.phones);
-      contato = (tel ? mapaTelefone.get(tel) : null) ?? null;
+      contato =
+        (telefonesPorPessoa.get(deal.personId) ?? [])
+          .map((forma) => mapaTelefone.get(forma))
+          .find(Boolean) ?? null;
     }
     if (!contato) {
       contagem.semContato++;

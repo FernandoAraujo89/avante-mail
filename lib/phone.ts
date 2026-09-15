@@ -1,4 +1,41 @@
-import { parsePhoneNumberFromString } from "libphonenumber-js";
+import {
+  parsePhoneNumberFromString as parseComMetadados,
+  type CountryCode,
+  type MetadataJson,
+  type PhoneNumber,
+} from "libphonenumber-js/core";
+import metadadosImportados from "libphonenumber-js/min/metadata";
+
+/**
+ * A tabela de números da biblioteca, entregue EXPLICITAMENTE.
+ *
+ * Pela entrada padrão (`libphonenumber-js`) a biblioteca carrega a tabela
+ * sozinha — e sob tsx, que é como os workers rodam, a tabela chegava
+ * embrulhada em `{ default: … }` e toda chamada morria com "Cannot read
+ * properties of undefined (reading 'hasOwnProperty')". Por isso a
+ * sincronização com o Pipedrive casou leads só por e-mail até 15/09/2026. Pelo
+ * `core`, com a tabela passada à mão, o mesmo código funciona no Next, no
+ * Vitest, no tsx e no jiti. O desembrulho fica por garantia: se algum
+ * carregador voltar a embrulhar, a tabela continua certa.
+ */
+const tabelaImportada = metadadosImportados as unknown as MetadataJson & {
+  default?: MetadataJson;
+};
+export const METADADOS_TELEFONE: MetadataJson =
+  tabelaImportada.default ?? tabelaImportada;
+
+/**
+ * `parsePhoneNumberFromString` com a tabela explícita. Todo código do projeto
+ * que lê telefone passa por aqui, nunca pela entrada padrão da biblioteca.
+ */
+export function lerTelefone(
+  texto: string,
+  pais?: CountryCode
+): PhoneNumber | undefined {
+  return pais
+    ? parseComMetadados(texto, pais, METADADOS_TELEFONE)
+    : parseComMetadados(texto, METADADOS_TELEFONE);
+}
 
 /**
  * Telefones são armazenados em E.164 (ex.: +5548999999999). Entradas sem DDI
@@ -8,7 +45,7 @@ export function normalizePhone(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const raw = value.trim();
   if (!raw) return null;
-  const parsed = parsePhoneNumberFromString(raw, "BR");
+  const parsed = lerTelefone(raw, "BR");
   if (!parsed || !parsed.isValid()) return null;
   return parsed.number;
 }
@@ -16,7 +53,7 @@ export function normalizePhone(value: unknown): string | null {
 /** Formato legível para exibição (ex.: +55 48 99999 9999). */
 export function formatPhone(e164: string | null | undefined): string {
   if (!e164) return "";
-  const parsed = parsePhoneNumberFromString(e164);
+  const parsed = lerTelefone(e164);
   return parsed ? parsed.formatInternational() : e164;
 }
 
