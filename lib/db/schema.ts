@@ -603,6 +603,45 @@ export const leadQualifications = pgTable("lead_qualifications", {
 });
 export type LeadQualificationRow = typeof leadQualifications.$inferSelect;
 
+/**
+ * Espelho dos negócios dos funis acompanhados no Pipedrive, com o lead que
+ * cada um casou (por e-mail ou telefone).
+ *
+ * Existe para a etapa do lead ser decidida por TODOS os negócios dele
+ * (lib/pipedrive/regra.ts), e não pelo último que mudou: a passada só lê o que
+ * mudou desde a marca-d'água, então os negócios que não mudaram precisam estar
+ * guardados em algum lugar. Guardar só o necessário para a decisão — a fonte da
+ * verdade continua sendo o Pipedrive.
+ */
+export const pipedriveDeals = pgTable(
+  "pipedrive_deals",
+  {
+    /** O id do negócio no Pipedrive. */
+    id: integer("id").primaryKey(),
+    pipelineId: integer("pipeline_id").notNull(),
+    /** Nome cru da etapa lá — resolvido na hora da decisão, pelos apelidos. */
+    stageName: text("stage_name"),
+    /** open | won | lost | deleted, da API; `fora` quando sumiu do funil. */
+    status: text("status").notNull(),
+    personId: integer("person_id"),
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    /** Rótulo da opção do campo de qualificação. */
+    qualificacao: text("qualificacao"),
+    updateTime: text("update_time").notNull(),
+    /** Quando a sincronização viu o negócio pela última vez numa leitura. */
+    lidoEm: timestamp("lido_em", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("pipedrive_deals_contato_idx").on(t.contactId),
+    index("pipedrive_deals_funil_idx").on(t.pipelineId, t.lidoEm),
+  ]
+);
+export type PipedriveDealRow = typeof pipedriveDeals.$inferSelect;
+
 export const webhookSources = pgTable(
   "webhook_sources",
   {

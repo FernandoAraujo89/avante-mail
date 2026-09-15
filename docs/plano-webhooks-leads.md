@@ -258,9 +258,9 @@ da regra antiga até a madrugada.
 **Sincronização com vários funis (`lib/pipedrive/sync.ts`).** Os funis moram em
 `app_settings.pipedrive_funis` POR ID (`[8,14]`) — renomear no Pipedrive não
 pode parar a leitura em silêncio, e um nome com "TESTE" pede para ser
-renomeado. Marca-d'água POR FUNIL (`pipedrive_sync_desde:<id>`). Os deals dos
-funis são aplicados juntos, na ordem de `update_time`: se a mesma pessoa tiver
-negócio nos dois, vale o que mudou por último. A passada grava os nomes que
+renomeado. Marca-d'água POR FUNIL (`pipedrive_sync_desde:<id>`). *Os deals eram
+aplicados na ordem de `update_time` ("vale o que mudou por último") — trocado
+no mesmo dia pela decisão por todos os negócios, ver abaixo.* A passada grava os nomes que
 encontrou (`pipedrive_sync_funis`) e `/leads/etapas` mostra quais funis
 alimentam a lista — e avisa em vermelho se um sumiu.
 
@@ -300,8 +300,8 @@ usuário mandou criar. A sincronização já sabia o que fazer (deal perdido →
 - **0 pontos.** Como vale só a etapa atual, o lead perde os pontos da etapa em
   que estava; o que ele faz e a qualificação continuam contando.
 - A migração apaga de novo as marcas-d'água: a passada seguinte relê os funis
-  e aplica os deals que já estavam perdidos. Se a mesma pessoa tiver um deal
-  perdido e outro aberto, vale o que mudou por último.
+  e aplica os deals que já estavam perdidos. Com um deal perdido e outro aberto,
+  vale o aberto (decisão por todos os negócios, abaixo).
 
 **Casamento por telefone (15/09/2026, `scripts/migrate-sincroniza-funil-telefone.ts`).**
 A sincronização sempre tentou o telefone quando o e-mail não batia, e nunca
@@ -319,6 +319,38 @@ com e sem o nono dígito (`phoneCandidatesFromWaId`, a regra do WhatsApp); o
 e-mail continua vencendo quando os dois batem. `scripts/testar-sync-funis.ts`
 roda sob tsx de propósito e falha nos casos de telefone se a biblioteca voltar
 a quebrar lá (conferido revertendo a correção).
+
+**Etapa decidida por TODOS os negócios do lead (15/09/2026,
+`scripts/migrate-sincroniza-funil-negocios.ts`, regra em
+`lib/pipedrive/regra.ts`).** Com "vale o que mudou por último", o lead com um
+negócio perdido e outro aberto ia para Perdido e voltava NA MESMA PASSADA, e
+cada releitura repetia a ida e a volta — linha do tempo dobrada, automação de
+"Lead andou no funil" disparando duas vezes, e um perdido atualizado depois
+escondendo um aberto (25 leads no dia em que o telefone passou a casar).
+
+A regra: negócio ganho → Comprou (vence tudo); havendo aberto, vale o aberto
+MAIS ADIANTADO no funil (empate: o mais recente); Perdido só quando todos estão
+perdidos. Aberto com etapa que não casa não vira Perdido — não mexe e conta
+recusa. A qualificação vem do negócio que decidiu a etapa ou, se ele não tiver,
+do mais recente que tiver.
+
+Para decidir pelo conjunto a passada precisa lembrar dos negócios que não
+mudaram: `pipedrive_deals` é o espelho local (id, funil, nome cru da etapa,
+status, pessoa, lead casado, rótulo da qualificação, `update_time`, `lido_em`).
+A passada (1) grava os negócios lidos com o lead que cada um casou, (2) marca
+como `fora` o que sumiu numa releitura completa, (3) decide de novo cada lead
+tocado — inclusive o que perdeu um negócio — e aplica no máximo uma mudança.
+Reler não mexe em quem já está certo.
+
+**Releitura completa uma vez por dia** (`pipedrive_releitura_ultima`, 20 h):
+tira da conta o negócio excluído ou movido para um funil não acompanhado
+(Geladeira, por exemplo — a leitura incremental nunca mais o vê) e acha o lead
+que chegou depois de o negócio dele parar de mudar. O começo da releitura fica
+em `pipedrive_releitura_inicio:<id>`: quando a leitura chega ao fim (mesmo em
+outra passada), o negócio com `lido_em` anterior virou `fora`. Negócio excluído
+no mesmo dia continua contando até essa releitura: a API aceita pedir os
+excluídos, mas não deu para confirmar sem o token que ela aceita vários status
+na mesma chamada, e errar ali pararia a sincronização.
 
 ### Rastreio anônimo e costura (fase E.2, 28/08/2026)
 

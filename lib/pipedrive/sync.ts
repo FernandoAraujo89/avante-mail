@@ -1,20 +1,14 @@
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
 import {
   contacts,
   getDb,
+  pipedriveDeals,
   type LeadQualificationRow,
   type LeadStageRow,
 } from "@/lib/db";
-import {
-  casarEtapa,
-  ETAPA_DE_PERDA,
-  listarEtapas,
-} from "@/lib/leads/etapas";
-import {
-  casarQualificacao,
-  listarQualificacoes,
-} from "@/lib/leads/qualificacoes";
+import { listarEtapas } from "@/lib/leads/etapas";
+import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
 import { normalizePhone } from "@/lib/phone";
 import { phoneCandidatesFromWaId } from "@/lib/whatsapp/inbound";
@@ -31,6 +25,7 @@ import {
   lerIdsDosFunis,
   type FunisDaUltimaPassada,
 } from "./funis";
+import { decidirPelosNegocios, type NegocioDoLead } from "./regra";
 
 /**
  * Reconciliação com o Pipedrive (docs/plano-webhooks-leads.md, seção
@@ -53,14 +48,25 @@ import {
  * Cada funil tem sua marca-d'água (`update_time` do último deal processado
  * dele) em app_settings, então a passada sobrevive a restart e não relê a base
  * inteira. A PRIMEIRA passada de um funil, sem marca, lê tudo — é o backfill.
+ *
+ * DESDE 15/09/2026 a etapa do lead é decidida por TODOS os negócios dele, não
+ * pelo último que mudou (lib/pipedrive/regra.ts). A passada lê só o que mudou,
+ * então os negócios lidos ficam num espelho local (`pipedrive_deals`), cada um
+ * com o lead que casou; depois, cada lead tocado é decidido de novo pelo
+ * conjunto — no máximo uma mudança por lead, e reler não mexe em ninguém.
  */
 
 /** Marca-d'água, uma por funil: `pipedrive_sync_desde:<id>`. */
 const CHAVE_DESDE = "pipedrive_sync_desde";
 
-/** Deal ganho vira esta etapa — a que encerra a nutrição e converte. */
-const ETAPA_DE_COMPRA = "comprou";
-// Deal perdido vira ETAPA_DE_PERDA SE ela estiver cadastrada; senão, não mexe.
+/** Começo da releitura completa de um funil: `pipedrive_releitura_inicio:<id>`. */
+const CHAVE_INICIO_DA_RELEITURA = "pipedrive_releitura_inicio";
+/** Quando a última releitura diária foi disparada. */
+const CHAVE_ULTIMA_RELEITURA = "pipedrive_releitura_ultima";
+/** De quanto em quanto tempo a passada relê os funis inteiros. */
+const HORAS_ENTRE_RELEITURAS = 20;
+/** Negócio que não apareceu na releitura: excluído ou movido de funil. */
+const STATUS_FORA = "fora";
 
 /** Páginas de 500 deals por funil a cada passada — o resto fica para a próxima. */
 const PAGINAS_POR_FUNIL = 4;
@@ -252,11 +258,35 @@ export async function sincronizarPipedrive(args?: {
     );
   }
 
+  // Uma vez por dia a passada relê os funis inteiros: é o que tira da conta o
+  // negócio excluído ou movido para um funil que não é acompanhado (a leitura
+  // incremental nunca mais o vê), e o que acha o lead que chegou DEPOIS do
+  // negócio dele parar de mudar.
+  const ultimaReleitura = await getSetting(CHAVE_ULTIMA_RELEITURA);
+  const horasDesdeReleitura = ultimaReleitura
+    ? (agora.getTime() - new Date(ultimaReleitura).getTime()) / 3_600_000
+    : Number.POSITIVE_INFINITY;
+  if (!(horasDesdeReleitura < HORAS_ENTRE_RELEITURAS)) {
+    for (const funil of funis) {
+      await setSetting(`${CHAVE_DESDE}:${funil.id}`, null);
+    }
+    await setSetting(CHAVE_ULTIMA_RELEITURA, agora.toISOString());
+  }
+
   // Cada funil a partir da sua marca-d'água.
-  const lidos: DealDoPipedrive[] = [];
+  const lidos = new Map<number, { deal: DealDoPipedrive; funilId: number }>();
   const marcas = new Map<number, string>();
+  const chegaramAoFim = new Set<number>();
   for (const funil of funis) {
-    const desde = (await getSetting(`${CHAVE_DESDE}:${funil.id}`)) ?? undefined;
+    const desde =
+      (await getSetting(`${CHAVE_DESDE}:${funil.id}`)) || undefined;
+    // Sem marca-d'água é leitura completa. O começo fica guardado: quando ela
+    // chegar ao fim — nesta passada ou numa seguinte, se o funil for grande —
+    // o negócio lido antes disso e que não apareceu de novo saiu do funil.
+    const chaveInicio = `${CHAVE_INICIO_DA_RELEITURA}:${funil.id}`;
+    if (!desde && !(await getSetting(chaveInicio))) {
+      await setSetting(chaveInicio, agora.toISOString());
+    }
     let cursor: string | undefined;
     for (let pagina = 0; pagina < PAGINAS_POR_FUNIL; pagina++) {
       const { deals, nextCursor } = await api.deals({
@@ -266,19 +296,22 @@ export async function sincronizarPipedrive(args?: {
         cursor,
       });
       for (const deal of deals) {
-        lidos.push(deal);
+        // O mesmo negócio pode vir duas vezes (mudou de funil no meio da
+        // leitura): fica a versão mais nova.
+        const anterior = lidos.get(deal.id);
+        if (!anterior || anterior.deal.updateTime <= deal.updateTime) {
+          lidos.set(deal.id, { deal, funilId: funil.id });
+        }
         // A API devolve em ordem de update_time: o último é a marca nova.
         if (deal.updateTime) marcas.set(funil.id, deal.updateTime);
       }
-      if (deals.length === 0 || !nextCursor) break;
+      if (deals.length === 0 || !nextCursor) {
+        chegaramAoFim.add(funil.id);
+        break;
+      }
       cursor = nextCursor;
     }
   }
-
-  // Os funis misturados, na ordem em que os deals mudaram. Se a mesma pessoa
-  // tiver negócio nos dois, vale o que mudou por último — e não o do funil
-  // que por acaso foi lido depois.
-  lidos.sort((a, b) => a.updateTime.localeCompare(b.updateTime));
 
   const contagem: Contagem = {
     etapasAplicadas: 0,
@@ -287,16 +320,51 @@ export async function sincronizarPipedrive(args?: {
     semContato: 0,
     recusas: 0,
   };
-  for (let i = 0; i < lidos.length; i += TAMANHO_DO_LOTE) {
-    await aplicarLote(lidos.slice(i, i + TAMANHO_DO_LOTE), {
+
+  // 1. Guarda os negócios lidos, cada um com o lead que casou.
+  const afetados = new Set<string>();
+  const todos = [...lidos.values()];
+  for (let i = 0; i < todos.length; i += TAMANHO_DO_LOTE) {
+    await espelharLote(todos.slice(i, i + TAMANHO_DO_LOTE), {
       api,
       campo,
       nomesDasEtapasPd,
-      etapas,
-      qualificacoes,
+      agora,
+      afetados,
       contagem,
     });
   }
+
+  // 2. Releitura que chegou ao fim: o que não apareceu saiu do funil.
+  const db = getDb();
+  for (const funilId of chegaramAoFim) {
+    const chaveInicio = `${CHAVE_INICIO_DA_RELEITURA}:${funilId}`;
+    const inicio = await getSetting(chaveInicio);
+    if (!inicio) continue;
+    const sairam = await db
+      .update(pipedriveDeals)
+      .set({ status: STATUS_FORA })
+      .where(
+        and(
+          eq(pipedriveDeals.pipelineId, funilId),
+          lt(pipedriveDeals.lidoEm, new Date(inicio)),
+          ne(pipedriveDeals.status, STATUS_FORA)
+        )
+      )
+      .returning({ contactId: pipedriveDeals.contactId });
+    for (const saiu of sairam) {
+      if (saiu.contactId) afetados.add(saiu.contactId);
+    }
+    await setSetting(chaveInicio, null);
+  }
+
+  // 3. Decide cada lead afetado por todos os negócios dele.
+  await recalcularLeads([...afetados], {
+    funis: funis.map((f) => f.id),
+    etapas,
+    qualificacoes,
+    contagem,
+  });
 
   for (const [funilId, marca] of marcas) {
     await setSetting(`${CHAVE_DESDE}:${funilId}`, marca);
@@ -305,30 +373,36 @@ export async function sincronizarPipedrive(args?: {
   return {
     rodou: true,
     funis: funis.length,
-    deals: lidos.length,
+    deals: lidos.size,
     ...contagem,
   };
 }
 
-async function aplicarLote(
-  deals: DealDoPipedrive[],
+/**
+ * Casa os negócios de um lote com os leads (e-mail primeiro, depois telefone)
+ * e grava no espelho. Junta em `afetados` o lead de cada negócio — e também o
+ * lead ANTIGO, quando o negócio deixou de casar com ele.
+ */
+async function espelharLote(
+  lote: { deal: DealDoPipedrive; funilId: number }[],
   ctx: {
     api: PipedriveApi;
     campo: { key: string; opcoes: Map<number, string> } | null;
     nomesDasEtapasPd: Map<number, string>;
-    etapas: LeadStageRow[];
-    qualificacoes: LeadQualificationRow[];
+    agora: Date;
+    afetados: Set<string>;
     contagem: Contagem;
   }
 ): Promise<void> {
-  const { api, campo, nomesDasEtapasPd, etapas, qualificacoes, contagem } =
-    ctx;
+  const { api, campo, nomesDasEtapasPd, agora, afetados, contagem } = ctx;
 
   // Identidades do lote inteiro de uma vez: uma consulta por lote, não duas
   // por deal.
   const idsDePessoas = [
     ...new Set(
-      deals.map((d) => d.personId).filter((id): id is number => id !== null)
+      lote
+        .map(({ deal }) => deal.personId)
+        .filter((id): id is number => id !== null)
     ),
   ];
   const pessoas = await api.pessoas(idsDePessoas);
@@ -344,115 +418,172 @@ async function aplicarLote(
   }
 
   // Duas consultas por lote (e-mail e telefone) em vez de duas por deal.
-  // Traz também quem tem `stage` nulo: parceiro reconhecido é "pular", que
-  // é diferente de "não achei" — os dois contam em lugares diferentes.
+  // Traz também parceiro (`stage` nulo): o negócio casa com ele e fica
+  // guardado, e a decisão é que o deixa de fora — parceiro não volta a lead.
   const db = getDb();
   const colunas = {
     id: contacts.id,
     email: contacts.email,
     phone: contacts.phone,
-    stage: contacts.stage,
-    qualification: contacts.qualification,
   };
-  const linhasPorEmail =
+  const [linhasPorEmail, linhasPorTelefone, anteriores] = await Promise.all([
     emails.size > 0
-      ? await db
+      ? db
           .select(colunas)
           .from(contacts)
           .where(inArray(contacts.email, [...emails]))
-      : [];
-  const linhasPorTelefone =
+      : Promise.resolve([]),
     telefones.size > 0
-      ? await db
+      ? db
           .select(colunas)
           .from(contacts)
           .where(inArray(contacts.phone, [...telefones]))
-      : [];
+      : Promise.resolve([]),
+    db
+      .select({ id: pipedriveDeals.id, contactId: pipedriveDeals.contactId })
+      .from(pipedriveDeals)
+      .where(
+        inArray(
+          pipedriveDeals.id,
+          lote.map(({ deal }) => deal.id)
+        )
+      ),
+  ]);
 
-  // Um objeto por contato, achado por e-mail ou por telefone: o estado em
-  // memória que a passada atualiza (etapa, qualificação) precisa ser o mesmo
-  // nos dois mapas, senão o segundo deal da pessoa veria o contato antigo.
-  const porId = new Map(
-    [...linhasPorEmail, ...linhasPorTelefone].map((c) => [c.id, c])
-  );
   const porEmail = new Map(
-    [...porId.values()].map((c) => [c.email.toLowerCase(), c])
+    linhasPorEmail.map((c) => [c.email.toLowerCase(), c.id])
   );
-  const mapaTelefone = new Map(
-    [...porId.values()]
+  const porTelefone = new Map(
+    linhasPorTelefone
       .filter((c) => c.phone)
-      .map((c) => [c.phone as string, c])
+      .map((c) => [c.phone as string, c.id])
   );
+  const contatoAnterior = new Map(anteriores.map((a) => [a.id, a.contactId]));
 
-  for (const deal of deals) {
-    if (deal.personId === null) continue;
-    const pessoa = pessoas.get(deal.personId);
-    if (!pessoa) continue;
+  const linhas = lote.map(({ deal, funilId }) => {
+    const pessoa = deal.personId === null ? null : pessoas.get(deal.personId);
+    const contactId = pessoa
+      ? (pessoa.emails
+          .map((e) => porEmail.get(e.toLowerCase()))
+          .find(Boolean) ??
+        (telefonesPorPessoa.get(deal.personId as number) ?? [])
+          .map((forma) => porTelefone.get(forma))
+          .find(Boolean) ??
+        null)
+      : null;
+    if (!contactId) contagem.semContato++;
 
-    let contato =
-      pessoa.emails
-        .map((e) => porEmail.get(e.toLowerCase()))
-        .find(Boolean) ?? null;
-    if (!contato) {
-      contato =
-        (telefonesPorPessoa.get(deal.personId) ?? [])
-          .map((forma) => mapaTelefone.get(forma))
-          .find(Boolean) ?? null;
-    }
-    if (!contato) {
-      contagem.semContato++;
-      continue;
-    }
-    // Convertido no meio do lote (dois deals da mesma pessoa): não é mais lead.
-    if (contato.stage === null) continue;
+    if (contactId) afetados.add(contactId);
+    const antes = contatoAnterior.get(deal.id);
+    if (antes && antes !== contactId) afetados.add(antes);
 
-    // Qualificação: o rótulo exato da opção no Pipedrive, resolvido na
-    // tabela — as mesmas formas que o webhook aceita.
-    let qualificacao: string | null = null;
-    if (campo) {
-      const rotulo = rotuloDaOpcao(deal.qualificacaoCrua, campo.opcoes);
-      if (rotulo) {
-        qualificacao = casarQualificacao(qualificacoes, rotulo)?.slug ?? null;
-        if (!qualificacao) contagem.recusas++;
-      }
-    }
+    return {
+      id: deal.id,
+      pipelineId: funilId,
+      stageName: nomesDasEtapasPd.get(deal.stageId) ?? null,
+      status: deal.status,
+      personId: deal.personId,
+      contactId,
+      qualificacao: campo
+        ? rotuloDaOpcao(deal.qualificacaoCrua, campo.opcoes)
+        : null,
+      updateTime: deal.updateTime,
+      lidoEm: agora,
+    };
+  });
 
-    // Etapa: ganho → compra; perdido → "perdido" se cadastrada; aberto →
-    // o nome da etapa do funil, resolvido pelo nome ou pelos apelidos.
-    let etapa: LeadStageRow | null = null;
-    if (deal.status === "won") {
-      etapa = casarEtapa(etapas, ETAPA_DE_COMPRA);
-      if (!etapa) contagem.recusas++;
-    } else if (deal.status === "lost") {
-      etapa = casarEtapa(etapas, ETAPA_DE_PERDA);
-    } else if (deal.status === "open") {
-      const nome = nomesDasEtapasPd.get(deal.stageId);
-      if (nome) {
-        etapa = casarEtapa(etapas, nome);
-        if (!etapa) contagem.recusas++;
-      }
-    }
-
-    const aplicado = await aplicarMudancaDoLead(contato, {
-      qualificacao,
-      etapa,
-      origem: "pipedrive",
+  if (linhas.length === 0) return;
+  await db
+    .insert(pipedriveDeals)
+    .values(linhas)
+    .onConflictDoUpdate({
+      target: pipedriveDeals.id,
+      set: {
+        pipelineId: sql`excluded.pipeline_id`,
+        stageName: sql`excluded.stage_name`,
+        status: sql`excluded.status`,
+        personId: sql`excluded.person_id`,
+        contactId: sql`excluded.contact_id`,
+        qualificacao: sql`excluded.qualificacao`,
+        updateTime: sql`excluded.update_time`,
+        lidoEm: sql`excluded.lido_em`,
+      },
     });
+}
 
-    // O retrato em memória acompanha o banco: um segundo deal da mesma
-    // pessoa neste lote precisa ver o estado novo, não o da consulta.
-    if (aplicado.mudouQualificacao) {
-      contagem.qualificacoesAplicadas++;
-      contato.qualification = qualificacao;
+/**
+ * Decide cada lead pelos negócios dele que estão guardados (só dos funis
+ * acompanhados) e aplica a mudança — no máximo uma por lead por passada.
+ */
+async function recalcularLeads(
+  ids: string[],
+  ctx: {
+    funis: number[];
+    etapas: LeadStageRow[];
+    qualificacoes: LeadQualificationRow[];
+    contagem: Contagem;
+  }
+): Promise<void> {
+  const { funis, etapas, qualificacoes, contagem } = ctx;
+  const db = getDb();
+
+  for (let i = 0; i < ids.length; i += TAMANHO_DO_LOTE) {
+    const lote = ids.slice(i, i + TAMANHO_DO_LOTE);
+    const [leads, negocios] = await Promise.all([
+      db
+        .select({
+          id: contacts.id,
+          stage: contacts.stage,
+          qualification: contacts.qualification,
+        })
+        .from(contacts)
+        .where(inArray(contacts.id, lote)),
+      db
+        .select({
+          contactId: pipedriveDeals.contactId,
+          status: pipedriveDeals.status,
+          stageName: pipedriveDeals.stageName,
+          qualificacao: pipedriveDeals.qualificacao,
+          updateTime: pipedriveDeals.updateTime,
+        })
+        .from(pipedriveDeals)
+        .where(
+          and(
+            inArray(pipedriveDeals.contactId, lote),
+            inArray(pipedriveDeals.pipelineId, funis)
+          )
+        ),
+    ]);
+
+    const porContato = new Map<string, NegocioDoLead[]>();
+    for (const n of negocios) {
+      if (!n.contactId) continue;
+      const lista = porContato.get(n.contactId) ?? [];
+      lista.push(n);
+      porContato.set(n.contactId, lista);
     }
-    if (aplicado.mudouEtapa && etapa) {
-      contagem.etapasAplicadas++;
-      contato.stage = etapa.slug;
+
+    for (const lead of leads) {
+      // Parceiro não é lead: a regra única de mudança recusaria de todo jeito,
+      // e a decisão contaria recusas que não são problema de ninguém.
+      if (lead.stage === null) continue;
+
+      const decisao = decidirPelosNegocios(
+        porContato.get(lead.id) ?? [],
+        etapas,
+        qualificacoes
+      );
+      contagem.recusas += decisao.recusas;
+
+      const aplicado = await aplicarMudancaDoLead(lead, {
+        qualificacao: decisao.qualificacao?.slug ?? null,
+        etapa: decisao.etapa,
+        origem: "pipedrive",
+      });
+      if (aplicado.mudouQualificacao) contagem.qualificacoesAplicadas++;
+      if (aplicado.mudouEtapa) contagem.etapasAplicadas++;
+      if (aplicado.convertidoPara) contagem.convertidos++;
+      if (aplicado.conversaoRecusada) contagem.recusas++;
     }
-    if (aplicado.convertidoPara) {
-      contagem.convertidos++;
-      contato.stage = null;
-    }
-    if (aplicado.conversaoRecusada) contagem.recusas++;
   }
 }
