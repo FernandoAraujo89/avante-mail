@@ -31,6 +31,15 @@ export function faixaInfo(valor: string | null) {
 export const ETAPA_DE_ENTRADA = "qualificado";
 
 /**
+ * Para onde vai o lead cujo negócio foi PERDIDO no Pipedrive.
+ *
+ * Não é uma coluna do funil de lá: vem do status do negócio, como a compra. E
+ * não é um degrau do funil daqui — o relatório a deixa fora da sequência,
+ * senão quem perdeu contaria como tendo chegado até a última etapa.
+ */
+export const ETAPA_DE_PERDA = "perdido";
+
+/**
  * Normaliza o que vem de fora para virar slug.
  *
  * O agente manda o rótulo do Pipedrive ("Passou por apresentação de produto"),

@@ -283,10 +283,25 @@ de colunas automáticas (mín. 9,75rem) do sm para cima; a etapa nova cadastrada
 na tela entra antes da etapa final, não depois de "Comprou" (a tela não
 reordena, e o funil acumulado conta pela posição).
 
-**Ainda em aberto:** deal PERDIDO continua sem mexer (a maioria dos deals dos
-dois funis termina perdida — 356 e 368 nas amostras): o lead fica parado na
-última etapa, com os pontos dela esfriando. Cadastrar a etapa `perdido` é a
-decisão de negócio pendente.
+**Etapa Perdido (15/09/2026, `scripts/migrate-sincroniza-funil-perdido.ts`).**
+A maioria dos deals dos dois funis termina perdida (356 e 368 nas amostras de
+500), e sem a etapa o lead ficava parado na última, com os pontos dela. O
+usuário mandou criar. A sincronização já sabia o que fazer (deal perdido →
+`perdido`, se existir); o que mudou em volta:
+
+- **Não é degrau do funil.** Posição 110 (no painel ela aparece no fim, ao lado
+  da outra saída), mas `etapasDoFunil` a tira da sequência do relatório e a
+  consulta de alcance a ignora: com a posição dela contando, quem perdeu
+  apareceria como tendo chegado até "Comprou". Quem perdeu conta nas etapas
+  até onde chegou antes; o relatório mostra à parte quantos estão em Perdido.
+- **Não encerra a nutrição.** Perder o negócio não é pedir para sair — é o lead
+  que mais precisa de trilha de recuperação (gatilho "Lead andou no funil" →
+  Perdido). É uma caixa na tela, se o time decidir o contrário.
+- **0 pontos.** Como vale só a etapa atual, o lead perde os pontos da etapa em
+  que estava; o que ele faz e a qualificação continuam contando.
+- A migração apaga de novo as marcas-d'água: a passada seguinte relê os funis
+  e aplica os deals que já estavam perdidos. Se a mesma pessoa tiver um deal
+  perdido e outro aberto, vale o que mudou por último.
 
 ### Rastreio anônimo e costura (fase E.2, 28/08/2026)
 

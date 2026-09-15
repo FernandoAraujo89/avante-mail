@@ -14,7 +14,12 @@ import {
 
 import { contactEvents, contacts, getDb, leadStages } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
-import { listarEtapas, passaramPorEtapa } from "@/lib/leads/etapas";
+import {
+  ETAPA_DE_PERDA,
+  etapasDoFunil,
+  listarEtapas,
+  passaramPorEtapa,
+} from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { lerConfiguracao } from "@/lib/leads/score";
 import { errorMessage } from "@/lib/utils";
@@ -167,12 +172,16 @@ export async function GET() {
                 FROM ${contacts}
                WHERE ${contacts.stage} IS NOT NULL
             ) AS passagem
-            JOIN ${leadStages} AS etapa ON etapa.slug = passagem.slug
+            JOIN ${leadStages} AS etapa
+              ON etapa.slug = passagem.slug
+             -- Perder não é chegar mais fundo: quem perdeu conta até onde
+             -- tinha chegado antes.
+             AND etapa.slug <> ${ETAPA_DE_PERDA}
            GROUP BY passagem.id
         ) AS alcance`
       );
 
-    const ativas = etapas.filter((e) => e.active);
+    const ativas = etapasDoFunil(etapas);
     const passaram = passaramPorEtapa(
       ativas.map((e) => e.position),
       alcances.map((a) => a.maisFunda)
@@ -186,6 +195,19 @@ export async function GET() {
       passaram:
         i === 0 ? (totais?.total ?? 0) + (convertidos?.total ?? 0) : passaram[i],
     }));
+
+    // Quem está em "Perdido" agora — fora da sequência do funil, mas não fora
+    // do relatório. Nulo quando a etapa nem existe: a tela não mostra um zero
+    // que parece medida.
+    const etapaDePerda = etapas.find((e) => e.slug === ETAPA_DE_PERDA);
+    const perdidos = etapaDePerda
+      ? (
+          await db
+            .select({ total: count() })
+            .from(contacts)
+            .where(eq(contacts.stage, ETAPA_DE_PERDA))
+        )[0]?.total ?? 0
+      : null;
 
     const canais = porCanal.filter((c) => c.canal);
     const semCanal = porCanal.find((c) => !c.canal)?.total ?? 0;
@@ -205,6 +227,7 @@ export async function GET() {
             : null,
       },
       funil,
+      perdidos,
       qualificacoes: qualificacoes.map((q) => ({
         slug: q.slug,
         label: q.label,

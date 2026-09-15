@@ -1,10 +1,11 @@
 // Conferência da sincronização com DOIS funis do Pipedrive, de ponta a ponta.
 //
 // Roda contra o banco do .env.local (o de desenvolvimento) com uma API do
-// Pipedrive DE MENTIRA — sem token e sem rede. Cria cinco contatos de teste,
+// Pipedrive DE MENTIRA — sem token e sem rede. Cria seis contatos de teste,
 // sincroniza, confere etapa, qualificação, marca-d'água e pontuação, e apaga
 // tudo no fim (inclusive as chaves de app_settings que a passada escreve).
-// Precisa da migração scripts/migrate-sincroniza-funil-completo.ts aplicada.
+// Precisa das migrações scripts/migrate-sincroniza-funil-completo.ts e
+// scripts/migrate-sincroniza-funil-perdido.ts aplicadas.
 //
 //   npx tsx scripts/testar-sync-funis.ts
 //
@@ -85,6 +86,10 @@ const DEALS: Record<number, DealDoPipedrive[]> = {
     // Mesma pessoa do deal 2, mudou DEPOIS: é este que vale.
     deal(6, 3, 98, "2026-09-10T13:00:00Z"),
     deal(7, 99, 99, "2026-09-10T13:30:00Z", "lost"),
+    // A mesma pessoa chega à análise e depois perde o negócio: vai para
+    // "Perdido" e os pontos da análise saem da conta.
+    deal(9, 6, 103, "2026-09-10T13:45:00Z"),
+    deal(8, 6, 103, "2026-09-10T14:00:00Z", "lost"),
   ],
 };
 
@@ -94,6 +99,7 @@ const PESSOAS = new Map<number, PessoaDoPipedrive>([
   [3, { emails: [email("c").toUpperCase()], phones: [] }],
   [4, { emails: [email("d")], phones: [] }],
   [5, { emails: [email("e")], phones: [] }],
+  [6, { emails: [email("f")], phones: [] }],
   [99, { emails: [email("desconhecido")], phones: [] }],
 ]);
 
@@ -176,6 +182,7 @@ async function main() {
         { name: "Teste D", email: email("d"), stage: "realizar-contato" },
         // Parceiro: aparece no Pipedrive, mas não entra no funil daqui.
         { name: "Teste E", email: email("e"), stage: null },
+        { name: "Teste F", email: email("f"), stage: "qualificado" },
       ])
       .returning({ id: contacts.id, email: contacts.email });
     const id = (quem: string) => criados.find((c) => c.email === email(quem))!.id;
@@ -184,7 +191,7 @@ async function main() {
     const r1 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
     ok("rodou", r1.rodou, true);
     ok("dois funis", r1.funis, 2);
-    ok("sete deals lidos", r1.deals, 7);
+    ok("nove deals lidos", r1.deals, 9);
     ok("um deal sem contato", r1.semContato, 1);
     ok("nenhuma recusa", r1.recusas, 0);
     ok("leram do zero", [pedidosDesde[8][0], pedidosDesde[14][0]], [
@@ -209,6 +216,7 @@ async function main() {
     ok("C: vale o deal que mudou por último", (await estado("c")).stage, "realizar-contato");
     ok("D: ganho vira compra", (await estado("d")).stage, "comprou");
     ok("E: parceiro continua parceiro", (await estado("e")).stage, null);
+    ok("F: negócio perdido vai para Perdido", (await estado("f")).stage, "perdido");
 
     const passagensDeC = await db
       .select({ payload: contactEvents.payload })
@@ -234,7 +242,7 @@ async function main() {
       "uma marca-d'água por funil",
       marcas.map((m) => `${m.key}=${m.value}`).sort(),
       [
-        "pipedrive_sync_desde:14=2026-09-10T13:30:00Z",
+        "pipedrive_sync_desde:14=2026-09-10T14:00:00Z",
         "pipedrive_sync_desde:8=2026-09-10T12:30:00Z",
       ]
     );
@@ -254,7 +262,7 @@ async function main() {
     const r2 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
     ok("partiu da marca de cada funil", [pedidosDesde[8][1], pedidosDesde[14][1]], [
       "2026-09-10T12:30:00Z",
-      "2026-09-10T13:30:00Z",
+      "2026-09-10T14:00:00Z",
     ]);
     ok("releitura não muda ninguém", r2.etapasAplicadas, 0);
 
@@ -285,6 +293,8 @@ async function main() {
       c.score,
       pontosDe("realizar-contato")
     );
+    const f = await recalcularContato(id("f"), regras, configuracao);
+    ok("F: perdeu — os pontos da análise saem", f.score, pontosDe("perdido"));
   } finally {
     await db.delete(contacts).where(like(contacts.email, `${MARCA}-%`));
     await db.delete(appSettings).where(inArray(appSettings.key, CHAVES_DA_PASSADA));

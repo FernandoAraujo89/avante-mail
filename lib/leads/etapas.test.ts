@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LeadStageRow } from "@/lib/db";
 
-import { casarEtapa, passaramPorEtapa } from "./etapas";
+import { casarEtapa, etapasDoFunil, passaramPorEtapa } from "./etapas";
 
 function etapa(
   slug: string,
@@ -42,6 +42,7 @@ const FUNIL: LeadStageRow[] = [
   etapa("analisando-proposta", "Analisando proposta", 80),
   etapa("aguardar-assinatura-e-pagamento", "Aguardar assinatura e pagamento", 90),
   etapa("comprou", "Comprou", 100, { stopsNurturing: true }),
+  etapa("perdido", "Perdido", 110),
 ];
 
 describe("casarEtapa com os nomes crus dos dois funis", () => {
@@ -86,8 +87,18 @@ describe("casarEtapa com os nomes crus dos dois funis", () => {
   });
 });
 
+describe("etapasDoFunil", () => {
+  it("deixa de fora a etapa desativada e a de perda", () => {
+    const slugs = etapasDoFunil(FUNIL).map((e) => e.slug);
+    expect(slugs).not.toContain("apresentacao-de-produto");
+    expect(slugs).not.toContain("perdido");
+    expect(slugs[0]).toBe("qualificado");
+    expect(slugs.at(-1)).toBe("comprou");
+  });
+});
+
 describe("passaramPorEtapa", () => {
-  const posicoes = FUNIL.filter((e) => e.active).map((e) => e.position);
+  const posicoes = etapasDoFunil(FUNIL).map((e) => e.position);
 
   it("quem pulou etapa conta em todas até onde chegou", () => {
     const alcances = [

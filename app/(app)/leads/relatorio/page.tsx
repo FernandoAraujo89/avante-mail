@@ -72,6 +72,8 @@ interface Relatorio {
     mediaScore: number | null;
   };
   funil: { slug: string; label: string; converte: boolean; passaram: number }[];
+  /** Quem está em "Perdido" agora. Nulo quando a etapa não existe. */
+  perdidos: number | null;
   qualificacoes: { slug: string; label: string; variant: string; total: number }[];
   semQualificacao: number;
   faixas: Record<string, number>;
@@ -539,6 +541,22 @@ export default function RelatorioPage() {
               </CardHeader>
               <CardContent>
                 <Funil funil={dados.funil} />
+                {/* Perdido é saída, não degrau: fora da sequência, contado à
+                    parte — e quem perdeu segue contado nas etapas até onde
+                    tinha chegado. */}
+                {dados.perdidos !== null ? (
+                  <p className="mt-4 border-t border-border pt-3 text-sm">
+                    <span className="font-semibold tabular-nums">
+                      {dados.perdidos}
+                    </span>{" "}
+                    {dados.perdidos === 1 ? "lead está" : "leads estão"} em{" "}
+                    <span className="font-medium">Perdido</span>{" "}
+                    <span className="text-muted-foreground">
+                      — negócio perdido no Pipedrive. Eles contam nas etapas até
+                      onde chegaram antes de perder.
+                    </span>
+                  </p>
+                ) : null}
                 <p className="mt-4 text-xs text-muted-foreground">
                   Quantos leads <span className="font-medium">chegaram</span>{" "}
                   pelo menos até cada etapa — quem avançou, pulou etapa ou virou

@@ -1,10 +1,14 @@
 import { asc, eq } from "drizzle-orm";
 
 import { getDb, leadStages, type LeadStageRow } from "@/lib/db";
-import { ETAPA_DE_ENTRADA, slugDaEtapa } from "@/components/leads/estagios";
+import {
+  ETAPA_DE_ENTRADA,
+  ETAPA_DE_PERDA,
+  slugDaEtapa,
+} from "@/components/leads/estagios";
 
 // Reexportados daqui para o servidor ter um lugar só de onde importar.
-export { ETAPA_DE_ENTRADA, slugDaEtapa };
+export { ETAPA_DE_ENTRADA, ETAPA_DE_PERDA, slugDaEtapa };
 
 /**
  * As etapas do funil, que espelham o Pipedrive e chegam por webhook.
@@ -61,6 +65,17 @@ export function casarEtapa(
     ) ??
     null
   );
+}
+
+/**
+ * Os degraus do funil, na ordem: as etapas ativas, menos a de perda.
+ *
+ * "Perdido" é uma saída, não um degrau. Na sequência, com a posição dela no
+ * fim, quem perdeu contaria como tendo chegado até "Comprou"; no começo, ela
+ * viraria o primeiro degrau do funil.
+ */
+export function etapasDoFunil(etapas: LeadStageRow[]): LeadStageRow[] {
+  return etapas.filter((e) => e.active && e.slug !== ETAPA_DE_PERDA);
 }
 
 /**

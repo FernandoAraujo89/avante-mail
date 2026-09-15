@@ -270,7 +270,9 @@ export default function EtapasPage() {
             existe lá é recusada pela sincronização, e o lead fica parado na
             anterior. Se a mesma etapa tem outro nome em outro funil — ou foi
             renomeada lá —, cadastre o nome no lápis, como{" "}
-            <span className="font-medium">apelido</span>.
+            <span className="font-medium">apelido</span>. Comprou e Perdido são
+            a exceção: vêm do status do negócio (ganho ou perdido), não de uma
+            coluna de lá.
           </p>
           <p className="text-muted-foreground">
             Os <span className="font-medium">pontos</span> entram no Lead Score

@@ -6,7 +6,11 @@ import {
   type LeadQualificationRow,
   type LeadStageRow,
 } from "@/lib/db";
-import { casarEtapa, listarEtapas } from "@/lib/leads/etapas";
+import {
+  casarEtapa,
+  ETAPA_DE_PERDA,
+  listarEtapas,
+} from "@/lib/leads/etapas";
 import {
   casarQualificacao,
   listarQualificacoes,
@@ -55,8 +59,7 @@ const CHAVE_DESDE = "pipedrive_sync_desde";
 
 /** Deal ganho vira esta etapa — a que encerra a nutrição e converte. */
 const ETAPA_DE_COMPRA = "comprou";
-/** Deal perdido vira esta etapa SE ela estiver cadastrada; senão, não mexe. */
-const ETAPA_DE_PERDA = "perdido";
+// Deal perdido vira ETAPA_DE_PERDA SE ela estiver cadastrada; senão, não mexe.
 
 /** Páginas de 500 deals por funil a cada passada — o resto fica para a próxima. */
 const PAGINAS_POR_FUNIL = 4;
