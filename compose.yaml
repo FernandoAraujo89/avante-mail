@@ -17,6 +17,12 @@
 name: avante-mail
 
 services:
+  # A imagem avante-mail:latest é construída UMA vez, por este serviço. Os
+  # workers usam a mesma imagem (só muda o command) e por isso não têm `build`:
+  # com `build` em todos, cada deploy disparava 5 builds idênticos em paralelo,
+  # com 5 exports da mesma imagem disputando CPU (14 a 25 min por deploy em
+  # 09/2026). O `pull_policy: never` dos workers impede o compose de tentar
+  # baixar do Docker Hub uma imagem homônima: ela sempre vem deste build.
   app:
     build: .
     image: avante-mail:latest
@@ -40,7 +46,7 @@ services:
 
   worker:
     image: avante-mail:latest
-    build: .
+    pull_policy: never
     command: ["npx", "tsx", "worker/email-worker.ts"]
     restart: unless-stopped
     env_file: .env.local
@@ -59,7 +65,7 @@ services:
   # da conta Meta existir, sem crash loop e sem tocar no canal de e-mail.
   whatsapp-worker:
     image: avante-mail:latest
-    build: .
+    pull_policy: never
     command: ["npx", "tsx", "worker/whatsapp-worker.ts"]
     restart: unless-stopped
     env_file: .env.local
@@ -78,7 +84,7 @@ services:
   # falta e aguarda — sem crash loop e sem tocar nos outros canais.
   sms-worker:
     image: avante-mail:latest
-    build: .
+    pull_policy: never
     command: ["npx", "tsx", "worker/sms-worker.ts"]
     restart: unless-stopped
     env_file: .env.local
@@ -96,7 +102,7 @@ services:
   # passo por vez. Sem automação ativa cadastrada, fica ocioso.
   automation-worker:
     image: avante-mail:latest
-    build: .
+    pull_policy: never
     command: ["npx", "tsx", "worker/automation-worker.ts"]
     restart: unless-stopped
     env_file: .env.local
