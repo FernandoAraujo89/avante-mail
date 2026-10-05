@@ -53,17 +53,15 @@ export async function verifySessionToken(
   try {
     const { payload } = await jwtVerify(token, getSecret());
     if (payload.purpose !== "session" || !payload.sub) return null;
+    // Sessão de antes dos perfis: não diz quem a pessoa é, então não vale —
+    // tratá-la como admin daria acesso total a quem entrou antes de ganhar
+    // um perfil restrito. Custa um login a mais, uma vez.
+    if (!ehPerfil(payload.role)) return null;
     return {
       id: payload.sub,
       name: typeof payload.name === "string" ? payload.name : "",
       email: typeof payload.email === "string" ? payload.email : "",
-      // Token emitido antes de existir perfil: só admins existiam.
-      role:
-        payload.role === undefined
-          ? "admin"
-          : ehPerfil(payload.role)
-            ? payload.role
-            : "sucesso_cliente",
+      role: payload.role,
     };
   } catch {
     return null;
