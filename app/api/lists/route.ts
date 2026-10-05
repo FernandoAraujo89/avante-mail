@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, isNull, sql } from "drizzle-orm";
 
 import { contactLists, getDb, lists } from "@/lib/db";
+import { veSoParceiros } from "@/lib/escopo-parceiros";
+import { sessionUserFromRequest } from "@/lib/session";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const db = getDb();
+    // Quem vê só parceiros não vê a lista de leads.
+    const soParceiros = veSoParceiros(await sessionUserFromRequest(request));
     const rows = await db
       .select({
         id: lists.id,
@@ -24,6 +28,7 @@ export async function GET() {
       })
       .from(lists)
       .leftJoin(contactLists, eq(contactLists.listId, lists.id))
+      .where(soParceiros ? isNull(lists.kind) : undefined)
       .groupBy(lists.id)
       .orderBy(asc(lists.name));
 

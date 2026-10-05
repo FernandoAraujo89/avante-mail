@@ -1,17 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { contactLists, contacts, getDb, lists } from "@/lib/db";
+import { listaEhRestrita, veSoParceiros } from "@/lib/escopo-parceiros";
+import { naoEhLead } from "@/lib/leads";
+import { sessionUserFromRequest } from "@/lib/session";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+function naoEncontrada() {
+  return NextResponse.json({ error: "Lista não encontrada." }, { status: 404 });
+}
+
+/** A lista de leads fica invisível para quem vê só parceiros. */
+async function foraDoAlcance(
+  request: NextRequest,
+  db: ReturnType<typeof getDb>,
+  id: string
+): Promise<boolean> {
+  return (
+    veSoParceiros(await sessionUserFromRequest(request)) &&
+    (await listaEhRestrita(db, id))
+  );
+}
+
+export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const db = getDb();
+    if (await foraDoAlcance(request, db, id)) return naoEncontrada();
+    const soParceiros = veSoParceiros(await sessionUserFromRequest(request));
 
     const [list] = await db.select().from(lists).where(eq(lists.id, id));
     if (!list) {
@@ -32,7 +53,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       })
       .from(contactLists)
       .innerJoin(contacts, eq(contacts.id, contactLists.contactId))
-      .where(eq(contactLists.listId, id))
+      .where(
+        soParceiros
+          ? and(eq(contactLists.listId, id), naoEhLead())
+          : eq(contactLists.listId, id)
+      )
       .orderBy(desc(contacts.createdAt));
 
     return NextResponse.json({ list, contacts: members });
@@ -46,6 +71,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
     const db = getDb();
     const body = await request.json();
+    if (await foraDoAlcance(request, db, id)) return naoEncontrada();
 
     const updates: Partial<typeof lists.$inferInsert> = {};
 
@@ -91,10 +117,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: NextRequest, context: RouteContext) {
+export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const db = getDb();
+    if (await foraDoAlcance(request, db, id)) return naoEncontrada();
 
     // Remover a lista não apaga contatos — só as associações (cascade).
     const [deleted] = await db

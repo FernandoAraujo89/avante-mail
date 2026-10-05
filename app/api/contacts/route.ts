@@ -9,6 +9,7 @@ import {
   ilike,
   inArray,
   isNotNull,
+  isNull,
   or,
   type SQL,
 } from "drizzle-orm";
@@ -19,9 +20,11 @@ import {
   getDb,
   lists,
 } from "@/lib/db";
+import { listasRestritas, veSoParceiros } from "@/lib/escopo-parceiros";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { ehLead, naoEhLead } from "@/lib/leads";
 import { normalizePhone } from "@/lib/phone";
+import { sessionUserFromRequest } from "@/lib/session";
 import { parseBrazilianMobile } from "@/lib/sms/phone";
 import {
   EMAIL_REGEX,
@@ -36,6 +39,7 @@ export async function GET(request: NextRequest) {
   try {
     const db = getDb();
     const params = request.nextUrl.searchParams;
+    const soParceiros = veSoParceiros(await sessionUserFromRequest(request));
 
     const search = params.get("search")?.trim();
     const tag = params.get("tag")?.trim();
@@ -122,6 +126,8 @@ export async function GET(request: NextRequest) {
     // envio faz, para a contagem da tela não prometer um público diferente do
     // que sai.
     if (leads === "exclude") conditions.push(naoEhLead());
+    // Sucesso do cliente: lead não existe para ele, qualquer que seja o filtro.
+    if (soParceiros) conditions.push(naoEhLead());
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -151,7 +157,11 @@ export async function GET(request: NextRequest) {
         })
         .from(contactLists)
         .innerJoin(lists, eq(lists.id, contactLists.listId))
-        .where(inArray(contactLists.contactId, ids));
+        .where(
+          soParceiros
+            ? and(inArray(contactLists.contactId, ids), isNull(lists.kind))
+            : inArray(contactLists.contactId, ids)
+        );
       for (const m of membership) {
         const arr = byContact.get(m.contactId) ?? [];
         arr.push({ id: m.listId, name: m.listName });
@@ -180,9 +190,14 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    const soParceiros = veSoParceiros(await sessionUserFromRequest(request));
     const deleted = await db
       .delete(contacts)
-      .where(inArray(contacts.id, ids))
+      .where(
+        soParceiros
+          ? and(inArray(contacts.id, ids), naoEhLead())
+          : inArray(contacts.id, ids)
+      )
       .returning({ id: contacts.id });
 
     return NextResponse.json({ deleted: deleted.length });
@@ -205,6 +220,16 @@ export async function POST(request: NextRequest) {
         : null;
     const tags = normalizeTags(body.tags);
     const listIds = normalizeIds(body.listIds);
+
+    if (
+      veSoParceiros(await sessionUserFromRequest(request)) &&
+      (await listasRestritas(db, listIds)).length > 0
+    ) {
+      return NextResponse.json(
+        { error: "Essa lista não está disponível para o seu perfil." },
+        { status: 403 }
+      );
+    }
 
     if (!name) {
       return NextResponse.json(

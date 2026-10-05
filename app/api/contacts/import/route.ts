@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { inArray } from "drizzle-orm";
+import { and, inArray } from "drizzle-orm";
 import Papa from "papaparse";
 
 import { contactLists, contacts, getDb, lists, type NewContact } from "@/lib/db";
+import { listaEhRestrita, veSoParceiros } from "@/lib/escopo-parceiros";
 import { emitContactEvents } from "@/lib/events";
+import { naoEhLead } from "@/lib/leads";
 import { firstValidPhone } from "@/lib/phone";
+import { sessionUserFromRequest } from "@/lib/session";
 import { parseBrazilianMobile } from "@/lib/sms/phone";
 import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
 
@@ -48,7 +51,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Se for importar para uma lista, ela precisa existir.
+    const soParceiros = veSoParceiros(await sessionUserFromRequest(request));
+
+    // Se for importar para uma lista, ela precisa existir — e, para quem vê
+    // só parceiros, não pode ser a de leads.
+    if (listId && soParceiros && (await listaEhRestrita(db, listId))) {
+      return NextResponse.json(
+        { error: "Lista de destino não encontrada." },
+        { status: 404 }
+      );
+    }
     if (listId) {
       const [list] = await db
         .select({ id: lists.id })
@@ -204,7 +216,11 @@ export async function POST(request: NextRequest) {
         const found = await db
           .select({ id: contacts.id })
           .from(contacts)
-          .where(inArray(contacts.email, chunk));
+          .where(
+            soParceiros
+              ? and(inArray(contacts.email, chunk), naoEhLead())
+              : inArray(contacts.email, chunk)
+          );
         matched.push(...found);
       }
       for (let i = 0; i < matched.length; i += CHUNK_SIZE) {

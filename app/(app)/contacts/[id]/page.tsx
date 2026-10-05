@@ -11,7 +11,7 @@ import {
   Send,
   Workflow,
 } from "lucide-react";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -38,7 +38,9 @@ import {
   getDb,
   lists as listsTable,
 } from "@/lib/db";
+import { usuarioDaSessao, veSoParceiros } from "@/lib/escopo-parceiros";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { naoEhLead } from "@/lib/leads";
 import { recortar } from "@/lib/paginacao";
 import {
   paginacaoDaUrl,
@@ -58,7 +60,14 @@ export default async function ContactHistoryPage({
   const { id } = await params;
   const db = getDb();
 
-  const [contact] = await db.select().from(contacts).where(eq(contacts.id, id));
+  // Lead não existe para quem vê só parceiros — nem chega a ser lido.
+  const soParceiros = veSoParceiros(await usuarioDaSessao());
+  const [contact] = await db
+    .select()
+    .from(contacts)
+    .where(
+      soParceiros ? and(eq(contacts.id, id), naoEhLead()) : eq(contacts.id, id)
+    );
 
   if (!contact) notFound();
 

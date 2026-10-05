@@ -86,6 +86,9 @@ export default function ContactsPage() {
   const [stageFilter, setStageFilter] = useState("all");
   const [availableLists, setAvailableLists] = useState<ListRef[]>([]);
   const [etapas, setEtapas] = useState<EtapaDto[]>([]);
+  // Sucesso do cliente: a API já tira os leads; a tela tira o que só faz
+  // sentido para eles (filtro de etapa, texto sobre leads). Nulo = carregando.
+  const [soParceiros, setSoParceiros] = useState<boolean | null>(null);
   const [tag, setTag] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ContactDto | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -122,11 +125,15 @@ export default function ContactsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [listas, funil] = await Promise.all([
+        const [listas, me] = await Promise.all([
           fetch("/api/lists"),
-          fetch("/api/leads/etapas"),
+          fetch("/api/auth/me"),
         ]);
         if (listas.ok) setAvailableLists(await listas.json());
+        const perfil = me.ok ? (await me.json()).role : null;
+        setSoParceiros(perfil !== "admin");
+        if (perfil !== "admin") return;
+        const funil = await fetch("/api/leads/etapas");
         if (funil.ok) {
           const json = await funil.json();
           setEtapas(Array.isArray(json?.etapas) ? json.etapas : []);
@@ -204,7 +211,11 @@ export default function ContactsPage() {
     <>
       <PageHeader
         title="Contatos"
-        description="Parceiros e leads na mesma base. Campanha vai só para quem não é lead; quem tem estágio é nutrido pela área de Leads."
+        description={
+          soParceiros
+            ? "Parceiros White Label e indicadores. Organize-os em listas para segmentar."
+            : "Parceiros e leads na mesma base. Campanha vai só para quem não é lead; quem tem estágio é nutrido pela área de Leads."
+        }
       >
         <Button variant="outline" asChild>
           <Link href="/contacts/import">
@@ -243,18 +254,20 @@ export default function ContactsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={stageFilter} onValueChange={setStageFilter}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Etapa" />
-          </SelectTrigger>
-          <SelectContent>
-            {filtrosDeEstagio(etapas).map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {soParceiros === false ? (
+          <Select value={stageFilter} onValueChange={setStageFilter}>
+            <SelectTrigger className="w-52">
+              <SelectValue placeholder="Etapa" />
+            </SelectTrigger>
+            <SelectContent>
+              {filtrosDeEstagio(etapas).map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <Input
           placeholder="Filtrar por tag..."
           value={tag}

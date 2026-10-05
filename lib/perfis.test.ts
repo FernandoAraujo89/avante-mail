@@ -43,9 +43,9 @@ describe("rotaPermitida", () => {
     }
   });
 
-  it("etapas do funil: só leitura", () => {
-    expect(rotaPermitida("sucesso_cliente", "/api/leads/etapas", "GET")).toBe(true);
-    expect(rotaPermitida("sucesso_cliente", "/api/leads/etapas", "POST")).toBe(false);
+  it("nada da área de leads", () => {
+    expect(rotaPermitida("sucesso_cliente", "/api/leads/etapas", "GET")).toBe(false);
+    expect(rotaPermitida("sucesso_cliente", "/api/leads", "GET")).toBe(false);
   });
 
   it("cada perfil tem seu início", () => {

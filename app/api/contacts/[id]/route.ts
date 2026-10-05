@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, ne } from "drizzle-orm";
 
 import { contactLists, contacts, getDb } from "@/lib/db";
+import {
+  contatoEhLead,
+  listasRestritas,
+  veSoParceiros,
+} from "@/lib/escopo-parceiros";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { normalizePhone } from "@/lib/phone";
+import { sessionUserFromRequest } from "@/lib/session";
 import {
   EMAIL_REGEX,
   errorMessage,
@@ -15,10 +21,30 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+function naoEncontrado() {
+  return NextResponse.json(
+    { error: "Contato não encontrado." },
+    { status: 404 }
+  );
+}
+
+/** Lead fica invisível para quem vê só parceiros: responde como inexistente. */
+async function foraDoAlcance(
+  request: NextRequest,
+  db: ReturnType<typeof getDb>,
+  id: string
+): Promise<boolean> {
+  return (
+    veSoParceiros(await sessionUserFromRequest(request)) &&
+    (await contatoEhLead(db, id))
+  );
+}
+
+export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const db = getDb();
+    if (await foraDoAlcance(request, db, id)) return naoEncontrado();
 
     const [contact] = await db
       .select()
@@ -36,11 +62,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .select({ listId: contactLists.listId })
       .from(contactLists)
       .where(eq(contactLists.contactId, id));
+    let listIds = memberships.map((m) => m.listId);
+    if (veSoParceiros(await sessionUserFromRequest(request))) {
+      const restritas = await listasRestritas(db, listIds);
+      listIds = listIds.filter((l) => !restritas.includes(l));
+    }
 
-    return NextResponse.json({
-      ...contact,
-      listIds: memberships.map((m) => m.listId),
-    });
+    return NextResponse.json({ ...contact, listIds });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -51,6 +79,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
     const db = getDb();
     const body = await request.json();
+    if (await foraDoAlcance(request, db, id)) return naoEncontrado();
+    const soParceiros = veSoParceiros(await sessionUserFromRequest(request));
 
     // O estado atual guia as transições de consentimento de WhatsApp e SMS.
     const [existing] = await db
@@ -211,7 +241,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     // Substitui as associações de lista pelo conjunto informado.
     let listasDepois = listasAntes;
     if (changesLists) {
-      const listIds = normalizeIds(body.listIds);
+      let listIds = normalizeIds(body.listIds);
+      if (soParceiros) {
+        if ((await listasRestritas(db, listIds)).length > 0) {
+          return NextResponse.json(
+            { error: "Essa lista não está disponível para o seu perfil." },
+            { status: 403 }
+          );
+        }
+        // As listas que ele não vê continuam como estavam.
+        listIds = [
+          ...new Set([...listIds, ...(await listasRestritas(db, listasAntes))]),
+        ];
+      }
       await db.delete(contactLists).where(eq(contactLists.contactId, id));
       if (listIds.length > 0) {
         await db
@@ -245,10 +287,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: NextRequest, context: RouteContext) {
+export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
     const db = getDb();
+    if (await foraDoAlcance(request, db, id)) return naoEncontrado();
 
     const [deleted] = await db
       .delete(contacts)

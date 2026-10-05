@@ -31,9 +31,9 @@ export function paginaInicial(perfil: Perfil): string {
   return perfil === "sucesso_cliente" ? "/lists" : "/dashboard";
 }
 
-// O que o Sucesso do cliente alcança. Telas e APIs andam juntas: a tela de
-// contatos lê as etapas do funil só para mostrar o rótulo do lead, por isso
-// essa leitura (GET) entra e o resto de /api/leads não.
+// O que o Sucesso do cliente alcança. Telas e APIs andam juntas. Dentro
+// delas, o que ele vê é só parceiro: lib/escopo-parceiros.ts tira os leads e
+// a lista de leads.
 const PREFIXOS_SUCESSO_CLIENTE = [
   "/contacts",
   "/lists",
@@ -43,7 +43,7 @@ const PREFIXOS_SUCESSO_CLIENTE = [
   "/api/solicitacoes",
   "/api/auth/",
 ];
-const LEITURAS_SUCESSO_CLIENTE = ["/api/leads/etapas"];
+const LEITURAS_SUCESSO_CLIENTE: string[] = [];
 
 function casa(pathname: string, prefixo: string): boolean {
   return (
