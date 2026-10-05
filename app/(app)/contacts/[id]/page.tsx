@@ -15,6 +15,7 @@ import { desc, eq } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { PaginacaoNaUrl } from "@/components/paginacao";
 import { SendStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,14 +39,21 @@ import {
   lists as listsTable,
 } from "@/lib/db";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { recortar } from "@/lib/paginacao";
+import {
+  paginacaoDaUrl,
+  type ParametrosDaUrl,
+} from "@/lib/paginacao-servidor";
 import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
 
 export const dynamic = "force-dynamic";
 
 export default async function ContactHistoryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<ParametrosDaUrl>;
 }) {
   const { id } = await params;
   const db = getDb();
@@ -89,7 +97,9 @@ export default async function ContactHistoryPage({
     )
     .leftJoin(automations, eq(automations.id, automationRuns.automationId))
     .where(eq(campaignSends.contactId, id))
-    .orderBy(desc(campaignSends.sentAt));
+    // O id desempata: a página seguinte é outra consulta, e empate sem
+    // critério pode trocar a ordem entre uma e outra.
+    .orderBy(desc(campaignSends.sentAt), desc(campaignSends.id));
 
   const conversationId = (await conversationIdsByContact([id])).get(id);
 
@@ -99,6 +109,15 @@ export default async function ContactHistoryPage({
   const opened = history.filter((h) => h.openedAt !== null).length;
   const clicked = history.filter((h) => h.clickedAt !== null).length;
   const replied = history.filter((h) => h.repliedAt !== null).length;
+
+  // As métricas contam o histórico inteiro; a tabela mostra uma página dele.
+  const pedido = await paginacaoDaUrl(await searchParams, "historico-do-contato");
+  const { pagina, inicio, fim } = recortar(
+    history.length,
+    pedido.pagina,
+    pedido.linhas
+  );
+  const historicoDaPagina = history.slice(inicio, fim);
 
   return (
     <>
@@ -169,7 +188,7 @@ export default async function ContactHistoryPage({
         Histórico de campanhas
       </h2>
 
-      <Card>
+      <Card id="historico-de-envios">
         {history.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-12 text-center">
             <MailCheck className="size-8 text-muted-foreground" />
@@ -190,7 +209,7 @@ export default async function ContactHistoryPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {history.map((h) => (
+              {historicoDaPagina.map((h) => (
                 <TableRow key={h.sendId}>
                   <TableCell>
                     {h.campaignId ? (
@@ -246,6 +265,14 @@ export default async function ContactHistoryPage({
             </TableBody>
           </Table>
         )}
+        <PaginacaoNaUrl
+          chave="historico-do-contato"
+          idDaLista="historico-de-envios"
+          total={history.length}
+          pagina={pagina}
+          linhas={pedido.linhas}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
     </>
   );

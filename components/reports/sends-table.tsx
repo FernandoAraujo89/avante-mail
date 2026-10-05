@@ -1,16 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  MessagesSquare,
-  Search,
-  Send,
-} from "lucide-react";
+import { Download, MessagesSquare, Search, Send } from "lucide-react";
 
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { SendStatusBadge, sendStatusLabel } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { csvFilename } from "@/lib/csv";
 import { formatDateTime } from "@/lib/format";
+import type { LinhasPorPagina } from "@/lib/paginacao";
 import { formatPhone } from "@/lib/phone";
 import { describeSendForExport, sendsToCsv } from "@/lib/send-export";
 import { compareSendStatus } from "@/lib/send-status";
@@ -78,7 +73,6 @@ export interface SendTableRow {
   conversationId?: string | null;
 }
 
-const PAGE_SIZES = [50, 100];
 const TODOS = "todos";
 const POR_STATUS = "status:";
 const POR_MOTIVO = "motivo:";
@@ -162,6 +156,7 @@ export function SendsTable({
   campaignId,
   filtro: filtroControlado,
   onFiltroChange,
+  linhasIniciais,
 }: {
   sends: SendTableRow[];
   channel: "email" | "whatsapp" | "sms";
@@ -173,14 +168,14 @@ export function SendsTable({
   /** Filtro controlado de fora (a apuração dos botões filtra a tabela). */
   filtro?: string;
   onFiltroChange?: (valor: string) => void;
+  /** Linhas por página guardadas, lidas no servidor (a tabela vem renderizada de lá). */
+  linhasIniciais?: LinhasPorPagina;
 }) {
   const [busca, setBusca] = useState("");
   const [filtroInterno, setFiltroInterno] = useState(TODOS);
   const filtro = filtroControlado ?? filtroInterno;
   const setFiltro = onFiltroChange ?? setFiltroInterno;
   const [ordem, setOrdem] = useState("nome-az");
-  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
-  const [page, setPage] = useState(1);
 
   const isWhats = channel === "whatsapp";
   const isSms = channel === "sms";
@@ -287,9 +282,11 @@ export function SendsTable({
   }, [filtradas, ordem, channel]);
 
   // Mexer nos filtros volta para a primeira página, senão a lista parece vazia.
-  useEffect(() => {
-    setPage(1);
-  }, [busca, filtro, ordem, pageSize]);
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(ordenadas, {
+    chave: "envios",
+    redefinirCom: [busca, filtro, ordem],
+    linhasIniciais,
+  });
 
   /** Rótulo do recorte atual — vai no nome do arquivo exportado. */
   const rotuloDoFiltro =
@@ -323,11 +320,6 @@ export function SendsTable({
           }).toString()}`,
         }
       : null;
-
-  const totalPages = Math.max(1, Math.ceil(ordenadas.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const inicio = (currentPage - 1) * pageSize;
-  const pagina = ordenadas.slice(inicio, inicio + pageSize);
 
   if (sends.length === 0) {
     return (
@@ -433,7 +425,10 @@ export function SendsTable({
       </div>
 
       {/* Altura limitada: sem isto a página rola sem fim em disparos grandes. */}
-      <div className="max-h-[65vh] overflow-y-auto rounded-lg border border-border">
+      <div
+        ref={ancora}
+        className="max-h-[65vh] overflow-y-auto rounded-lg border border-border"
+      >
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_0_var(--color-border)]">
             <TableRow>
@@ -454,7 +449,7 @@ export function SendsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pagina.map((send) => {
+            {itensDaPagina.map((send) => {
               const outcome = isWhats
                 ? describeSendOutcome(
                     send.status,
@@ -547,7 +542,7 @@ export function SendsTable({
                 </TableRow>
               );
             })}
-            {pagina.length === 0 ? (
+            {itensDaPagina.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={colunas}>
                   <p className="py-8 text-center text-sm text-muted-foreground">
@@ -560,58 +555,7 @@ export function SendsTable({
         </Table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <span>Por página</span>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(v) => setPageSize(Number(v))}
-          >
-            <SelectTrigger className="h-8 w-20">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PAGE_SIZES.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  {n}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span>
-            {ordenadas.length === 0
-              ? "0 envios"
-              : `${inicio + 1}–${inicio + pagina.length} de ${ordenadas.length}`}
-            {ordenadas.length !== sends.length ? ` (de ${sends.length})` : ""}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(currentPage - 1)}
-            disabled={currentPage <= 1}
-            aria-label="Página anterior"
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <span className="tabular-nums">
-            {currentPage}/{totalPages}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(currentPage + 1)}
-            disabled={currentPage >= totalPages}
-            aria-label="Próxima página"
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      </div>
+      <Paginacao {...paginacao} totalSemFiltro={sends.length} />
     </div>
   );
 }

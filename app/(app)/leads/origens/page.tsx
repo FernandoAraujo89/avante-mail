@@ -15,6 +15,7 @@ import {
 import { OrigemDialog } from "@/components/leads/origem-dialog";
 import { TokenDialog } from "@/components/leads/token-dialog";
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -84,6 +85,10 @@ export default function OrigensPage() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(origens ?? [], {
+    chave: "origens",
+  });
 
   async function apagar() {
     if (!apagarAlvo) return;
@@ -155,7 +160,7 @@ export default function OrigensPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {origens === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando origens...
@@ -190,7 +195,7 @@ export default function OrigensPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {origens.map((o) => (
+              {itensDaPagina.map((o) => (
                 <TableRow key={o.id}>
                   <TableCell>
                     <span className="font-medium">{o.name}</span>
@@ -255,6 +260,10 @@ export default function OrigensPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       <OrigemDialog

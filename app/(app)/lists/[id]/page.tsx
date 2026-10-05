@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Search, Upload, UserPlus, X } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -115,6 +116,14 @@ export default function ListDetailPage() {
     };
   }, [addOpen, search, id]);
 
+  const membros = usePaginacao(members, { chave: "membros-da-lista" });
+  // A janela de adicionar também pagina: a base inteira (~1.500 contatos)
+  // viraria uma coluna de caixas sem fim. Nova busca, 1ª página.
+  const opcoes = usePaginacao(options ?? [], {
+    chave: "adicionar-a-lista",
+    redefinirCom: [search],
+  });
+
   function togglePick(contactId: string) {
     setPicked((prev) => {
       const next = new Set(prev);
@@ -201,7 +210,7 @@ export default function ListDetailPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={membros.ancora}>
         {loading ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando...
@@ -226,7 +235,7 @@ export default function ListDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {members.map((contact) => (
+              {membros.itensDaPagina.map((contact) => (
                 <TableRow key={contact.id}>
                   <TableCell>
                     <Link
@@ -264,13 +273,11 @@ export default function ListDetailPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...membros.paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
-
-      {members.length > 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {members.length} contato{members.length === 1 ? "" : "s"} nesta lista
-        </p>
-      ) : null}
 
       <Dialog
         open={addOpen}
@@ -301,7 +308,10 @@ export default function ListDetailPage() {
             />
           </div>
 
-          <div className="max-h-72 overflow-y-auto rounded-lg border border-border">
+          <div
+            ref={opcoes.ancora}
+            className="max-h-72 overflow-y-auto rounded-lg border border-border"
+          >
             {options === null ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 Buscando contatos...
@@ -312,7 +322,7 @@ export default function ListDetailPage() {
               </p>
             ) : (
               <ul className="divide-y divide-border">
-                {options.map((c) => (
+                {opcoes.itensDaPagina.map((c) => (
                   <li key={c.id}>
                     <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-muted/50">
                       <input
@@ -333,6 +343,7 @@ export default function ListDetailPage() {
               </ul>
             )}
           </div>
+          <Paginacao {...opcoes.paginacao} />
 
           <DialogFooter>
             <Button

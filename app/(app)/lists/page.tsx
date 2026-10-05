@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ListChecks, Pencil, Plus, Trash2, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -69,6 +70,10 @@ export default function ListsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(lists ?? [], {
+    chave: "listas",
+  });
 
   function openCreate() {
     setEditing(null);
@@ -146,7 +151,7 @@ export default function ListsPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {lists === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando listas...
@@ -174,7 +179,7 @@ export default function ListsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {lists.map((list) => (
+              {itensDaPagina.map((list) => (
                 <TableRow key={list.id}>
                   <TableCell>
                     <span className="flex items-center gap-2">
@@ -232,6 +237,10 @@ export default function ListsPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>

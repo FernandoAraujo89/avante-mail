@@ -397,6 +397,7 @@ export function ReportsClient() {
                   rows={waData?.campaigns ?? []}
                   selectedId={focusId}
                   onSelect={setFocusId}
+                  redefinirCom={[from, to, campaignIds.join(",")]}
                 />
               </CardContent>
             </Card>
@@ -548,6 +549,7 @@ export function ReportsClient() {
                 selectedId={focusId}
                 onSelect={setFocusId}
                 nameLabel={isNews ? "Edição" : "Campanha"}
+                redefinirCom={[scope, from, to, campaignIds.join(",")]}
               />
             </CardContent>
           </Card>

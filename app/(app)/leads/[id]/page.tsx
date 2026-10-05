@@ -15,6 +15,7 @@ import { rotuloDaFonte } from "@/lib/leads/fonte";
 import { etapaPorSlug, listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { PageHeader } from "@/components/page-header";
+import { PaginacaoNaUrl } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,7 +29,12 @@ import {
   getDb,
   lists as listsTable,
 } from "@/lib/db";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime, formatInt } from "@/lib/format";
+import { recortar } from "@/lib/paginacao";
+import {
+  paginacaoDaUrl,
+  type ParametrosDaUrl,
+} from "@/lib/paginacao-servidor";
 import { formatPhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
@@ -115,8 +121,10 @@ function detalheDoEvento(
 
 export default async function LeadPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<ParametrosDaUrl>;
 }) {
   const { id } = await params;
   const db = getDb();
@@ -168,6 +176,21 @@ export default async function LeadPage({
     );
   }
 
+  // A linha do tempo pagina (?pagina=&linhas=): antes eram só os 50 eventos
+  // mais recentes, numa coluna que rolava sem fim — e quem visitou o site
+  // centenas de vezes não tinha como ver o começo da jornada. A contagem vem
+  // antes para a página pedida ficar presa ao que existe.
+  const pedido = await paginacaoDaUrl(await searchParams, "linha-do-tempo");
+  const [totalEventos] = await db
+    .select({ total: count() })
+    .from(contactEvents)
+    .where(eq(contactEvents.contactId, id));
+  const linhaDoTempo = recortar(
+    totalEventos?.total ?? 0,
+    pedido.pagina,
+    pedido.linhas
+  );
+
   const [
     eventos,
     envios,
@@ -176,7 +199,6 @@ export default async function LeadPage({
     etapas,
     etapaAtual,
     qualificacoes,
-    [totalEventos],
     [totalEnvios],
   ] = await Promise.all([
     db
@@ -188,8 +210,11 @@ export default async function LeadPage({
       })
       .from(contactEvents)
       .where(eq(contactEvents.contactId, id))
-      .orderBy(desc(contactEvents.createdAt))
-      .limit(50),
+      // Eventos gravados na mesma transação dividem o createdAt; o id
+      // desempata para a página seguinte não repetir nem pular nenhum.
+      .orderBy(desc(contactEvents.createdAt), desc(contactEvents.id))
+      .limit(pedido.linhas)
+      .offset(linhaDoTempo.inicio),
     db
       .select({
         id: campaignSends.id,
@@ -236,13 +261,9 @@ export default async function LeadPage({
       // As qualificações também: a ficha e a linha do tempo guardam o slug, e
       // o texto do playbook mora na tabela desde que a lista virou dado.
       listarQualificacoes(true),
-      // Contagens REAIS do que a exclusão apaga. As listas acima são cortadas
-      // em 50 e 20 para a linha do tempo caber na tela; usar o tamanho delas
-      // faria a janela dizer "50 eventos" para quem tem 200.
-      db
-        .select({ total: count() })
-        .from(contactEvents)
-        .where(eq(contactEvents.contactId, id)),
+      // Contagem REAL do que a exclusão apaga (a de eventos vem lá de cima).
+      // As mensagens recebidas são cortadas em 20; usar o tamanho da lista
+      // faria a janela dizer "20 mensagens" para quem tem 200.
       db
         .select({ total: count() })
         .from(campaignSends)
@@ -421,7 +442,7 @@ export default async function LeadPage({
           ) : null}
         </div>
 
-        <Card>
+        <Card id="linha-do-tempo">
           <CardHeader>
             <CardTitle>Linha do tempo</CardTitle>
           </CardHeader>
@@ -462,6 +483,14 @@ export default async function LeadPage({
                 })}
               </ol>
             )}
+            <PaginacaoNaUrl
+              chave="linha-do-tempo"
+              idDaLista="linha-do-tempo"
+              total={totalEventos?.total ?? 0}
+              pagina={linhaDoTempo.pagina}
+              linhas={pedido.linhas}
+              className="mt-4 border-t border-border pt-4"
+            />
 
             {envios.length > 0 ? (
               <div className="mt-6 border-t border-border pt-4">
@@ -483,6 +512,17 @@ export default async function LeadPage({
                     </li>
                   ))}
                 </ul>
+                {/* Aqui ficam só as 20 mais recentes; a lista inteira, paginada,
+                    é o histórico do contato. */}
+                {(totalEnvios?.total ?? 0) > envios.length ? (
+                  <Link
+                    href={`/contacts/${lead.id}`}
+                    className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+                  >
+                    Ver as {formatInt(totalEnvios?.total ?? 0)} mensagens no
+                    histórico do contato
+                  </Link>
+                ) : null}
               </div>
             ) : null}
           </CardContent>

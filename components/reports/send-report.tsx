@@ -45,6 +45,7 @@ import {
   listsLabel,
 } from "@/lib/format";
 import { campaignSenderLabel } from "@/lib/campaign-author";
+import { linhasGuardadas } from "@/lib/paginacao-servidor";
 import { campaignCost } from "@/lib/pricing";
 import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
 import {
@@ -96,6 +97,10 @@ export async function SendReport({
             .where(inArray(listsTable.id, campaign.lists))
         ).map((l) => l.name)
       : [];
+
+  // A tabela de envios pagina no navegador; o tamanho guardado vem daqui para
+  // ela já nascer do tamanho certo, sem pular de 20 para 100 linhas ao abrir.
+  const linhasDosEnvios = await linhasGuardadas("envios");
 
   const sends = await db
     .select({
@@ -363,6 +368,7 @@ export async function SendReport({
           sends={sendsWithReplies}
           templateButtons={whatsappButtons}
           nomeDoDisparo={campaign.name}
+          linhasIniciais={linhasDosEnvios}
         />
       </>
     );
@@ -475,6 +481,7 @@ export async function SendReport({
             channel="sms"
             nomeDoDisparo={campaign.name}
             vazio="Nenhum envio registrado para esta campanha."
+            linhasIniciais={linhasDosEnvios}
           />
         </Card>
       </>
@@ -566,6 +573,7 @@ export async function SendReport({
               ? "Nenhum envio registrado para esta edição."
               : "Nenhum envio registrado para esta campanha."
           }
+          linhasIniciais={linhasDosEnvios}
         />
       </Card>
     </>

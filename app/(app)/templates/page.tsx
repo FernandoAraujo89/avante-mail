@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { Code2, Pencil } from "lucide-react";
-import { desc } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
+import { PaginacaoNaUrl } from "@/components/paginacao";
 import { NewTemplateButton } from "@/components/templates/new-template-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,11 @@ import {
 import { getDb, templates } from "@/lib/db";
 import { formatDate } from "@/lib/format";
 import { compileEmailContent } from "@/lib/mjml";
+import { recortar } from "@/lib/paginacao";
+import {
+  paginacaoDaUrl,
+  type ParametrosDaUrl,
+} from "@/lib/paginacao-servidor";
 import { renderVariables, SAMPLE_VARIABLES } from "@/lib/render";
 
 export const dynamic = "force-dynamic";
@@ -27,12 +33,24 @@ const CATEGORY_LABELS: Record<string, string> = {
   fiscal: "Fiscal",
 };
 
-export default async function TemplatesPage() {
+export default async function TemplatesPage({
+  searchParams,
+}: {
+  searchParams: Promise<ParametrosDaUrl>;
+}) {
   const db = getDb();
+  const pedido = await paginacaoDaUrl(await searchParams, "templates");
+  const [{ total }] = await db.select({ total: count() }).from(templates);
+  const { pagina, inicio } = recortar(total, pedido.pagina, pedido.linhas);
+
+  // Só a página vai para o MJML: compilar cada template da base a cada visita
+  // era o que mais pesava nesta tela.
   const rows = await db
     .select()
     .from(templates)
-    .orderBy(desc(templates.createdAt));
+    .orderBy(desc(templates.createdAt), desc(templates.id))
+    .limit(pedido.linhas)
+    .offset(inicio);
 
   const withPreview = await Promise.all(
     rows.map(async (template) => {
@@ -59,7 +77,10 @@ export default async function TemplatesPage() {
           </p>
         </Card>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          id="lista-de-templates"
+          className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+        >
           {withPreview.map((template) => (
             <Card key={template.id} className="overflow-hidden">
               <iframe
@@ -117,6 +138,15 @@ export default async function TemplatesPage() {
           ))}
         </div>
       )}
+      <PaginacaoNaUrl
+        chave="templates"
+        idDaLista="lista-de-templates"
+        total={total}
+        pagina={pagina}
+        linhas={pedido.linhas}
+        rotulo="Itens por página"
+        className="mt-6"
+      />
     </>
   );
 }

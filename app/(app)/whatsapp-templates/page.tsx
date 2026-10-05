@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { WhatsAppTemplateStatusBadge } from "@/components/whatsapp/template-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,10 @@ export default function WhatsAppTemplatesPage() {
     load();
   }, [load]);
 
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(templates ?? [], {
+    chave: "modelos-whatsapp",
+  });
+
   async function handleSync() {
     setSyncing(true);
     setError("");
@@ -201,7 +206,7 @@ export default function WhatsAppTemplatesPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {templates === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando modelos...
@@ -233,7 +238,7 @@ export default function WhatsAppTemplatesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {templates.map((template) => {
+              {itensDaPagina.map((template) => {
                 const editable = EDITABLE.has(template.status);
                 const quality = template.qualityScore
                   ? QUALITY_LABELS[template.qualityScore.toUpperCase()]
@@ -331,6 +336,10 @@ export default function WhatsAppTemplatesPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       <Dialog

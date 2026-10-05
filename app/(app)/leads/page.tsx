@@ -18,6 +18,11 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import {
+  CaixaDaPagina,
+  Paginacao,
+  usePaginacao,
+} from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -58,7 +63,7 @@ import {
   varianteDaQualificacao,
   type QualificacaoDto,
 } from "@/components/leads/qualificacoes";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatInt } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 
 interface Resposta {
@@ -212,11 +217,6 @@ export default function LeadsPage() {
     setAviso("");
   }, [busca, estagio, canal, faixa, qualificacao]);
 
-  const leadsVisiveis = dados?.leads ?? [];
-  const todosMarcados =
-    leadsVisiveis.length > 0 &&
-    leadsVisiveis.every((l) => selecionados.has(l.id));
-
   function alternarUm(id: string) {
     setSelecionados((antes) => {
       const agora = new Set(antes);
@@ -224,12 +224,6 @@ export default function LeadsPage() {
       else agora.add(id);
       return agora;
     });
-  }
-
-  function alternarTodos() {
-    setSelecionados(() =>
-      todosMarcados ? new Set() : new Set(leadsVisiveis.map((l) => l.id))
-    );
   }
 
   async function excluirSelecionados() {
@@ -325,6 +319,29 @@ export default function LeadsPage() {
     });
     return lista;
   }, [dados, ordem]);
+
+  // Filtro ou ordem nova volta para a 1ª página; a atualização de fundo a cada
+  // 30s traz os mesmos filtros e deixa a pessoa na página em que está.
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(leads ?? [], {
+    chave: "leads",
+    redefinirCom: [
+      busca,
+      estagio,
+      canal,
+      faixa,
+      qualificacao,
+      ordem.chave,
+      ordem.direcao,
+    ],
+  });
+  const idsDaPagina = itensDaPagina.map((l) => l.id);
+  const paginaInteiraMarcada =
+    idsDaPagina.length > 0 && idsDaPagina.every((id) => selecionados.has(id));
+  // Marcado em outra página continua marcado — e a barra diz quantos, porque
+  // é gente que a exclusão leva sem estar à vista.
+  const marcadosForaDaPagina =
+    selecionados.size - idsDaPagina.filter((id) => selecionados.has(id)).length;
+  const totalFiltrado = leads?.length ?? 0;
 
   return (
     <>
@@ -566,9 +583,32 @@ export default function LeadsPage() {
 
       {selecionados.size > 0 ? (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-accent/50 px-4 py-2">
-          <span className="text-sm font-medium">
-            {selecionados.size} lead{selecionados.size === 1 ? "" : "s"}{" "}
-            selecionado{selecionados.size === 1 ? "" : "s"}
+          <span className="text-sm">
+            <span className="font-medium">
+              {formatInt(selecionados.size)} lead
+              {selecionados.size === 1 ? "" : "s"} selecionado
+              {selecionados.size === 1 ? "" : "s"}
+            </span>
+            {marcadosForaDaPagina > 0 ? (
+              <span className="text-muted-foreground">
+                {" "}
+                · {formatInt(marcadosForaDaPagina)} em outras páginas
+              </span>
+            ) : null}
+            {/* A caixa do cabeçalho marca só a página; a lista filtrada
+                inteira é um convite explícito, com o número à vista. */}
+            {paginaInteiraMarcada && selecionados.size < totalFiltrado ? (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto px-1.5 py-0 text-sm"
+                onClick={() =>
+                  setSelecionados(new Set((leads ?? []).map((l) => l.id)))
+                }
+              >
+                Selecionar todos os {formatInt(totalFiltrado)}
+              </Button>
+            ) : null}
           </span>
           <div className="flex gap-2">
             <Button
@@ -590,7 +630,7 @@ export default function LeadsPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {leads === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando leads...
@@ -617,12 +657,10 @@ export default function LeadsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">
-                  <input
-                    type="checkbox"
-                    aria-label="Selecionar todos"
-                    className="size-4 cursor-pointer accent-primary align-middle"
-                    checked={todosMarcados}
-                    onChange={alternarTodos}
+                  <CaixaDaPagina
+                    ids={idsDaPagina}
+                    selecionados={selecionados}
+                    onChange={setSelecionados}
                   />
                 </TableHead>
                 {COLUNAS.map((c) => (
@@ -657,7 +695,7 @@ export default function LeadsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {leads.map((lead) => (
+              {itensDaPagina.map((lead) => (
                 <TableRow key={lead.id}>
                   <TableCell className="w-10">
                     <input
@@ -756,14 +794,12 @@ export default function LeadsPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          totalSemFiltro={totalNoFunil}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
-
-      {leads !== null && leads.length > 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {leads.length} lead{leads.length === 1 ? "" : "s"} com os filtros
-          atuais
-        </p>
-      ) : null}
 
       <Dialog open={excluirAberto} onOpenChange={setExcluirAberto}>
         <DialogContent>

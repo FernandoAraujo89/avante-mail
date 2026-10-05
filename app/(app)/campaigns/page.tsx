@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { BarChart2, Copy, Pencil, Plus } from "lucide-react";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
+import { PaginacaoNaUrl } from "@/components/paginacao";
 import { CampaignStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,14 +31,31 @@ import {
 } from "@/lib/db";
 import { campaignSenderLabel } from "@/lib/campaign-author";
 import { formatBrl, formatDateTime, formatUsd, listsLabel } from "@/lib/format";
+import { recortar } from "@/lib/paginacao";
+import {
+  paginacaoDaUrl,
+  type ParametrosDaUrl,
+} from "@/lib/paginacao-servidor";
 import { campaignCost } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({
+  searchParams,
+}: {
+  searchParams: Promise<ParametrosDaUrl>;
+}) {
   const db = getDb();
 
   // Só campanhas: o Avante News tem tela própria (/news).
+  const soCampanhas = eq(campaigns.kind, "campaign");
+  const pedido = await paginacaoDaUrl(await searchParams, "campanhas");
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(campaigns)
+    .where(soCampanhas);
+  const { pagina, inicio } = recortar(total, pedido.pagina, pedido.linhas);
+
   const rows = await db
     .select({
       campaign: campaigns,
@@ -48,8 +66,12 @@ export default async function CampaignsPage() {
     .from(campaigns)
     .leftJoin(templates, eq(campaigns.templateId, templates.id))
     .leftJoin(users, eq(campaigns.sentByUserId, users.id))
-    .where(eq(campaigns.kind, "campaign"))
-    .orderBy(desc(campaigns.createdAt));
+    .where(soCampanhas)
+    // O id desempata: sem ele, duas campanhas do mesmo instante podem trocar
+    // de lugar entre uma página e outra — e uma aparece duas vezes.
+    .orderBy(desc(campaigns.createdAt), desc(campaigns.id))
+    .limit(pedido.linhas)
+    .offset(inicio);
 
   const allLists = await db
     .select({ id: listsTable.id, name: listsTable.name })
@@ -60,19 +82,25 @@ export default async function CampaignsPage() {
 
   // Unidades cobráveis por campanha: e-mails aceitos pelo SES (sentAt),
   // mensagens de WhatsApp entregues (deliveredAt) e SEGMENTOS de SMS que saíram
-  // (sentAt — a Twilio cobra ao entregar à operadora). Uma query só.
-  const chargeAgg = await db
-    .select({
-      campaignId: campaignSends.campaignId,
-      sentChargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
-      waChargeable: sql<number>`count(*) filter (where ${campaignSends.deliveredAt} is not null)`,
-      // Envio antigo, sem segmento gravado, conta como 1 — o piso de qualquer SMS.
-      // Prefere o que a Twilio cobrou; cai na nossa contagem e, por último, no
-      // piso de 1 segmento (linha anterior às colunas).
-      smsSegments: sql<number>`coalesce(sum(coalesce(${campaignSends.smsSegmentsBilled}, ${campaignSends.smsSegments}, 1)) filter (where ${campaignSends.sentAt} is not null), 0)`,
-    })
-    .from(campaignSends)
-    .groupBy(campaignSends.campaignId);
+  // (sentAt — a Twilio cobra ao entregar à operadora). Uma query só, e só
+  // para as campanhas da página.
+  const idsDaPagina = rows.map((r) => r.campaign.id);
+  const chargeAgg =
+    idsDaPagina.length === 0
+      ? []
+      : await db
+          .select({
+            campaignId: campaignSends.campaignId,
+            sentChargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
+            waChargeable: sql<number>`count(*) filter (where ${campaignSends.deliveredAt} is not null)`,
+            // Envio antigo, sem segmento gravado, conta como 1 — o piso de qualquer SMS.
+            // Prefere o que a Twilio cobrou; cai na nossa contagem e, por último, no
+            // piso de 1 segmento (linha anterior às colunas).
+            smsSegments: sql<number>`coalesce(sum(coalesce(${campaignSends.smsSegmentsBilled}, ${campaignSends.smsSegments}, 1)) filter (where ${campaignSends.sentAt} is not null), 0)`,
+          })
+          .from(campaignSends)
+          .where(inArray(campaignSends.campaignId, idsDaPagina))
+          .groupBy(campaignSends.campaignId);
   const chargeMap = new Map(
     chargeAgg.map((r) => [
       r.campaignId,
@@ -147,7 +175,7 @@ export default async function CampaignsPage() {
         </Button>
       </PageHeader>
 
-      <Card>
+      <Card id="lista-de-campanhas">
         {rows.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Nenhuma campanha ainda. Clique em &quot;Nova campanha&quot; para
@@ -264,6 +292,14 @@ export default async function CampaignsPage() {
             </TableBody>
           </Table>
         )}
+        <PaginacaoNaUrl
+          chave="campanhas"
+          idDaLista="lista-de-campanhas"
+          total={total}
+          pagina={pagina}
+          linhas={pedido.linhas}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
     </>
   );

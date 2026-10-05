@@ -9,6 +9,7 @@ import {
 } from "@/components/reports/sends-table";
 import { Card } from "@/components/ui/card";
 import { formatInt, formatPercent } from "@/lib/format";
+import type { LinhasPorPagina } from "@/lib/paginacao";
 import { REPLY_GROUP, replyBreakdown } from "@/lib/whatsapp/replies";
 import type { WhatsAppButton } from "@/lib/whatsapp/types";
 import { cn } from "@/lib/utils";
@@ -41,11 +42,13 @@ export function WhatsAppReplies({
   sends,
   templateButtons,
   nomeDoDisparo,
+  linhasIniciais,
 }: {
   campaignId: string;
   sends: SendTableRow[];
   templateButtons: WhatsAppButton[] | null;
   nomeDoDisparo: string;
+  linhasIniciais?: LinhasPorPagina;
 }) {
   const [filtro, setFiltro] = useState(TODOS);
   const tableRef = useRef<HTMLDivElement>(null);
@@ -196,6 +199,7 @@ export function WhatsAppReplies({
             vazio="Nenhum envio registrado para esta campanha."
             filtro={filtro}
             onFiltroChange={setFiltro}
+            linhasIniciais={linhasIniciais}
           />
         </Card>
       </div>

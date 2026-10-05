@@ -10,6 +10,7 @@ import type { EtapaDto } from "@/components/leads/estagios";
 import type { QualificacaoDto } from "@/components/leads/qualificacoes";
 import { AutomationStatusBadge } from "@/components/status-badge";
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -156,6 +157,9 @@ export default function AutomationsPage() {
   }
 
   const ativas = (rows ?? []).filter((r) => r.status === "active").length;
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(rows ?? [], {
+    chave: "automacoes",
+  });
 
   return (
     <>
@@ -175,7 +179,7 @@ export default function AutomationsPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {rows === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando automações...
@@ -207,7 +211,7 @@ export default function AutomationsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
+              {itensDaPagina.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
                     <Link
@@ -304,6 +308,10 @@ export default function AutomationsPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       {rows && rows.length > 0 ? (

@@ -6,6 +6,11 @@ import { History, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 
 import { etapaLabel, type EtapaDto } from "@/components/leads/estagios";
 import { PageHeader } from "@/components/page-header";
+import {
+  CaixaDaPagina,
+  Paginacao,
+  usePaginacao,
+} from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,7 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatInt } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 
 type ListRef = { id: string; name: string };
@@ -151,8 +156,19 @@ export default function ContactsPage() {
     }
   }
 
-  const allSelected =
-    !!contacts && contacts.length > 0 && contacts.every((c) => selected.has(c.id));
+  // Filtro novo volta para a 1ª página; recarregar depois de excluir, não.
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(contacts ?? [], {
+    chave: "contatos",
+    redefinirCom: [search, listFilter, stageFilter, tag],
+  });
+  const idsDaPagina = itensDaPagina.map((c) => c.id);
+  const paginaInteiraMarcada =
+    idsDaPagina.length > 0 && idsDaPagina.every((id) => selected.has(id));
+  // A seleção sobrevive à troca de página, e a barra diz quanto dela está
+  // fora de vista — excluir gente que não aparece na tela sem avisar, nunca.
+  const marcadosForaDaPagina =
+    selected.size - idsDaPagina.filter((id) => selected.has(id)).length;
+  const totalFiltrado = contacts?.length ?? 0;
 
   function toggleOne(id: string) {
     setSelected((prev) => {
@@ -161,12 +177,6 @@ export default function ContactsPage() {
       else next.add(id);
       return next;
     });
-  }
-
-  function toggleAll() {
-    setSelected(() =>
-      allSelected ? new Set() : new Set((contacts ?? []).map((c) => c.id))
-    );
   }
 
   async function confirmBulkDelete() {
@@ -260,10 +270,32 @@ export default function ContactsPage() {
       ) : null}
 
       {selected.size > 0 ? (
-        <div className="mb-3 flex items-center justify-between rounded-lg border bg-accent/50 px-4 py-2">
-          <span className="text-sm font-medium">
-            {selected.size} contato{selected.size === 1 ? "" : "s"} selecionado
-            {selected.size === 1 ? "" : "s"}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-accent/50 px-4 py-2">
+          <span className="text-sm">
+            <span className="font-medium">
+              {formatInt(selected.size)} contato{selected.size === 1 ? "" : "s"}{" "}
+              selecionado{selected.size === 1 ? "" : "s"}
+            </span>
+            {marcadosForaDaPagina > 0 ? (
+              <span className="text-muted-foreground">
+                {" "}
+                · {formatInt(marcadosForaDaPagina)} em outras páginas
+              </span>
+            ) : null}
+            {/* A caixa do cabeçalho marca só a página; para levar a lista
+                filtrada inteira, o convite aparece aqui, com o número. */}
+            {paginaInteiraMarcada && selected.size < totalFiltrado ? (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto px-1.5 py-0 text-sm"
+                onClick={() =>
+                  setSelected(new Set((contacts ?? []).map((c) => c.id)))
+                }
+              >
+                Selecionar todos os {formatInt(totalFiltrado)}
+              </Button>
+            ) : null}
           </span>
           <div className="flex gap-2">
             <Button
@@ -285,7 +317,7 @@ export default function ContactsPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {contacts === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando contatos...
@@ -299,12 +331,10 @@ export default function ContactsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">
-                  <input
-                    type="checkbox"
-                    aria-label="Selecionar todos"
-                    className="size-4 cursor-pointer accent-primary align-middle"
-                    checked={allSelected}
-                    onChange={toggleAll}
+                  <CaixaDaPagina
+                    ids={idsDaPagina}
+                    selecionados={selected}
+                    onChange={setSelected}
                   />
                 </TableHead>
                 <TableHead>Contato</TableHead>
@@ -316,7 +346,7 @@ export default function ContactsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contacts.map((contact) => (
+              {itensDaPagina.map((contact) => (
                 <TableRow key={contact.id}>
                   <TableCell className="w-10">
                     <input
@@ -434,13 +464,11 @@ export default function ContactsPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
-
-      {contacts !== null ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {contacts.length} contato{contacts.length === 1 ? "" : "s"}
-        </p>
-      ) : null}
 
       <Dialog
         open={deleteTarget !== null}

@@ -1,4 +1,13 @@
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  sql,
+} from "drizzle-orm";
 
 import {
   automationRuns,
@@ -344,10 +353,17 @@ export interface ContatoNoFluxo {
   terminouEm: Date | null;
 }
 
-/** Quem passou (ou está passando) pela automação, do mais recente ao mais antigo. */
+/**
+ * Quem passou (ou está passando) pela automação, do mais recente ao mais
+ * antigo — uma página por vez (`limite` e `deslocamento`), porque o relatório
+ * pagina e uma automação antiga soma milhares de percursos.
+ */
 export async function contatosDaAutomacao(
   automationId: string,
-  limite = 300
+  {
+    limite = 300,
+    deslocamento = 0,
+  }: { limite?: number; deslocamento?: number } = {}
 ): Promise<ContatoNoFluxo[]> {
   const db = getDb();
   const linhas = await db
@@ -367,8 +383,24 @@ export async function contatosDaAutomacao(
     .from(automationRuns)
     .innerJoin(contacts, eq(contacts.id, automationRuns.contactId))
     .where(eq(automationRuns.automationId, automationId))
-    .orderBy(desc(automationRuns.enteredAt))
-    .limit(limite);
+    // Percursos criados na mesma transação dividem o mesmo enteredAt (now() é
+    // fixo nela): sem o id desempatando, a página seguinte poderia repetir
+    // gente e pular outros.
+    .orderBy(desc(automationRuns.enteredAt), desc(automationRuns.id))
+    .limit(limite)
+    .offset(deslocamento);
 
   return linhas;
+}
+
+/** Quantos percursos a tabela de contatos tem — a mesma junção da listagem. */
+export async function contarContatosDaAutomacao(
+  automationId: string
+): Promise<number> {
+  const [linha] = await getDb()
+    .select({ total: count() })
+    .from(automationRuns)
+    .innerJoin(contacts, eq(contacts.id, automationRuns.contactId))
+    .where(eq(automationRuns.automationId, automationId));
+  return linha?.total ?? 0;
 }

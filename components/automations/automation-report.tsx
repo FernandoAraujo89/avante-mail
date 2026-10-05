@@ -14,6 +14,7 @@ import {
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { PaginacaoNaUrl } from "@/components/paginacao";
 import { AutomationStatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  contarContatosDaAutomacao,
   contatosDaAutomacao,
   relatorioDaAutomacao,
   type MetricaDoPasso,
@@ -35,6 +37,11 @@ import { automations, getDb, lists, templates, whatsappTemplates } from "@/lib/d
 import { listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { formatDateTime } from "@/lib/format";
+import { recortar } from "@/lib/paginacao";
+import {
+  paginacaoDaUrl,
+  type ParametrosDaUrl,
+} from "@/lib/paginacao-servidor";
 import { cn } from "@/lib/utils";
 
 import { resumoDoPasso, STEP_LABEL, type Catalogo } from "./labels";
@@ -69,7 +76,14 @@ function caminhoDoPasso(passo: MetricaDoPasso): string | null {
   return passo.branch === "yes" ? "Sim" : "Não";
 }
 
-export async function AutomationReport({ id }: { id: string }) {
+export async function AutomationReport({
+  id,
+  parametros,
+}: {
+  id: string;
+  /** `?pagina=` e `?linhas=` da tabela de contatos. */
+  parametros: ParametrosDaUrl;
+}) {
   const db = getDb();
 
   const [automacao] = await db
@@ -81,7 +95,19 @@ export async function AutomationReport({ id }: { id: string }) {
   const relatorio = await relatorioDaAutomacao(id);
   if (!relatorio) notFound();
 
-  const pessoas = await contatosDaAutomacao(id);
+  // A tabela de contatos pagina no servidor: antes ela parava nos 300 mais
+  // recentes, e quem passou antes disso não aparecia em lugar nenhum.
+  const pedido = await paginacaoDaUrl(parametros, "contatos-da-automacao");
+  const totalDePessoas = await contarContatosDaAutomacao(id);
+  const { pagina, inicio } = recortar(
+    totalDePessoas,
+    pedido.pagina,
+    pedido.linhas
+  );
+  const pessoas = await contatosDaAutomacao(id, {
+    limite: pedido.linhas,
+    deslocamento: inicio,
+  });
 
   // Nomes para os resumos dos passos (lista, modelo de e-mail e de WhatsApp).
   const catalogo: Catalogo = {
@@ -404,13 +430,12 @@ export async function AutomationReport({ id }: { id: string }) {
       </Card>
 
       {/* ─── Contatos ─────────────────────────────────────────── */}
-      <Card className="mt-6">
+      <Card id="contatos-da-automacao" className="mt-6">
         <CardContent className="p-5">
           <div className="mb-4">
             <h2 className="text-base font-semibold">Contatos</h2>
             <p className="text-sm text-muted-foreground">
-              Quem passou pela automação, do mais recente ao mais antigo
-              {pessoas.length >= 300 ? " (300 mais recentes)" : ""}.
+              Quem passou pela automação, do mais recente ao mais antigo.
             </p>
           </div>
 
@@ -478,6 +503,14 @@ export async function AutomationReport({ id }: { id: string }) {
               </Table>
             </div>
           )}
+          <PaginacaoNaUrl
+            chave="contatos-da-automacao"
+            idDaLista="contatos-da-automacao"
+            total={totalDePessoas}
+            pagina={pagina}
+            linhas={pedido.linhas}
+            className="mt-4 border-t border-border pt-4"
+          />
         </CardContent>
       </Card>
     </>

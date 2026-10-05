@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -189,6 +190,9 @@ export default function QualificacoesPage() {
   }
 
   const qualificacoes = dados?.qualificacoes ?? [];
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(qualificacoes, {
+    chave: "qualificacoes",
+  });
 
   return (
     <>
@@ -283,7 +287,7 @@ export default function QualificacoesPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card ref={ancora}>
         {dados === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando...
@@ -305,7 +309,7 @@ export default function QualificacoesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {qualificacoes.map((q) => (
+              {itensDaPagina.map((q) => (
                 <TableRow key={q.id}>
                   <TableCell>
                     <span className="flex flex-wrap items-center gap-2">
@@ -393,6 +397,10 @@ export default function QualificacoesPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       <p className="mt-3 text-xs text-muted-foreground">

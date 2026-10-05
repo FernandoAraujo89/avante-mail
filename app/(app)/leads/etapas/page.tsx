@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -233,6 +234,9 @@ export default function EtapasPage() {
   }
 
   const etapas = dados?.etapas ?? [];
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(etapas, {
+    chave: "etapas",
+  });
 
   return (
     <>
@@ -348,7 +352,7 @@ export default function EtapasPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card ref={ancora}>
         {dados === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando...
@@ -376,7 +380,7 @@ export default function EtapasPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {etapas.map((e) => (
+              {itensDaPagina.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell>
                     {/* No celular a coluna de ações fica fixa por cima da
@@ -498,6 +502,10 @@ export default function EtapasPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       <p className="mt-3 text-xs text-muted-foreground">

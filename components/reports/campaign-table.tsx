@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search } from "lucide-react";
 
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -41,11 +42,14 @@ export function CampaignTable({
   selectedId,
   onSelect,
   nameLabel = "Campanha",
+  redefinirCom = [],
 }: {
   rows: CampaignRow[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   nameLabel?: string;
+  /** O recorte do relatório (período, campanhas, escopo): mudou, 1ª página. */
+  redefinirCom?: readonly unknown[];
 }) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("sentAt");
@@ -67,6 +71,13 @@ export function CampaignTable({
     return list;
   }, [rows, search, sortKey, sortDir]);
 
+  // Busca, ordem ou recorte do relatório novos (período, campanhas, escopo)
+  // voltam para a 1ª página; o botão Atualizar mantém onde se está.
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(filtered, {
+    chave: "relatorio-por-disparo",
+    redefinirCom: [search, sortKey, sortDir, ...redefinirCom],
+  });
+
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -77,7 +88,7 @@ export function CampaignTable({
   }
 
   return (
-    <div>
+    <div ref={ancora}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -138,7 +149,7 @@ export function CampaignTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((row) => (
+            {itensDaPagina.map((row) => (
               <TableRow
                 key={row.id}
                 onClick={() => onSelect(selectedId === row.id ? null : row.id)}
@@ -183,6 +194,11 @@ export function CampaignTable({
           </TableBody>
         </Table>
       )}
+      <Paginacao
+        {...paginacao}
+        totalSemFiltro={rows.length}
+        className="mt-4"
+      />
     </div>
   );
 }

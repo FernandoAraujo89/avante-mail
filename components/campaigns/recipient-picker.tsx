@@ -1,21 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Check, Search } from "lucide-react";
 
 import {
   NumberFilterDialog,
   type NumberFilterResult,
 } from "@/components/campaigns/number-filter-dialog";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 export interface RecipientContact {
@@ -40,8 +34,6 @@ interface RecipientPickerProps {
   onEligibleCountChange?: (count: number) => void;
 }
 
-const PAGE_SIZES = [20, 50, 100];
-
 export function RecipientPicker({
   channel,
   lists,
@@ -54,8 +46,6 @@ export function RecipientPicker({
   const [contacts, setContacts] = useState<RecipientContact[] | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
-  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
-  const [page, setPage] = useState(1);
   // Resumo do último filtro por lista de números, para o usuário não perder de
   // vista o que a seleção atual significa depois de fechar a janela.
   const [filtro, setFiltro] = useState<NumberFilterResult | null>(null);
@@ -134,11 +124,6 @@ export function RecipientPicker({
     };
   }, [channel, listsKey, tagsKey]);
 
-  // Buscar ou trocar o público/página joga de volta para a primeira página.
-  useEffect(() => {
-    setPage(1);
-  }, [search, pageSize, channel, listsKey, tagsKey]);
-
   const visible = useMemo(() => {
     if (!contacts) return [];
     const term = search.trim().toLowerCase();
@@ -154,12 +139,15 @@ export function RecipientPicker({
   const selectedCount = value === null ? total : value.length;
   const isSelected = (id: string) => value === null || value.includes(id);
 
-  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
-  // A página fica presa ao intervalo válido: apagar a busca pode encolher a
-  // lista e deixar `page` além do fim.
-  const currentPage = Math.min(page, totalPages);
-  const start = (currentPage - 1) * pageSize;
-  const pageRows = visible.slice(start, start + pageSize);
+  // Buscar ou trocar o público joga de volta para a primeira página.
+  const {
+    itensDaPagina: pageRows,
+    ancora,
+    paginacao,
+  } = usePaginacao(visible, {
+    chave: "destinatarios",
+    redefinirCom: [search, channel, listsKey, tagsKey],
+  });
 
   function toggle(id: string) {
     if (!contacts) return;
@@ -287,7 +275,10 @@ export function RecipientPicker({
         </p>
       ) : (
         // Altura limitada: com 100 por página a lista rolaria a tela inteira.
-        <div className="max-h-[28rem] overflow-y-auto rounded-lg border border-border">
+        <div
+          ref={ancora}
+          className="max-h-[28rem] overflow-y-auto rounded-lg border border-border"
+        >
           {pageRows.map((contact) => {
             const selected = isSelected(contact.id);
             return (
@@ -333,57 +324,8 @@ export function RecipientPicker({
         </div>
       )}
 
-      {contacts !== null && visible.length > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>Por página</span>
-            <Select
-              value={String(pageSize)}
-              onValueChange={(v) => setPageSize(Number(v))}
-            >
-              <SelectTrigger className="h-8 w-20">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZES.map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>
-              {start + 1}–{start + pageRows.length} de {visible.length}
-              {search.trim() ? " (filtrados)" : ""}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-              aria-label="Página anterior"
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="tabular-nums">
-              {currentPage}/{totalPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(currentPage + 1)}
-              disabled={currentPage >= totalPages}
-              aria-label="Próxima página"
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        </div>
+      {contacts !== null ? (
+        <Paginacao {...paginacao} totalSemFiltro={total} />
       ) : null}
     </div>
   );

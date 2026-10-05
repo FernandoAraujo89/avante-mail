@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { BarChart2, Copy, Newspaper, Pencil, Plus, Users } from "lucide-react";
-import { desc, eq, sql } from "drizzle-orm";
+import { count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { DeleteButton } from "@/components/delete-button";
 import { NewsAudienceCard } from "@/components/news/news-audience-card";
 import { PageHeader } from "@/components/page-header";
+import { PaginacaoNaUrl } from "@/components/paginacao";
 import { CampaignStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,13 +22,30 @@ import {
 import { campaigns, campaignSends, getDb, templates, users } from "@/lib/db";
 import { campaignSenderLabel } from "@/lib/campaign-author";
 import { formatBrl, formatDateTime, formatUsd } from "@/lib/format";
+import { recortar } from "@/lib/paginacao";
+import {
+  paginacaoDaUrl,
+  type ParametrosDaUrl,
+} from "@/lib/paginacao-servidor";
 import { campaignCost } from "@/lib/pricing";
 import { resolveNewsList } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewsPage() {
+export default async function NewsPage({
+  searchParams,
+}: {
+  searchParams: Promise<ParametrosDaUrl>;
+}) {
   const db = getDb();
+
+  const soEdicoes = eq(campaigns.kind, "news");
+  const pedido = await paginacaoDaUrl(await searchParams, "news");
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(campaigns)
+    .where(soEdicoes);
+  const { pagina, inicio } = recortar(total, pedido.pagina, pedido.linhas);
 
   const [rows, audience] = await Promise.all([
     db
@@ -40,19 +58,28 @@ export default async function NewsPage() {
       .from(campaigns)
       .leftJoin(templates, eq(campaigns.templateId, templates.id))
       .leftJoin(users, eq(campaigns.sentByUserId, users.id))
-      .where(eq(campaigns.kind, "news"))
-      .orderBy(desc(campaigns.createdAt)),
+      .where(soEdicoes)
+      // O id desempata, para nenhuma edição pular de página entre um clique e
+      // outro.
+      .orderBy(desc(campaigns.createdAt), desc(campaigns.id))
+      .limit(pedido.linhas)
+      .offset(inicio),
     resolveNewsList(),
   ]);
 
-  // E-mails aceitos pelo SES por edição — base do custo.
-  const chargeAgg = await db
-    .select({
-      campaignId: campaignSends.campaignId,
-      chargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
-    })
-    .from(campaignSends)
-    .groupBy(campaignSends.campaignId);
+  // E-mails aceitos pelo SES por edição — base do custo. Só as da página.
+  const idsDaPagina = rows.map((r) => r.campaign.id);
+  const chargeAgg =
+    idsDaPagina.length === 0
+      ? []
+      : await db
+          .select({
+            campaignId: campaignSends.campaignId,
+            chargeable: sql<number>`count(*) filter (where ${campaignSends.sentAt} is not null)`,
+          })
+          .from(campaignSends)
+          .where(inArray(campaignSends.campaignId, idsDaPagina))
+          .groupBy(campaignSends.campaignId);
   const chargeMap = new Map(
     chargeAgg.map((r) => [r.campaignId, Number(r.chargeable)])
   );
@@ -81,7 +108,7 @@ export default async function NewsPage() {
 
       <NewsAudienceCard initialAudience={audience} />
 
-      <Card className="mt-6">
+      <Card id="lista-de-edicoes" className="mt-6">
         {rows.length === 0 ? (
           <div className="py-12 text-center">
             <Newspaper className="mx-auto size-8 text-muted-foreground/60" />
@@ -187,6 +214,14 @@ export default async function NewsPage() {
             </TableBody>
           </Table>
         )}
+        <PaginacaoNaUrl
+          chave="news"
+          idDaLista="lista-de-edicoes"
+          total={total}
+          pagina={pagina}
+          linhas={pedido.linhas}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       {rows.length > 0 ? (
