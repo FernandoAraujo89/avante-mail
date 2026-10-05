@@ -5,6 +5,7 @@ import { KeyRound, Plus } from "lucide-react";
 
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
+import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,6 +20,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableActionsCell,
   TableActionsHead,
@@ -29,13 +37,54 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/format";
+import {
+  PERFIL_DESCRICAO,
+  PERFIL_LABEL,
+  PERFIS,
+  type Perfil,
+} from "@/lib/perfis";
 
 type UserDto = {
   id: string;
   name: string;
   email: string;
+  role: Perfil;
   createdAt: string;
 };
+
+/** Escolha do perfil: rótulo e o que ele pode, para não ter de adivinhar. */
+function SeletorDePerfil({
+  id,
+  value,
+  onChange,
+  disabled,
+  className,
+}: {
+  id?: string;
+  value: Perfil;
+  onChange: (perfil: Perfil) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v as Perfil)}
+      disabled={disabled}
+    >
+      <SelectTrigger id={id} className={className}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {PERFIS.map((perfil) => (
+          <SelectItem key={perfil} value={perfil}>
+            {PERFIL_LABEL[perfil]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 export default function UsersPage() {
   const [list, setList] = useState<UserDto[] | null>(null);
@@ -47,6 +96,7 @@ export default function UsersPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Perfil>("admin");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -80,6 +130,10 @@ export default function UsersPage() {
     load();
   }, [load]);
 
+  const { itensDaPagina, ancora, paginacao } = usePaginacao(list ?? [], {
+    chave: "usuarios",
+  });
+
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -88,7 +142,7 @@ export default function UsersPage() {
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ name, email, password, role }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao criar usuário.");
@@ -97,6 +151,7 @@ export default function UsersPage() {
       setName("");
       setEmail("");
       setPassword("");
+      setRole("admin");
       await load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err));
@@ -130,6 +185,26 @@ export default function UsersPage() {
     }
   }
 
+  async function handleRoleChange(user: UserDto, novo: Perfil) {
+    setError("");
+    setNotice("");
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: novo }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao trocar o perfil.");
+      setNotice(
+        `${user.name} agora é ${PERFIL_LABEL[novo]}. Vale a partir do próximo login da pessoa.`
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -160,7 +235,7 @@ export default function UsersPage() {
         </div>
       ) : null}
 
-      <Card>
+      <Card ref={ancora}>
         {list === null ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             Carregando usuários...
@@ -174,12 +249,13 @@ export default function UsersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Usuário</TableHead>
+                <TableHead>Perfil</TableHead>
                 <TableHead>Criado em</TableHead>
                 <TableActionsHead>Ações</TableActionsHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {list.map((user) => (
+              {itensDaPagina.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -193,6 +269,19 @@ export default function UsersPage() {
                         <Badge variant="info">Você</Badge>
                       ) : null}
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {me?.id === user.id ? (
+                      <span className="text-sm">{PERFIL_LABEL[user.role]}</span>
+                    ) : (
+                      <SeletorDePerfil
+                        value={user.role}
+                        onChange={(novo) => {
+                          if (novo !== user.role) handleRoleChange(user, novo);
+                        }}
+                        className="w-48"
+                      />
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDate(user.createdAt)}
@@ -226,6 +315,10 @@ export default function UsersPage() {
             </TableBody>
           </Table>
         )}
+        <Paginacao
+          {...paginacao}
+          className="border-t border-border px-4 py-3"
+        />
       </Card>
 
       {/* Novo usuário */}
@@ -263,6 +356,13 @@ export default function UsersPage() {
                 placeholder="pessoa@avantejuntos.com.br"
                 required
               />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="user-role">Perfil</Label>
+              <SeletorDePerfil id="user-role" value={role} onChange={setRole} />
+              <p className="text-xs text-muted-foreground">
+                {PERFIL_DESCRICAO[role]}
+              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="user-password">Senha (mínimo 8 caracteres)</Label>
@@ -317,7 +417,9 @@ export default function UsersPage() {
               </p>
             ) : null}
             <div className="grid gap-2">
-              <Label htmlFor="new-password">Nova senha (mínimo 8 caracteres)</Label>
+              <Label htmlFor="new-password">
+                Nova senha (mínimo 8 caracteres)
+              </Label>
               <Input
                 id="new-password"
                 type="password"

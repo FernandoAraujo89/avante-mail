@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type { EmailDesign, EditorType, Row } from "../email-builder/types";
+import type { Perfil } from "../perfis";
 import type {
   WhatsAppButton,
   WhatsAppHeaderType,
@@ -163,6 +164,8 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  // Perfil de acesso (lib/perfis.ts). Quem já existia é admin.
+  role: text("role").$type<Perfil>().notNull().default("admin"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -270,6 +273,52 @@ export const lists = pgTable("lists", {
   // única lista onde um lead pode cair (docs/plano-webhooks-leads.md, seção 5).
   kind: text("kind").$type<ListKind>(),
   createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Pedido de campanha feito por quem não dispara (o Sucesso do cliente): diz o
+// canal, as listas e o que comunicar. Quem cria e dispara a campanha é sempre
+// o marketing (admin). As listas ficam como ids soltos, sem FK: o pedido é um
+// registro histórico e não deve sumir porque uma lista foi apagada.
+export const CAMPAIGN_REQUEST_STATUSES = [
+  "pendente",
+  "em_andamento",
+  "concluida",
+  "recusada",
+] as const;
+export type CampaignRequestStatus = (typeof CAMPAIGN_REQUEST_STATUSES)[number];
+export const CAMPAIGN_REQUEST_CHANNELS = ["email", "whatsapp"] as const;
+export type CampaignRequestChannel = (typeof CAMPAIGN_REQUEST_CHANNELS)[number];
+
+export const campaignRequests = pgTable("campaign_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  channels: text("channels").array().$type<CampaignRequestChannel[]>().notNull(),
+  listIds: uuid("list_ids").array().notNull(),
+  briefing: text("briefing").notNull(),
+  /** Quando a pessoa gostaria que saísse. Nulo = sem data. */
+  desiredAt: timestamp("desired_at", { withTimezone: true }),
+  status: text("status")
+    .$type<CampaignRequestStatus>()
+    .notNull()
+    .default("pendente"),
+  /** Resposta do marketing (motivo da recusa, combinado de data…). */
+  responseNote: text("response_note"),
+  requestedBy: uuid("requested_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  handledBy: uuid("handled_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  /** Campanha criada a partir do pedido (a primeira, se forem dois canais). */
+  campaignId: uuid("campaign_id").references(() => campaigns.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });

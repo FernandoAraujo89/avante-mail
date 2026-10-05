@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  ClipboardList,
   FileCode2,
   Gauge,
   GitBranch,
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { AvanteLogo } from "@/components/avante-logo";
+import { rotaPermitida, type Perfil } from "@/lib/perfis";
 import { cn } from "@/lib/utils";
 import { UNREAD_CHANGED_EVENT } from "@/lib/whatsapp/inbox-events";
 
@@ -45,6 +47,8 @@ const NAV_GROUPS: {
     icon: typeof LayoutDashboard;
     /** Mostra o número de conversas com mensagem por ler. */
     unreadBadge?: boolean;
+    /** Mostra o número de solicitações de campanha pendentes. */
+    pendingBadge?: boolean;
   }[];
 }[] = [
   {
@@ -55,6 +59,12 @@ const NAV_GROUPS: {
     label: "Relacionamento",
     items: [
       { href: "/campaigns", label: "Campanhas", icon: Send },
+      {
+        href: "/solicitacoes",
+        label: "Solicitações",
+        icon: ClipboardList,
+        pendingBadge: true,
+      },
       {
         href: "/conversations",
         label: "Conversas",
@@ -89,6 +99,7 @@ const NAV_GROUPS: {
 ];
 
 function Brand() {
+  // O middleware leva cada perfil ao seu início a partir do /dashboard.
   return (
     <Link href="/dashboard" aria-label="Campanhas Avante — início">
       <AvanteLogo type="horizontal" variant="blue" height={24} />
@@ -99,8 +110,13 @@ function Brand() {
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [me, setMe] = useState<{ name: string; email: string } | null>(null);
+  const [me, setMe] = useState<{
+    name: string;
+    email: string;
+    role: Perfil;
+  } | null>(null);
   const [unread, setUnread] = useState(0);
+  const [pending, setPending] = useState(0);
   // No mobile o drawer fechado fica no DOM (deslocado): `inert` tira os ~15
   // links dele da ordem de tabulação. No desktop (md+) a sidebar é fixa.
   const [isMobile, setIsMobile] = useState(false);
@@ -138,9 +154,21 @@ export function Sidebar() {
     })();
   }, []);
 
+  const isAdmin = me?.role === "admin";
+
+  // Menu do perfil: só os itens que ele alcança (a trava de verdade é o
+  // middleware; aqui é só não mostrar porta fechada). Grupo vazio some.
+  const grupos = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: me
+      ? group.items.filter((item) => rotaPermitida(me.role, item.href, "GET"))
+      : [],
+  })).filter((group) => group.items.length > 0);
+
   // Resposta nova no WhatsApp precisa ser vista de qualquer tela, não só de
   // quem está com a caixa de conversas aberta.
   useEffect(() => {
+    if (!isAdmin) return;
     let active = true;
     const load = async () => {
       if (document.visibilityState !== "visible") return;
@@ -161,7 +189,32 @@ export function Sidebar() {
       document.removeEventListener("visibilitychange", load);
       window.removeEventListener(UNREAD_CHANGED_EVENT, load);
     };
-  }, []);
+  }, [isAdmin]);
+
+  // Pedido de campanha novo, para o marketing ver de qualquer tela.
+  useEffect(() => {
+    if (!isAdmin) return;
+    let active = true;
+    const load = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch("/api/solicitacoes?contagem=pendentes", {
+          cache: "no-store",
+        });
+        if (res.ok && active) setPending((await res.json()).pendentes ?? 0);
+      } catch {
+        // Sem rede: o número fica como estava até a próxima tentativa.
+      }
+    };
+    load();
+    const timer = setInterval(load, UNREAD_POLL_MS);
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", load);
+    };
+  }, [isAdmin, pathname]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -233,7 +286,7 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-          {NAV_GROUPS.map((group, indice) => (
+          {grupos.map((group, indice) => (
             <div key={group.label ?? "inicio"} className="grid gap-1">
               {group.label ? (
                 <p
@@ -276,6 +329,14 @@ export function Sidebar() {
                         aria-label={`${unread} conversa(s) com mensagem não lida`}
                       >
                         {unread > 99 ? "99+" : unread}
+                      </span>
+                    ) : null}
+                    {item.pendingBadge && isAdmin && pending > 0 ? (
+                      <span
+                        className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[11px] font-bold text-foreground"
+                        aria-label={`${pending} solicitação(ões) de campanha pendente(s)`}
+                      >
+                        {pending > 99 ? "99+" : pending}
                       </span>
                     ) : null}
                   </Link>

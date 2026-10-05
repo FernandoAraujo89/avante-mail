@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { count, eq } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 
 import { getDb, users } from "@/lib/db";
 import { hashPassword } from "@/lib/passwords";
+import { ehPerfil } from "@/lib/perfis";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { errorMessage } from "@/lib/utils";
 
@@ -30,6 +31,26 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       updates.passwordHash = hashPassword(body.password);
     }
+    if (body.role !== undefined) {
+      if (!ehPerfil(body.role)) {
+        return NextResponse.json(
+          { error: "Perfil inválido." },
+          { status: 400 }
+        );
+      }
+      // Quem rebaixa a si mesmo perde a tela de usuários e não tem volta.
+      const token = request.cookies.get(SESSION_COOKIE)?.value;
+      const session = token ? await verifySessionToken(token) : null;
+      if (session?.id === id && body.role !== "admin") {
+        return NextResponse.json(
+          {
+            error: "Você não pode tirar o seu próprio acesso de administrador.",
+          },
+          { status: 400 }
+        );
+      }
+      updates.role = body.role;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
@@ -42,7 +63,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       .update(users)
       .set(updates)
       .where(eq(users.id, id))
-      .returning({ id: users.id, name: users.name, email: users.email });
+      .returning({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        role: users.role,
+      });
 
     if (!updated) {
       return NextResponse.json(
@@ -73,11 +99,14 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
     const db = getDb();
 
-    // Sempre precisa sobrar pelo menos um usuário.
-    const [{ total }] = await db.select({ total: count() }).from(users);
-    if (total <= 1) {
+    // Sempre precisa sobrar pelo menos um administrador.
+    const [{ outrosAdmins }] = await db
+      .select({ outrosAdmins: count() })
+      .from(users)
+      .where(and(eq(users.role, "admin"), ne(users.id, id)));
+    if (outrosAdmins === 0) {
       return NextResponse.json(
-        { error: "É necessário manter ao menos um usuário no sistema." },
+        { error: "É necessário manter ao menos um administrador no sistema." },
         { status: 400 }
       );
     }

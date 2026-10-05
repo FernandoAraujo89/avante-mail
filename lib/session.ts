@@ -2,6 +2,8 @@
 // (middleware), então só pode usar `jose` — nada de node:crypto.
 import { jwtVerify, SignJWT } from "jose";
 
+import { ehPerfil, type Perfil } from "@/lib/perfis";
+
 export const SESSION_COOKIE = "avante_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 dias
 
@@ -9,6 +11,7 @@ export interface SessionUser {
   id: string;
   name: string;
   email: string;
+  role: Perfil;
 }
 
 function getSecret(): Uint8Array {
@@ -24,6 +27,7 @@ export async function signSessionToken(user: SessionUser): Promise<string> {
     purpose: "session",
     name: user.name,
     email: user.email,
+    role: user.role,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
@@ -53,6 +57,13 @@ export async function verifySessionToken(
       id: payload.sub,
       name: typeof payload.name === "string" ? payload.name : "",
       email: typeof payload.email === "string" ? payload.email : "",
+      // Token emitido antes de existir perfil: só admins existiam.
+      role:
+        payload.role === undefined
+          ? "admin"
+          : ehPerfil(payload.role)
+            ? payload.role
+            : "sucesso_cliente",
     };
   } catch {
     return null;

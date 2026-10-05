@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { paginaInicial, rotaPermitida } from "@/lib/perfis";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 
 // Rotas acessíveis sem login: página de login, endpoints usados pelos
@@ -38,6 +39,21 @@ export async function middleware(request: NextRequest) {
     }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // Perfil: o que não é dele não abre, nem pela API. Tela vira redirecionamento
+  // para o início do perfil; API responde 403.
+  if (!rotaPermitida(user.role, pathname, request.method)) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { error: "Seu perfil não tem acesso a esta área." },
+        { status: 403 }
+      );
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = paginaInicial(user.role);
     url.search = "";
     return NextResponse.redirect(url);
   }

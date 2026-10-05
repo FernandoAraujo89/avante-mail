@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 
 import { getDb, users } from "@/lib/db";
 import { hashPassword } from "@/lib/passwords";
+import { ehPerfil } from "@/lib/perfis";
 import { EMAIL_REGEX, errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ export async function GET() {
         id: users.id,
         name: users.name,
         email: users.email,
+        role: users.role,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -32,6 +34,10 @@ export async function POST(request: NextRequest) {
     const email =
       typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const role = body.role === undefined ? "admin" : body.role;
+    if (!ehPerfil(role)) {
+      return NextResponse.json({ error: "Perfil inválido." }, { status: 400 });
+    }
 
     if (!name) {
       return NextResponse.json(
@@ -66,11 +72,12 @@ export async function POST(request: NextRequest) {
 
     const [created] = await db
       .insert(users)
-      .values({ name, email, passwordHash: hashPassword(password) })
+      .values({ name, email, role, passwordHash: hashPassword(password) })
       .returning({
         id: users.id,
         name: users.name,
         email: users.email,
+        role: users.role,
         createdAt: users.createdAt,
       });
 

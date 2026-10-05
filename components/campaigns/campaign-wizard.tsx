@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ClipboardList,
   Eye,
   LayoutTemplate,
   Mail,
@@ -62,8 +63,9 @@ import { materializeDesignForEditing } from "@/lib/email-builder/materialize";
 import { descreverRelatorioDeImagens } from "@/lib/imagens-relatorio";
 import { createDefaultDesign } from "@/lib/email-builder/presets";
 import type { EditorType, EmailDesign } from "@/lib/email-builder/types";
-import { formatBrl, listsLabel } from "@/lib/format";
+import { formatBrl, formatDateTime, listsLabel } from "@/lib/format";
 import { countSms, estimateSmsCostUsd, sanitizeGsm7 } from "@/lib/sms/gsm7";
+import type { SolicitacaoDto } from "@/lib/solicitacoes/rotulos";
 import { cn } from "@/lib/utils";
 import {
   extractVariables,
@@ -165,6 +167,7 @@ export function CampaignWizard({
   editId,
   duplicateId,
   replyGroup,
+  fromRequest,
 }: {
   editId?: string;
   duplicateId?: string;
@@ -174,6 +177,11 @@ export function CampaignWizard({
    * o grupo de quem confirmou presença pede um lembrete, não o convite de novo.
    */
   replyGroup?: { campaignId: string; group: string };
+  /**
+   * Campanha a partir de uma solicitação do Sucesso do cliente: canal e listas
+   * vêm do pedido, e o briefing fica à vista enquanto a mensagem é montada.
+   */
+  fromRequest?: { id: string; channel: CampaignChannel };
 }) {
   const router = useRouter();
 
@@ -184,8 +192,14 @@ export function CampaignWizard({
   const [savedId, setSavedId] = useState<string | null>(editId ?? null);
   const [data, setData] = useState<WizardData>(EMPTY_DATA);
   const [initializing, setInitializing] = useState(
-    Boolean(editId || duplicateId || replyGroup)
+    Boolean(editId || duplicateId || replyGroup || fromRequest)
   );
+  const [requestOrigin, setRequestOrigin] = useState<{
+    title: string;
+    briefing: string;
+    requestedBy: string | null;
+    desiredAt: string | null;
+  } | null>(null);
   // De onde vieram os destinatários, quando a campanha nasce de um grupo de
   // resposta — o aviso no topo diz isso enquanto a pessoa monta a mensagem.
   const [groupOrigin, setGroupOrigin] = useState<{
@@ -399,6 +413,40 @@ export function CampaignWizard({
       }
     })();
     // O grupo vem da URL e a página remonta o assistente quando ela muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Carrega a solicitação que dá origem à campanha nova.
+  useEffect(() => {
+    if (!fromRequest) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/solicitacoes/${fromRequest.id}`);
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.error ?? "Erro ao carregar a solicitação.");
+        }
+        const pedido = json as SolicitacaoDto;
+        setData({
+          ...EMPTY_DATA,
+          name: pedido.title,
+          channel: fromRequest.channel,
+          // Lista apagada depois do pedido fica de fora.
+          lists: pedido.lists.filter((l) => l.name !== null).map((l) => l.id),
+        });
+        setRequestOrigin({
+          title: pedido.title,
+          briefing: pedido.briefing,
+          requestedBy: pedido.requestedBy?.name ?? null,
+          desiredAt: pedido.desiredAt,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setInitializing(false);
+      }
+    })();
+    // A solicitação vem da URL e a página remonta o assistente quando ela muda.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -723,6 +771,15 @@ export function CampaignWizard({
     if (!res.ok) throw new Error(json.error ?? "Erro ao salvar a campanha.");
     if (!savedId) {
       setSavedId(json.id);
+      // O pedido passa a apontar para a campanha e sai de "pendente". Melhor
+      // esforço: se falhar, o marketing ajusta a situação na tela de pedidos.
+      if (fromRequest) {
+        fetch(`/api/solicitacoes/${fromRequest.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId: json.id, status: "em_andamento" }),
+        }).catch(() => {});
+      }
       // A URL passa a apontar para o rascunho criado: um F5 (ou voltar depois)
       // continua editando a MESMA campanha em vez de gerar outra cópia.
       window.history.replaceState(null, "", `/campaigns/new?id=${json.id}`);
@@ -987,6 +1044,31 @@ export function CampaignWizard({
             . Eles já estão escolhidos no passo Destinatários — falta escolher a
             mensagem.
           </p>
+        </div>
+      ) : null}
+
+      {requestOrigin ? (
+        <div className="mb-6 flex max-w-3xl items-start gap-3 rounded-lg border border-info/30 bg-info-light/40 px-4 py-3 text-sm">
+          <ClipboardList className="mt-0.5 size-4 shrink-0 text-info-dark" aria-hidden="true" />
+          <div className="min-w-0">
+            <p>
+              Solicitação{" "}
+              <Link
+                href="/solicitacoes"
+                className="font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                {requestOrigin.title}
+              </Link>
+              {requestOrigin.requestedBy ? `, de ${requestOrigin.requestedBy}` : ""}
+              {requestOrigin.desiredAt
+                ? ` — para ${formatDateTime(requestOrigin.desiredAt)}`
+                : ""}
+              . Canal e listas já vêm do pedido.
+            </p>
+            <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+              {requestOrigin.briefing}
+            </p>
+          </div>
         </div>
       ) : null}
 

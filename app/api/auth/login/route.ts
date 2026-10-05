@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { getDb, users } from "@/lib/db";
 import { verifyPassword } from "@/lib/passwords";
+import { paginaInicial } from "@/lib/perfis";
 import { clientIp, rateLimitAllow } from "@/lib/rate-limit";
 import {
   SESSION_COOKIE,
@@ -55,11 +56,18 @@ export async function POST(request: NextRequest) {
       id: user.id,
       name: user.name,
       email: user.email,
+      role: user.role,
     });
 
     const response = NextResponse.json({
       ok: true,
-      user: { id: user.id, name: user.name, email: user.email },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        inicio: paginaInicial(user.role),
+      },
     });
     response.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
