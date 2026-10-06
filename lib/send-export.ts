@@ -31,7 +31,7 @@ export interface ExportableSend {
   errorCode: string | null;
   errorMessage: string | null;
   contactName: string;
-  contactEmail: string;
+  contactEmail: string | null;
   contactPhone: string | null;
   contactCompany: string | null;
   // Só no WhatsApp: o botão tocado e o que o contato escreveu. É o que a
@@ -208,7 +208,7 @@ export function buildSendExport(
       send.contactName,
       send.contactCompany ?? "",
       channel === "email"
-        ? send.contactEmail
+        ? (send.contactEmail ?? "")
         : send.contactPhone
           ? formatPhone(send.contactPhone)
           : "",

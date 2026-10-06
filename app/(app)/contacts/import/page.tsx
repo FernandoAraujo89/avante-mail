@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Papa from "papaparse";
-import { CheckCircle2, FileUp, Upload } from "lucide-react";
+import { CheckCircle2, Download, FileUp, Upload } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { csvFilename, toCsv } from "@/lib/csv";
 import {
   Select,
   SelectContent,
@@ -35,9 +36,9 @@ const FIELDS = [
   { key: "name", label: "Nome", required: true, synonyms: ["name", "nome"] },
   {
     key: "email",
-    label: "E-mail",
-    required: true,
-    synonyms: ["email", "e-mail", "e_mail"],
+    label: "E-mail(s)",
+    required: false,
+    synonyms: ["email", "e-mail", "e_mail", "emails"],
   },
   {
     key: "company",
@@ -53,9 +54,18 @@ const FIELDS = [
   },
   {
     key: "phone",
-    label: "Telefone (WhatsApp)",
+    label: "Telefone(s)",
     required: false,
-    synonyms: ["phone", "telefone", "celular", "whatsapp", "fone"],
+    synonyms: [
+      "phone",
+      "telefone",
+      "celular",
+      "whatsapp",
+      "fone",
+      "telefones",
+      "numero",
+      "número",
+    ],
   },
   {
     key: "whatsappOptIn",
@@ -76,14 +86,35 @@ type FieldKey = (typeof FIELDS)[number]["key"];
 const IGNORE = "__ignore__";
 const NO_LIST = "__none__";
 
+type Pendencia = {
+  linha: number;
+  nome: string;
+  valores: string;
+  motivo: string;
+};
+
 type ImportResult = {
   total: number;
-  imported: number;
-  duplicated: number;
-  invalid: number;
-  phoneInvalid: number;
+  criados: number;
+  atualizados: number;
+  semMudanca: number;
+  emailsAdicionados: number;
+  telefonesAdicionados: number;
+  telefonesInvalidos: number;
   addedToList: number;
+  pendencias: Pendencia[];
+  pendenciasOmitidas: number;
 };
+
+function baixarArquivo(nome: string, conteudo: string) {
+  const blob = new Blob([conteudo], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nome;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 type ListRef = { id: string; name: string };
 
@@ -162,8 +193,12 @@ export default function ImportContactsPage() {
   }
 
   async function handleImport() {
-    if (mapping.name === IGNORE || mapping.email === IGNORE) {
-      setError("Mapeie ao menos as colunas de Nome e E-mail.");
+    if (mapping.name === IGNORE) {
+      setError("Mapeie a coluna de Nome.");
+      return;
+    }
+    if (mapping.email === IGNORE && mapping.phone === IGNORE) {
+      setError("Mapeie a coluna de E-mail, a de Telefone ou as duas.");
       return;
     }
     setImporting(true);
@@ -208,8 +243,8 @@ export default function ImportContactsPage() {
   return (
     <>
       <PageHeader
-        title="Importar contatos"
-        description="Envie um arquivo CSV e mapeie as colunas para os campos da base."
+        title="Importar ou atualizar contatos"
+        description="Envie um CSV com nome e telefone (e-mail opcional). Quem já existe ganha os endereços novos; quem não existe é criado."
       />
 
       {error ? (
@@ -219,7 +254,7 @@ export default function ImportContactsPage() {
       ) : null}
 
       {result ? (
-        <Card className="max-w-xl">
+        <Card className="max-w-3xl">
           <CardHeader>
             <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-success-light/40">
               <CheckCircle2 className="size-5 text-success-dark" />
@@ -227,29 +262,48 @@ export default function ImportContactsPage() {
             <CardTitle>Importação concluída</CardTitle>
             <CardDescription>
               Resultado do arquivo{" "}
-              <span className="text-foreground">{fileName}</span>:
+              <span className="text-foreground">{fileName}</span> (
+              {result.total} linha{result.total === 1 ? "" : "s"}):
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
             <ul className="space-y-1 text-sm">
               <li>
                 <span className="font-semibold text-success-dark">
-                  {result.imported}
+                  {result.criados}
                 </span>{" "}
-                contatos importados
+                contato{result.criados === 1 ? "" : "s"} novo
+                {result.criados === 1 ? "" : "s"}
               </li>
               <li>
-                <span className="font-semibold">{result.duplicated}</span>{" "}
-                ignorados por e-mail duplicado
+                <span className="font-semibold text-primary">
+                  {result.atualizados}
+                </span>{" "}
+                contato{result.atualizados === 1 ? "" : "s"} que já existia
+                {result.atualizados === 1 ? "" : "m"} e ganh
+                {result.atualizados === 1 ? "ou" : "aram"} dados novos
+                {result.emailsAdicionados + result.telefonesAdicionados > 0
+                  ? ` (${result.telefonesAdicionados} telefone${
+                      result.telefonesAdicionados === 1 ? "" : "s"
+                    } e ${result.emailsAdicionados} e-mail${
+                      result.emailsAdicionados === 1 ? "" : "s"
+                    } acrescentados no total)`
+                  : ""}
               </li>
-              <li>
-                <span className="font-semibold">{result.invalid}</span>{" "}
-                linhas inválidas (sem nome ou e-mail válido)
-              </li>
-              {result.phoneInvalid > 0 ? (
+              {result.semMudanca > 0 ? (
                 <li>
-                  <span className="font-semibold">{result.phoneInvalid}</span>{" "}
-                  telefones inválidos (contato importado sem telefone)
+                  <span className="font-semibold">{result.semMudanca}</span> já
+                  estava{result.semMudanca === 1 ? "" : "m"} iguais (nada a
+                  mudar)
+                </li>
+              ) : null}
+              {result.telefonesInvalidos > 0 ? (
+                <li>
+                  <span className="font-semibold">
+                    {result.telefonesInvalidos}
+                  </span>{" "}
+                  célula{result.telefonesInvalidos === 1 ? "" : "s"} de telefone
+                  sem número válido (a linha entrou pelo resto)
                 </li>
               ) : null}
               {result.addedToList > 0 ? (
@@ -260,10 +314,81 @@ export default function ImportContactsPage() {
                   adicionados à lista escolhida
                 </li>
               ) : null}
-              <li className="text-muted-foreground">
-                {result.total} linhas no arquivo
-              </li>
             </ul>
+
+            {result.pendencias.length > 0 ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">
+                    {result.pendencias.length + result.pendenciasOmitidas} linha
+                    {result.pendencias.length + result.pendenciasOmitidas === 1
+                      ? ""
+                      : "s"}{" "}
+                    ficaram para você decidir
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      baixarArquivo(
+                        csvFilename("pendencias", fileName),
+                        toCsv(
+                          ["linha", "nome", "e-mails e telefones", "motivo"],
+                          result.pendencias.map((p) => [
+                            String(p.linha),
+                            p.nome,
+                            p.valores,
+                            p.motivo,
+                          ])
+                        )
+                      )
+                    }
+                  >
+                    <Download />
+                    Baixar CSV
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Nome repetido na base, e-mail de um contato com telefone de
+                  outro, ou linha sem dado válido. Nada dessas linhas foi
+                  gravado: resolva na tela do contato e importe de novo só elas,
+                  se quiser.
+                </p>
+                <div className="max-h-80 overflow-auto rounded-lg border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">Linha</TableHead>
+                        <TableHead>Nome</TableHead>
+                        <TableHead>E-mails e telefones</TableHead>
+                        <TableHead>Motivo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {result.pendencias.map((p) => (
+                        <TableRow key={p.linha}>
+                          <TableCell className="text-muted-foreground">
+                            {p.linha}
+                          </TableCell>
+                          <TableCell>{p.nome || "—"}</TableCell>
+                          <TableCell className="break-all text-muted-foreground">
+                            {p.valores || "—"}
+                          </TableCell>
+                          <TableCell>{p.motivo}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {result.pendenciasOmitidas > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Mostrando as {result.pendencias.length} primeiras; mais{" "}
+                    {result.pendenciasOmitidas} no arquivo original.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="flex gap-2">
               <Button asChild>
                 <Link href="/contacts">Ver contatos</Link>
@@ -283,17 +408,17 @@ export default function ImportContactsPage() {
             <div>
               <p className="font-medium">Selecione o arquivo CSV</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Colunas esperadas: name, email, company, tags, telefone,
-                aceita_whatsapp
+                Colunas: nome, telefone, email, empresa, tags, aceita_whatsapp —
+                só o nome é obrigatório, com telefone ou e-mail.
                 <br />
-                (tags separadas por vírgula. A coluna aceita_whatsapp é
-                opcional: sem ela, todo contato com telefone entra aceitando
-                WhatsApp; com ela, só quem estiver como sim/1/true aceita —
-                use-a para registrar quem não autorizou)
-                <br />
-                O telefone pode vir em qualquer formato com DDD (ex.: (31)
-                99576-8114 ou 31995768114). Se a célula tiver vários números
-                separados por vírgula, o primeiro válido é usado.
+                Quem já está na base (mesmo e-mail, mesmo telefone ou mesmo
+                nome, se for um só) ganha os telefones e e-mails que faltavam;
+                quem não está vira contato novo. Uma célula pode trazer vários
+                números ou e-mails separados por vírgula — todos entram.
+                <br />O telefone pode vir em qualquer formato com DDD (ex.: (31)
+                99576-8114 ou 31995768114). A coluna aceita_whatsapp é opcional:
+                sem ela, todo telefone entra aceitando WhatsApp e SMS; com ela,
+                só quem estiver como sim/1/true aceita.
               </p>
             </div>
             <input
@@ -390,7 +515,10 @@ export default function ImportContactsPage() {
                   {previewRows.map((row, index) => (
                     <TableRow key={index}>
                       {headers.map((header) => (
-                        <TableCell key={header} className="text-muted-foreground">
+                        <TableCell
+                          key={header}
+                          className="text-muted-foreground"
+                        >
                           {row[header] ?? ""}
                         </TableCell>
                       ))}

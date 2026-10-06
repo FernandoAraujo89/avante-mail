@@ -10,6 +10,7 @@ import {
 import { listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
+import { contatosPorEnderecos } from "@/lib/contatos/enderecos";
 import { normalizePhone } from "@/lib/phone";
 import { phoneCandidatesFromWaId } from "@/lib/whatsapp/inbound";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -417,28 +418,16 @@ async function espelharLote(
     for (const forma of formas) telefones.add(forma);
   }
 
-  // Duas consultas por lote (e-mail e telefone) em vez de duas por deal.
-  // Traz também parceiro (`stage` nulo): o negócio casa com ele e fica
-  // guardado, e a decisão é que o deixa de fora — parceiro não volta a lead.
+  // Pelos endereços do contato (todos os e-mails e telefones dele, não só o
+  // principal), em lote. Traz também parceiro (`stage` nulo): o negócio casa
+  // com ele e fica guardado, e a decisão é que o deixa de fora — parceiro não
+  // volta a lead.
   const db = getDb();
-  const colunas = {
-    id: contacts.id,
-    email: contacts.email,
-    phone: contacts.phone,
-  };
-  const [linhasPorEmail, linhasPorTelefone, anteriores] = await Promise.all([
-    emails.size > 0
-      ? db
-          .select(colunas)
-          .from(contacts)
-          .where(inArray(contacts.email, [...emails]))
-      : Promise.resolve([]),
-    telefones.size > 0
-      ? db
-          .select(colunas)
-          .from(contacts)
-          .where(inArray(contacts.phone, [...telefones]))
-      : Promise.resolve([]),
+  const [{ porEmail, porTelefone }, anteriores] = await Promise.all([
+    contatosPorEnderecos(db, {
+      emails: [...emails],
+      phones: [...telefones],
+    }),
     db
       .select({ id: pipedriveDeals.id, contactId: pipedriveDeals.contactId })
       .from(pipedriveDeals)
@@ -449,15 +438,6 @@ async function espelharLote(
         )
       ),
   ]);
-
-  const porEmail = new Map(
-    linhasPorEmail.map((c) => [c.email.toLowerCase(), c.id])
-  );
-  const porTelefone = new Map(
-    linhasPorTelefone
-      .filter((c) => c.phone)
-      .map((c) => [c.phone as string, c.id])
-  );
   const contatoAnterior = new Map(anteriores.map((a) => [a.id, a.contactId]));
 
   const linhas = lote.map(({ deal, funilId }) => {

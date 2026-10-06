@@ -12,17 +12,22 @@ export interface UnsubscribePayload {
   contactId: string;
   // Envio que originou o clique — permite atribuir o descadastro à campanha.
   sendId?: string;
+  // O e-mail que recebeu a mensagem: é ELE que sai, não o contato inteiro.
+  // Ausente nos links de antes dos endereços múltiplos.
+  email?: string;
 }
 
 /**
  * Gera o token de descadastro de um contato (válido por 1 ano).
- * Opcionalmente carrega o sendId para atribuir o cancelamento à campanha.
+ * Opcionalmente carrega o sendId para atribuir o cancelamento à campanha e
+ * o e-mail para a saída valer só para aquele endereço.
  */
 export async function signUnsubscribeToken(
   contactId: string,
-  sendId?: string
+  sendId?: string,
+  email?: string
 ): Promise<string> {
-  const jwt = new SignJWT({ purpose: "unsubscribe", sid: sendId })
+  const jwt = new SignJWT({ purpose: "unsubscribe", sid: sendId, eml: email })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(contactId)
     .setIssuedAt()
@@ -40,6 +45,7 @@ export async function verifyUnsubscribeToken(
     return {
       contactId: payload.sub,
       sendId: typeof payload.sid === "string" ? payload.sid : undefined,
+      email: typeof payload.eml === "string" ? payload.eml : undefined,
     };
   } catch {
     return null;

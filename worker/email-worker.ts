@@ -165,6 +165,18 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
     return;
   }
 
+  // Para onde vai: o endereço gravado no envio; nos envios de antes dos
+  // endereços múltiplos, o e-mail principal do contato.
+  const destino = send.address ?? contact.email;
+  if (!destino) {
+    console.log(`[WORKER] ${contactId} sem e-mail, envio cancelado.`);
+    await db
+      .update(campaignSends)
+      .set({ status: "failed", errorMessage: "Contato sem e-mail." })
+      .where(eq(campaignSends.id, sendId));
+    return;
+  }
+
   // De onde vem o conteúdo: da campanha ou do passo da automação. O resto do
   // envio (compilação, rastreio, descadastro, gravação) é idêntico nos dois.
   const conteudo = send.campaignId
@@ -183,7 +195,7 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
     }
 
     const { messageId } = await sendEmail({
-      to: contact.email,
+      to: destino,
       subject: conteudo.subject,
       html,
       headers: {

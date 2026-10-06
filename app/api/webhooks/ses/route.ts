@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import MessageValidator from "sns-validator";
 
-import { campaignSends, contacts, getDb, type BounceType } from "@/lib/db";
+import { optOutEmail, optOutEmailsDoContato } from "@/lib/contatos/enderecos";
+import { campaignSends, getDb, type BounceType } from "@/lib/db";
 import { errorMessage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -131,12 +132,10 @@ export async function POST(request: NextRequest) {
         // Bounce definitivo: suprime o contato para preservar a reputação de
         // envio. Bounce transitório (soft) não suprime — pode ser passageiro.
         if (bounceType === "hard") {
-          // Endereço morto: suprime. Automação em curso também para — seguir
-          // mandando para um endereço que devolve queima a reputação.
-          await db
-            .update(contacts)
-            .set({ subscribed: false, emailOptOutAt: new Date() })
-            .where(eq(contacts.id, send.contactId));
+          // Endereço morto: suprime ESTE e-mail. Se era o último que aceitava,
+          // a automação em curso também para — seguir mandando para um
+          // endereço que devolve queima a reputação.
+          await suprimirEmailDoEnvio(send);
         }
         break;
       }
@@ -148,10 +147,7 @@ export async function POST(request: NextRequest) {
           .where(eq(campaignSends.id, send.id));
 
         // Reclamação de spam: suprime imediatamente, sem exceção.
-        await db
-          .update(contacts)
-          .set({ subscribed: false, emailOptOutAt: new Date() })
-          .where(eq(contacts.id, send.contactId));
+        await suprimirEmailDoEnvio(send);
         break;
 
       // Delivery / Send / Open / Click: a entrega é inferida do envio e o
@@ -163,5 +159,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
+
+/**
+ * Tira do canal o e-mail para onde o envio foi. Envio de antes dos endereços
+ * múltiplos não diz qual foi: tira todos os do contato.
+ */
+async function suprimirEmailDoEnvio(send: {
+  contactId: string;
+  address: string | null;
+}): Promise<void> {
+  const db = getDb();
+  if (send.address) {
+    await optOutEmail(db, send.address);
+  } else {
+    await optOutEmailsDoContato(db, send.contactId);
   }
 }

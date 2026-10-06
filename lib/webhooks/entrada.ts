@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "crypto";
-import { and, eq, gt, or } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 
 import {
   contactLists,
@@ -24,6 +24,10 @@ import {
   type ResultadoDaCostura,
 } from "@/lib/track/costura";
 import { visitanteSeguro } from "@/lib/track/site";
+import {
+  adicionarEnderecos,
+  contatosPorEnderecos,
+} from "@/lib/contatos/enderecos";
 import { firstValidPhone } from "@/lib/phone";
 import { EMAIL_REGEX, normalizeTags } from "@/lib/utils";
 
@@ -247,16 +251,19 @@ export async function processarEntrada(args: {
   }
 
   // Identidade: e-mail OU telefone já existentes viram atualização — é a
-  // defesa que impede lead repetido de virar contato duplicado.
-  const condicoes = [
-    email ? eq(contacts.email, email) : undefined,
-    telefone ? eq(contacts.phone, telefone) : undefined,
-  ].filter(Boolean);
-  const [existente] = await db
-    .select()
-    .from(contacts)
-    .where(condicoes.length > 1 ? or(...condicoes) : condicoes[0])
-    .limit(1);
+  // defesa que impede lead repetido de virar contato duplicado. Procura em
+  // TODOS os endereços do contato, não só no principal.
+  const donos = await contatosPorEnderecos(db, {
+    emails: email ? [email] : [],
+    phones: telefone ? [telefone] : [],
+  });
+  const idExistente =
+    (email ? donos.porEmail.get(email) : undefined) ??
+    (telefone ? donos.porTelefone.get(telefone) : undefined) ??
+    null;
+  const [existente] = idExistente
+    ? await db.select().from(contacts).where(eq(contacts.id, idExistente))
+    : [];
 
   const tags = [...new Set([...normalizeTags(padroes.tags), ...campos.tags])];
   const listId = typeof padroes.listId === "string" ? padroes.listId : null;
@@ -347,10 +354,17 @@ export async function processarEntrada(args: {
         // já foi conferido aqui dentro.
         name: existente.name || campos.name || existente.name,
         company: existente.company ?? campos.company,
-        phone: existente.phone ?? telefone,
         tags: tagsDepois,
       })
       .where(eq(contacts.id, existente.id));
+
+    // E-mail ou telefone que o contato ainda não tinha entra como mais um
+    // endereço dele (o que ele já tem fica como está). Pertencendo a OUTRO
+    // contato, não é movido — e o mapa acima já teria casado com ele.
+    await adicionarEnderecos(db, existente.id, {
+      emails: email ? [{ email, subscribed: consentimento }] : [],
+      phones: telefone ? [{ phone: telefone, whatsapp: consentimento }] : [],
+    });
 
     // Lead que já existia sem origem ganha a do primeiro toque; o evento de
     // criação, que é passado, não é reescrito.
@@ -376,15 +390,10 @@ export async function processarEntrada(args: {
     acao = "criado";
     const novo: NewContact = {
       name: campos.name || email || telefone || "Sem nome",
-      // O e-mail é obrigatório na tabela; sem ele, gera um marcador estável
-      // a partir do telefone, para o contato existir e poder ser completado.
-      email: email ?? `${telefone?.replace(/\D/g, "")}@sem-email.local`,
-      phone: telefone,
+      // E-mail, telefone e consentimento entram pelo módulo de endereços,
+      // logo depois do insert — é ele que preenche o resumo do contato.
       company: campos.company,
       tags,
-      subscribed: consentimento,
-      whatsappSubscribed: consentimento && telefone !== null,
-      whatsappOptInAt: consentimento && telefone ? new Date() : null,
       // Sem etapa no payload, o lead entra na etapa de entrada: ele existe e
       // ainda não andou no funil do Pipedrive.
       stage: etapa?.slug ?? ETAPA_DE_ENTRADA,
@@ -406,6 +415,10 @@ export async function processarEntrada(args: {
     const [criado] = await db.insert(contacts).values(novo).returning();
     contactId = criado.id;
     etapaAplicada = novo.stage ?? null;
+    await adicionarEnderecos(db, criado.id, {
+      emails: email ? [{ email, subscribed: consentimento }] : [],
+      phones: telefone ? [{ phone: telefone, whatsapp: consentimento }] : [],
+    });
 
     // A costura vem ANTES do evento de criação: se o formulário não disse de
     // onde a pessoa veio, a primeira visita costurada pode dizer — e o

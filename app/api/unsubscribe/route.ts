@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, isNull } from "drizzle-orm";
 
+import { optOutEmail, optOutEmailsDoContato } from "@/lib/contatos/enderecos";
 import { campaignSends, contacts, getDb } from "@/lib/db";
 import { emitContactEvent } from "@/lib/events";
 import { verifyUnsubscribeToken } from "@/lib/jwt";
@@ -42,32 +43,39 @@ export async function POST(request: NextRequest) {
     }
 
     const db = getDb();
-    // O estado ANTES da baixa: o RETURNING do update traria o valor novo, e
-    // aí não daria para saber se o contato já estava fora — o link costuma ser
-    // aberto mais de uma vez, e isso não pode virar evento repetido.
-    const [antes] = await db
-      .select({ subscribed: contacts.subscribed })
+    const [contato] = await db
+      .select({ id: contacts.id })
       .from(contacts)
       .where(eq(contacts.id, payload.contactId));
-
-    const [updated] = await db
-      .update(contacts)
-      // Supressão de verdade: a pessoa pediu para sair. É o que faz a
-      // automação em curso parar (ver lib/automations/engine.ts).
-      .set({ subscribed: false, emailOptOutAt: new Date() })
-      .where(eq(contacts.id, payload.contactId))
-      .returning({ email: contacts.email });
-
-    if (!updated) {
+    if (!contato) {
       return NextResponse.json(
         { error: "Contato não encontrado." },
         { status: 404 }
       );
     }
 
-    if (antes?.subscribed) {
+    // Sai o E-MAIL que recebeu a mensagem — do token ou do envio. Só os links
+    // de antes dos endereços múltiplos, que não dizem qual foi, tiram todos.
+    // Supressão de verdade: a pessoa pediu para sair. Quando não sobra e-mail
+    // aceitando, a automação em curso para (ver lib/automations/engine.ts).
+    let email = payload.email ?? null;
+    if (!email && payload.sendId) {
+      const [envio] = await db
+        .select({ address: campaignSends.address })
+        .from(campaignSends)
+        .where(eq(campaignSends.id, payload.sendId));
+      email = envio?.address ?? null;
+    }
+    const resultado = email
+      ? await optOutEmail(db, email)
+      : await optOutEmailsDoContato(db, payload.contactId);
+
+    // O link costuma ser aberto mais de uma vez: só a primeira saída do canal
+    // vira evento.
+    if (resultado?.contatoSaiu) {
       await emitContactEvent("email_unsubscribed", payload.contactId, {
         sendId: payload.sendId ?? null,
+        email,
       });
     }
 
@@ -85,7 +93,7 @@ export async function POST(request: NextRequest) {
         );
     }
 
-    return NextResponse.json({ ok: true, email: updated.email });
+    return NextResponse.json({ ok: true, email });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

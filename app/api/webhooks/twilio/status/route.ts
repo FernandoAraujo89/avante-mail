@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { campaignSends, contacts, getDb } from "@/lib/db";
+import {
+  optOutTelefone,
+  optOutTelefonesDoContato,
+} from "@/lib/contatos/enderecos";
+import { campaignSends, getDb } from "@/lib/db";
 import { emitContactEvent } from "@/lib/events";
 import { errorMessage } from "@/lib/utils";
 import {
@@ -89,6 +93,7 @@ async function processStatus(params: Record<string, string>): Promise<void> {
       id: campaignSends.id,
       campaignId: campaignSends.campaignId,
       contactId: campaignSends.contactId,
+      address: campaignSends.address,
       status: campaignSends.status,
       sentAt: campaignSends.sentAt,
       deliveredAt: campaignSends.deliveredAt,
@@ -132,23 +137,20 @@ async function processStatus(params: Record<string, string>): Promise<void> {
     })
   );
 
-  // 21614 (inválido/fixo) e 21610 (opt-out no provedor): o CONTATO sai do
-  // canal — reenviar seria pagar para errar a mesma coisa.
+  // 21614 (inválido/fixo) e 21610 (opt-out no provedor): o NÚMERO para onde
+  // o envio foi sai do canal — reenviar seria pagar para errar a mesma coisa.
+  // Envio de antes dos endereços múltiplos não diz qual número: saem todos.
   if (shouldBlockContact(errorCode)) {
-    const [contato] = await db
-      .select({ id: contacts.id, smsSubscribed: contacts.smsSubscribed })
-      .from(contacts)
-      .where(eq(contacts.id, send.contactId));
+    const saida = send.address
+      ? await optOutTelefone(db, send.address, "sms")
+      : await optOutTelefonesDoContato(db, send.contactId, "sms");
 
-    if (contato?.smsSubscribed) {
-      await db
-        .update(contacts)
-        .set({ smsSubscribed: false, smsOptOutAt: new Date() })
-        .where(eq(contacts.id, contato.id));
-      await emitContactEvent("sms_unsubscribed", contato.id, {
+    if (saida?.contatoSaiu) {
+      await emitContactEvent("sms_unsubscribed", send.contactId, {
         campaignId: send.campaignId ?? null,
         sendId: send.id,
         errorCode,
+        phone: send.address,
       });
     }
   }

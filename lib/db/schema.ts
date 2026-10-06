@@ -186,10 +186,24 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
     .defaultNow(),
 });
 
+// Um contato pode ter VÁRIOS e-mails e VÁRIOS telefones (contact_emails e
+// contact_phones, logo abaixo), e a campanha vai para todos. As colunas de
+// endereço e de consentimento DESTA tabela são um RESUMO dos endereços,
+// mantido por lib/contatos/enderecos.ts:
+//   email / phone                         = o endereço principal;
+//   subscribed / whatsappSubscribed / sms = ALGUM endereço aceita o canal;
+//   *OptInAt                              = o primeiro aceite;
+//   *OptOutAt                             = quando o ÚLTIMO endereço saiu
+//                                           (nulo enquanto algum aceita).
+// É o que deixa as telas, os filtros e as condições de automação lerem o
+// contato como sempre leram. Quem ESCREVE endereço ou consentimento passa
+// pelo módulo; escrever direto aqui deixa o resumo mentindo.
 export const contacts = pgTable("contacts", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  email: text("email").notNull().unique(),
+  // Nulo = contato só com telefone. Quando existe, é único: um e-mail
+  // pertence a um contato só.
+  email: text("email").unique(),
   company: text("company"),
   tags: text("tags").array(),
   subscribed: boolean("subscribed").notNull().default(true),
@@ -263,6 +277,66 @@ export const contacts = pgTable("contacts", {
     .notNull()
     .defaultNow(),
 });
+
+// ─── Endereços do contato ──────────────────────────────────────────────────
+// O consentimento mora AQUI, por endereço: o SAIR chega de UM número e o
+// descadastro vem do link de UM e-mail. Tirar a pessoa inteira silenciaria um
+// número que ela ainda queria (decisão de 06/10/2026). O resumo em `contacts`
+// é derivado destas linhas.
+
+export const contactPhones = pgTable(
+  "contact_phones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    // E.164 (+5548…). Um número pertence a UM contato.
+    phone: text("phone").notNull().unique(),
+    whatsappSubscribed: boolean("whatsapp_subscribed").notNull().default(false),
+    whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),
+    whatsappOptOutAt: timestamp("whatsapp_opt_out_at", { withTimezone: true }),
+    smsSubscribed: boolean("sms_subscribed").notNull().default(false),
+    smsOptInAt: timestamp("sms_opt_in_at", { withTimezone: true }),
+    smsOptOutAt: timestamp("sms_opt_out_at", { withTimezone: true }),
+    // O que aparece como "o telefone" do contato. Um por contato.
+    principal: boolean("principal").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("contact_phones_contato_idx").on(t.contactId),
+    uniqueIndex("contact_phones_principal_idx")
+      .on(t.contactId)
+      .where(sql`${t.principal}`),
+  ]
+);
+
+export const contactEmails = pgTable(
+  "contact_emails",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    // Minúsculo. Um e-mail pertence a UM contato.
+    email: text("email").notNull().unique(),
+    subscribed: boolean("subscribed").notNull().default(true),
+    // Preenchido = este endereço pediu para sair (ou devolveu/reclamou).
+    optOutAt: timestamp("opt_out_at", { withTimezone: true }),
+    principal: boolean("principal").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("contact_emails_contato_idx").on(t.contactId),
+    uniqueIndex("contact_emails_principal_idx")
+      .on(t.contactId)
+      .where(sql`${t.principal}`),
+  ]
+);
 
 // Listas de contato criadas pelo usuário (substituem os antigos segmentos).
 export const lists = pgTable("lists", {
@@ -916,6 +990,9 @@ export const campaignSends = pgTable("campaign_sends", {
   // que talvez não exista mais — e é a base de cobrança: e-mail conta sentAt,
   // WhatsApp conta deliveredAt.
   channel: text("channel").$type<CampaignChannel>().notNull().default("email"),
+  // O e-mail ou telefone exato para onde ESTE envio foi. Nulo nos envios de
+  // antes dos endereços múltiplos (valia o endereço do contato).
+  address: text("address"),
   contactId: uuid("contact_id")
     .notNull()
     .references(() => contacts.id, { onDelete: "cascade" }),
@@ -1208,6 +1285,10 @@ export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
 export type List = typeof lists.$inferSelect;
 export type NewList = typeof lists.$inferInsert;
+export type ContactPhone = typeof contactPhones.$inferSelect;
+export type NewContactPhone = typeof contactPhones.$inferInsert;
+export type ContactEmail = typeof contactEmails.$inferSelect;
+export type NewContactEmail = typeof contactEmails.$inferInsert;
 export type ContactList = typeof contactLists.$inferSelect;
 export type NewContactList = typeof contactLists.$inferInsert;
 export type Template = typeof templates.$inferSelect;

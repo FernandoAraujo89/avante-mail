@@ -62,7 +62,7 @@ export interface SendTableRow {
   errorCode: string | null;
   errorMessage: string | null;
   contactName: string;
-  contactEmail: string;
+  contactEmail: string | null;
   contactPhone: string | null;
   contactCompany: string | null;
   // Só no WhatsApp (ver lib/send-export.ts).
@@ -247,7 +247,7 @@ export function SendsTable({
       if (!termo) return true;
       return [
         s.contactName,
-        s.contactEmail,
+        s.contactEmail ?? "",
         s.contactPhone ?? "",
         s.contactCompany ?? "",
         s.replyButton ?? "",

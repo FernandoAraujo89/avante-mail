@@ -76,6 +76,22 @@ export function firstValidPhone(value: unknown): string | null {
   return null;
 }
 
+/**
+ * TODOS os telefones válidos de um texto, em E.164, sem repetição e na ordem
+ * em que aparecem. Mesma divisão de firstValidPhone — é a versão para quem
+ * guarda vários números por contato (contact_phones), em que a célula
+ * "91 98121-9276, (91) 98704-2212" são DOIS telefones, não um e um descarte.
+ */
+export function allValidPhones(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  const found: string[] = [];
+  for (const candidate of value.split(/[,;/|\r\n]+/)) {
+    const normalized = normalizePhone(candidate);
+    if (normalized && !found.includes(normalized)) found.push(normalized);
+  }
+  return found;
+}
+
 /** Formato aceito no campo `to` da Cloud API (E.164 sem o "+"). */
 export function phoneToWaId(e164: string): string {
   return e164.replace(/^\+/, "");

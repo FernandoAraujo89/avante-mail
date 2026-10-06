@@ -31,6 +31,7 @@ import type {
   PessoaDoPipedrive,
   PipedriveApi,
 } from "../lib/pipedrive/client";
+import { importarEnderecosDasColunasAntigas } from "../lib/contatos/enderecos";
 import { sincronizarPipedrive } from "../lib/pipedrive/sync";
 
 config({ path: ".env.local" });
@@ -239,6 +240,8 @@ async function main() {
         { name: "Teste J", email: email("j"), stage: "qualificado" },
       ])
       .returning({ id: contacts.id, email: contacts.email });
+    // A sincronização casa pelos endereços (contact_emails/contact_phones).
+    await importarEnderecosDasColunasAntigas(db);
     const id = (quem: string) => criados.find((c) => c.email === email(quem))!.id;
 
     const estado = async (quem: string) => {

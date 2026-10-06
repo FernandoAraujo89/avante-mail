@@ -17,7 +17,7 @@ export interface CorpoDoWebhook {
   contato: {
     id: string;
     nome: string;
-    email: string;
+    email: string | null;
     telefone: string | null;
     empresa: string | null;
     estagio: string | null;

@@ -31,6 +31,7 @@ import {
   type WhatsAppMessage,
   type WhatsAppTemplate,
 } from "@/lib/db";
+import { contatoPorTelefone, contatoPorWaId } from "@/lib/contatos/enderecos";
 import { formatPhone } from "@/lib/phone";
 import { getSetting } from "@/lib/settings";
 import { errorMessage } from "@/lib/utils";
@@ -81,27 +82,20 @@ import {
 // responde e montar a conversa para a tela. A interpretação da mensagem (tipo,
 // janela, a que envio responde) é pura e mora em lib/whatsapp/inbound.ts.
 
+// O contato e o NÚMERO dele que escreveu (um contato pode ter vários): a
+// conversa é desse número, e o SAIR também.
 type ContactRef = { id: string; phone: string | null; whatsappSubscribed: boolean };
 
 /** O contato dono do número, aceitando as duas formas do celular brasileiro. */
 async function findContactByWaId(waId: string): Promise<ContactRef | null> {
-  const candidates = phoneCandidatesFromWaId(waId);
-  if (candidates.length === 0) return null;
-  const rows = await getDb()
-    .select({
-      id: contacts.id,
-      phone: contacts.phone,
-      whatsappSubscribed: contacts.whatsappSubscribed,
-    })
-    .from(contacts)
-    .where(inArray(contacts.phone, candidates));
-  // A forma exata vem primeiro: se as duas estiverem cadastradas (contato
-  // duplicado), vale a que o WhatsApp informou.
-  for (const phone of candidates) {
-    const hit = rows.find((r) => r.phone === phone);
-    if (hit) return hit;
-  }
-  return null;
+  const telefone = await contatoPorWaId(getDb(), waId);
+  return telefone
+    ? {
+        id: telefone.contactId,
+        phone: telefone.phone,
+        whatsappSubscribed: telefone.whatsappSubscribed,
+      }
+    : null;
 }
 
 type SendRef = {
@@ -109,6 +103,7 @@ type SendRef = {
   contactId: string;
   campaignId: string | null;
   repliedAt: Date | null;
+  address: string | null;
 };
 
 const SEND_REF = {
@@ -116,6 +111,7 @@ const SEND_REF = {
   contactId: campaignSends.contactId,
   campaignId: campaignSends.campaignId,
   repliedAt: campaignSends.repliedAt,
+  address: campaignSends.address,
 };
 
 export interface InboundRecord {
@@ -154,18 +150,25 @@ export async function recordInboundMessage(
       .limit(1);
   }
 
-  let contact: ContactRef | null = null;
-  if (send) {
-    [contact = null] = await db
-      .select({
-        id: contacts.id,
-        phone: contacts.phone,
-        whatsappSubscribed: contacts.whatsappSubscribed,
-      })
+  // O número que escreveu, se está cadastrado, diz tudo; o envio citado
+  // cobre quem escreveu de um número que o cadastro não reconhece.
+  let contact: ContactRef | null = await findContactByWaId(message.waId);
+  if (!contact && send) {
+    const [dono] = await db
+      .select({ id: contacts.id, phone: contacts.phone })
       .from(contacts)
       .where(eq(contacts.id, send.contactId));
+    if (dono) {
+      const numero = send.address
+        ? await contatoPorTelefone(db, send.address)
+        : null;
+      contact = {
+        id: dono.id,
+        phone: numero?.phone ?? send.address ?? dono.phone,
+        whatsappSubscribed: numero?.whatsappSubscribed ?? false,
+      };
+    }
   }
-  contact ??= await findContactByWaId(message.waId);
 
   if (strategy === "recent" && contact) {
     const since = new Date(

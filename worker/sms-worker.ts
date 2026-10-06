@@ -3,6 +3,7 @@ import "./env";
 import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
+import { optOutTelefone } from "../lib/contatos/enderecos";
 import { campaigns, campaignSends, contacts, getDb } from "../lib/db";
 import { createRedisConnection, SMS_QUEUE_NAME, type SmsJobData } from "../lib/queue";
 import {
@@ -168,10 +169,7 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
       // caso do 21610 é a Twilio dizendo que a pessoa mandou PARAR por um
       // caminho que nosso webhook não viu.
       if (shouldMarkSmsOptOut(error)) {
-        await db
-          .update(contacts)
-          .set({ smsSubscribed: false, smsOptOutAt: new Date() })
-          .where(eq(contacts.id, contactId));
+        await optOutTelefone(db, send.address ?? contact.phone, "sms");
         console.log(
           `[WORKER-SMS] ${contact.phone} marcado fora do canal SMS (código ${
             error instanceof SmsApiError ? error.code : "?"

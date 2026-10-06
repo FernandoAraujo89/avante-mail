@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
+import { campaignSends, getDb, whatsappTemplates } from "@/lib/db";
 import {
-  campaignSends,
-  contacts,
-  getDb,
-  whatsappTemplates,
-} from "@/lib/db";
+  optOutTelefonePorWaId,
+  optOutTelefonesDoContato,
+} from "@/lib/contatos/enderecos";
 import { emitContactEvent } from "@/lib/events";
 import { sendEmail } from "@/lib/ses";
 import { errorMessage } from "@/lib/utils";
@@ -267,12 +266,17 @@ async function handleInboundMessage(
   }
 
   if (isOptOutMessage(message.body) && contact.whatsappSubscribed) {
-    await getDb()
-      .update(contacts)
-      .set({ whatsappSubscribed: false, whatsappOptOutAt: new Date() })
-      .where(eq(contacts.id, contact.id));
-
-    await emitContactEvent("whatsapp_unsubscribed", contact.id);
+    // Sai o NÚMERO que escreveu; os outros números do contato continuam. O
+    // evento é do contato: só quando não sobra número aceitando WhatsApp.
+    const db = getDb();
+    const saida =
+      (await optOutTelefonePorWaId(db, message.waId, "whatsapp")) ??
+      (await optOutTelefonesDoContato(db, contact.id, "whatsapp"));
+    if (saida.contatoSaiu) {
+      await emitContactEvent("whatsapp_unsubscribed", contact.id, {
+        waId: message.waId,
+      });
+    }
 
     // Confirmação em texto livre (grátis, dentro da janela de 24h aberta pela
     // própria mensagem do contato). Best-effort — não bloqueia o opt-out. Vai

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
-import { campaignSends, contacts, getDb } from "@/lib/db";
+import { contatoPorTelefone, optOutTelefone } from "@/lib/contatos/enderecos";
+import { campaignSends, getDb } from "@/lib/db";
 import { emitContactEvent } from "@/lib/events";
 import { errorMessage } from "@/lib/utils";
 import {
@@ -83,12 +84,11 @@ async function processInbound(params: Record<string, string>): Promise<void> {
   if (!from) return;
   const db = getDb();
 
-  const [contato] = await db
-    .select({ id: contacts.id, smsSubscribed: contacts.smsSubscribed })
-    .from(contacts)
-    .where(eq(contacts.phone, from)); // From já vem em E.164
-
-  if (!contato) return; // resposta de número fora da base
+  // From já vem em E.164. É o NÚMERO que escreveu — pode ser o segundo
+  // telefone do contato.
+  const telefone = await contatoPorTelefone(db, from);
+  if (!telefone) return; // resposta de número fora da base
+  const contato = { id: telefone.contactId, smsSubscribed: telefone.smsSubscribed };
 
   // Resposta no envio de SMS mais recente ainda sem resposta (relatório).
   const [ultimoEnvio] = await db
@@ -126,11 +126,12 @@ async function processInbound(params: Record<string, string>): Promise<void> {
     })
   );
 
+  // Sai só este número. O evento é do contato: só quando não sobra número
+  // aceitando SMS.
   if (isSmsOptOutMessage(params.Body) && contato.smsSubscribed) {
-    await db
-      .update(contacts)
-      .set({ smsSubscribed: false, smsOptOutAt: new Date() })
-      .where(eq(contacts.id, contato.id));
-    await emitContactEvent("sms_unsubscribed", contato.id);
+    const saida = await optOutTelefone(db, from, "sms");
+    if (saida?.contatoSaiu) {
+      await emitContactEvent("sms_unsubscribed", contato.id, { phone: from });
+    }
   }
 }

@@ -343,7 +343,7 @@ export interface ContatoNoFluxo {
   runId: string;
   contactId: string;
   nome: string;
-  email: string;
+  email: string | null;
   telefone: string | null;
   status: AutomationRunStatus;
   currentStepId: string | null;

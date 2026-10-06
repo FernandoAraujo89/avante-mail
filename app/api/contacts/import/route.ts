@@ -1,31 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, inArray } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 import Papa from "papaparse";
 
-import { contactLists, contacts, getDb, lists, type NewContact } from "@/lib/db";
+import {
+  decidir,
+  indexar,
+  indiceVazio,
+  type Decisao,
+  type LinhaDoArquivo,
+} from "@/lib/contatos/casamento";
+import {
+  adicionarEnderecos,
+  listarEnderecosDeVarios,
+} from "@/lib/contatos/enderecos";
+import { contactLists, contacts, getDb, lists } from "@/lib/db";
 import { listaEhRestrita, veSoParceiros } from "@/lib/escopo-parceiros";
-import { emitContactEvents } from "@/lib/events";
-import { naoEhLead } from "@/lib/leads";
-import { firstValidPhone } from "@/lib/phone";
+import { emitContactEvents, emitTagDiff } from "@/lib/events";
+import { allValidPhones } from "@/lib/phone";
 import { sessionUserFromRequest } from "@/lib/session";
-import { parseBrazilianMobile } from "@/lib/sms/phone";
-import { EMAIL_REGEX, errorMessage, normalizeTags } from "@/lib/utils";
+import { errorMessage, normalizeTags, parseEmailList } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+// Importa E atualiza (06/10/2026): a linha que casa com um contato da base
+// acrescenta a ele os e-mails e telefones que ele ainda não tinha; a que não
+// casa com ninguém vira contato novo. A regra de casamento é a de
+// lib/contatos/casamento.ts. O e-mail deixou de ser obrigatório — a planilha
+// do Sucesso do cliente traz nome e telefone.
+
 type ImportField =
-  | "name"
-  | "email"
-  | "company"
-  | "tags"
-  | "phone"
-  | "whatsappOptIn";
+  "name" | "email" | "company" | "tags" | "phone" | "whatsappOptIn";
 type ColumnMapping = Partial<Record<ImportField, string>>;
 
-const CHUNK_SIZE = 500;
-
 // Valores aceitos como "sim" na coluna de consentimento dos canais de telefone.
-const TRUTHY = new Set(["sim", "s", "yes", "y", "true", "1", "x", "verdadeiro"]);
+const TRUTHY = new Set([
+  "sim",
+  "s",
+  "yes",
+  "y",
+  "true",
+  "1",
+  "x",
+  "verdadeiro",
+]);
+
+/** Até quantas pendências voltam na resposta (o resto vira só número). */
+const MAX_PENDENCIAS = 500;
+
+interface Pendencia {
+  linha: number;
+  nome: string;
+  valores: string;
+  motivo: string;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,9 +71,15 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!mapping.name || !mapping.email) {
+    if (!mapping.name) {
       return NextResponse.json(
-        { error: "Mapeie ao menos as colunas de nome e e-mail." },
+        { error: "Mapeie a coluna de nome." },
+        { status: 400 }
+      );
+    }
+    if (!mapping.email && !mapping.phone) {
+      return NextResponse.json(
+        { error: "Mapeie a coluna de e-mail, a de telefone ou as duas." },
         { status: 400 }
       );
     }
@@ -65,7 +98,7 @@ export async function POST(request: NextRequest) {
       const [list] = await db
         .select({ id: lists.id })
         .from(lists)
-        .where(inArray(lists.id, [listId]));
+        .where(eq(lists.id, listId));
       if (!list) {
         return NextResponse.json(
           { error: "Lista de destino não encontrada." },
@@ -87,184 +120,288 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── 1. As linhas, já limpas ─────────────────────────────────────────
     const total = parsed.data.length;
-    let invalid = 0;
-    let phoneInvalid = 0;
-    const byEmail = new Map<string, NewContact>();
-    const seenPhones = new Set<string>();
+    let telefonesInvalidos = 0;
+    const pendencias: Pendencia[] = [];
+    let pendenciasOmitidas = 0;
+    const pendente = (p: Pendencia) => {
+      if (pendencias.length < MAX_PENDENCIAS) pendencias.push(p);
+      else pendenciasOmitidas++;
+    };
 
-    for (const row of parsed.data) {
-      const name = (row[mapping.name] ?? "").trim();
-      const email = (row[mapping.email] ?? "").trim().toLowerCase();
+    type Linha = LinhaDoArquivo & {
+      empresa: string | null;
+      tags: string[];
+      consentimentoTelefone: boolean;
+    };
+    const linhas: Linha[] = [];
 
-      if (!name || !EMAIL_REGEX.test(email)) {
-        invalid++;
-        continue;
+    parsed.data.forEach((row, indice) => {
+      const numero = indice + 2; // a linha 1 é o cabeçalho
+      const nome = (row[mapping.name as string] ?? "").trim();
+      const emailCru = mapping.email ? (row[mapping.email] ?? "").trim() : "";
+      const telefoneCru = mapping.phone
+        ? (row[mapping.phone] ?? "").trim()
+        : "";
+      const emails = parseEmailList(emailCru);
+      // Célula com vários números ("91 9...-..., (91) 9...-...") são vários
+      // telefones do mesmo contato; qualquer formato com DDD vira E.164.
+      const telefones = allValidPhones(telefoneCru);
+      if (telefoneCru && telefones.length === 0) telefonesInvalidos++;
+
+      if (!nome) {
+        pendente({
+          linha: numero,
+          nome,
+          valores: [emailCru, telefoneCru].filter(Boolean).join(" · "),
+          motivo: "sem nome",
+        });
+        return;
+      }
+      if (emails.length === 0 && telefones.length === 0) {
+        pendente({
+          linha: numero,
+          nome,
+          valores: [emailCru, telefoneCru].filter(Boolean).join(" · "),
+          motivo:
+            emailCru || telefoneCru
+              ? "e-mail e telefone inválidos"
+              : "sem e-mail nem telefone",
+        });
+        return;
       }
 
-      if (!byEmail.has(email)) {
-        // Telefone inválido não descarta a linha — o contato entra sem ele.
-        // Célula com vários números (ex.: "91 9...-..., (91) 9...-...") usa o
-        // primeiro válido; qualquer formato com DDD é normalizado para E.164.
-        let phone: string | null = null;
-        if (mapping.phone) {
-          const rawPhone = (row[mapping.phone] ?? "").trim();
-          if (rawPhone) {
-            phone = firstValidPhone(rawPhone);
-            if (!phone) phoneInvalid++;
-          }
-        }
-        // Telefone repetido dentro do arquivo fica só na primeira linha
-        // (coluna única no banco).
-        if (phone) {
-          if (seenPhones.has(phone)) phone = null;
-          else seenPhones.add(phone);
-        }
+      // Opt-in dos canais de telefone: quem tem telefone válido entra com
+      // consentimento. Se a planilha trouxer uma coluna de consentimento, ela
+      // é que manda — inclusive para negar (só "sim/true/1..." mantém o
+      // opt-in), que é como se registra quem não autorizou (LGPD). A coluna
+      // é UMA só e vale para WhatsApp e SMS: quem a preencheu autorizou o
+      // contato PELO TELEFONE, não por um canal técnico.
+      const consentimentoTelefone =
+        !mapping.whatsappOptIn ||
+        TRUTHY.has((row[mapping.whatsappOptIn] ?? "").trim().toLowerCase());
 
-        // Opt-in dos canais de telefone: quem tem telefone válido entra com
-        // consentimento. Se a planilha trouxer uma coluna de consentimento, ela
-        // é que manda — inclusive para negar (só "sim/true/1..." mantém o
-        // opt-in), que é como se registra quem não autorizou (LGPD).
-        //
-        // A coluna é UMA só e vale para WhatsApp e SMS: quem a preencheu
-        // autorizou o contato PELO TELEFONE, não por um canal técnico. No banco
-        // os campos são separados porque o opt-out não é: responder SAIR no
-        // WhatsApp ou STOP no SMS derruba só o canal em que aconteceu.
-        const telefoneOptIn =
-          phone !== null &&
-          (!mapping.whatsappOptIn ||
-            TRUTHY.has(
-              (row[mapping.whatsappOptIn as string] ?? "").trim().toLowerCase()
-            ));
-        const smsOptIn =
-          telefoneOptIn && phone !== null && parseBrazilianMobile(phone).ok;
+      linhas.push({
+        linha: numero,
+        nome,
+        emails,
+        telefones,
+        empresa: mapping.company
+          ? (row[mapping.company] ?? "").trim() || null
+          : null,
+        tags: mapping.tags ? normalizeTags(row[mapping.tags]) : [],
+        consentimentoTelefone,
+      });
+    });
 
-        byEmail.set(email, {
-          name,
-          email,
-          phone,
-          company: mapping.company
-            ? (row[mapping.company] ?? "").trim() || null
-            : null,
-          tags: mapping.tags ? normalizeTags(row[mapping.tags]) : [],
-          whatsappSubscribed: telefoneOptIn,
-          whatsappOptInAt: telefoneOptIn ? new Date() : null,
-          // O SMS pede uma condição a mais: ser CELULAR. Planilha de base
-          // costuma trazer o fixo do escritório, e cada fixo com opt-in vira
-          // uma mensagem paga e um erro 21614 na primeira campanha.
-          smsSubscribed: smsOptIn,
-          smsOptInAt: smsOptIn ? new Date() : null,
+    // ── 2. O índice da base ─────────────────────────────────────────────
+    // A base é pequena (milhares): cabe inteira na memória, e casar em
+    // memória evita três consultas por linha. Quem vê só parceiros não
+    // enxerga lead: para ele, lead nem está no índice. Para o admin, lead
+    // casa por e-mail/telefone (para não duplicar), mas nunca pelo nome —
+    // a planilha é de parceiros.
+    const base = await db
+      .select({
+        id: contacts.id,
+        name: contacts.name,
+        company: contacts.company,
+        tags: contacts.tags,
+        lead: sql<boolean>`${contacts.stage} is not null`,
+      })
+      .from(contacts)
+      .where(soParceiros ? isNull(contacts.stage) : undefined);
+    const enderecosDaBase = await listarEnderecosDeVarios(
+      db,
+      base.map((c) => c.id)
+    );
+    const indice = indiceVazio();
+    const dados = new Map(base.map((c) => [c.id, c]));
+    for (const c of base) {
+      const e = enderecosDaBase.get(c.id);
+      indexar(indice, {
+        id: c.id,
+        nome: c.name,
+        emails: (e?.emails ?? []).map((x) => x.email),
+        telefones: (e?.phones ?? []).map((x) => x.phone),
+        porNome: !c.lead,
+      });
+    }
+
+    // ── 3. Linha a linha ────────────────────────────────────────────────
+    let criados = 0;
+    let atualizados = 0;
+    let semMudanca = 0;
+    let emailsAdicionados = 0;
+    let telefonesAdicionados = 0;
+    let addedToList = 0;
+    const eventos: Parameters<typeof emitContactEvents>[0] = [];
+
+    const descrever = (l: Linha) => [...l.emails, ...l.telefones].join(" · ");
+
+    async function entrarNaLista(contactId: string) {
+      if (!listId) return;
+      const added = await db
+        .insert(contactLists)
+        .values({ contactId, listId })
+        .onConflictDoNothing()
+        .returning({ contactId: contactLists.contactId });
+      if (added.length > 0) {
+        addedToList++;
+        eventos.push({
+          type: "list_subscribed",
+          contactId,
+          payload: { listId },
         });
       }
     }
 
-    const rows = Array.from(byEmail.values());
+    for (const linha of linhas) {
+      const decisao: Decisao = decidir(linha, indice);
 
-    // Telefones já usados por contatos da base violariam a coluna única e
-    // abortariam o INSERT do lote — importa esses contatos sem o telefone.
-    const phones = rows
-      .map((r) => r.phone)
-      .filter((p): p is string => Boolean(p));
-    if (phones.length > 0) {
-      const inUse = new Set<string>();
-      for (let i = 0; i < phones.length; i += CHUNK_SIZE) {
-        const chunk = phones.slice(i, i + CHUNK_SIZE);
-        const found = await db
-          .select({ phone: contacts.phone })
-          .from(contacts)
-          .where(inArray(contacts.phone, chunk));
-        for (const f of found) {
-          if (f.phone) inUse.add(f.phone);
+      if (decisao.tipo === "ambiguo") {
+        pendente({
+          linha: linha.linha,
+          nome: linha.nome,
+          valores: descrever(linha),
+          motivo: `${decisao.candidatos.length} contatos com este nome — abra um deles e acrescente à mão`,
+        });
+        continue;
+      }
+      if (decisao.tipo === "conflito") {
+        pendente({
+          linha: linha.linha,
+          nome: linha.nome,
+          valores: descrever(linha),
+          motivo: "o e-mail é de um contato e o telefone é de outro",
+        });
+        continue;
+      }
+
+      const entrada = {
+        emails: linha.emails.map((email) => ({ email })),
+        phones: linha.telefones.map((phone) => ({
+          phone,
+          whatsapp: linha.consentimentoTelefone,
+          sms: linha.consentimentoTelefone,
+        })),
+      };
+
+      if (decisao.tipo === "criar") {
+        const [novo] = await db
+          .insert(contacts)
+          .values({
+            name: linha.nome,
+            company: linha.empresa,
+            tags: linha.tags,
+          })
+          .returning({ id: contacts.id });
+        const r = await adicionarEnderecos(db, novo.id, entrada);
+        if (
+          r.emailsAdicionados.length === 0 &&
+          r.telefonesAdicionados.length === 0
+        ) {
+          // Todos os endereços pertencem a contatos que este perfil não vê
+          // (um lead, por exemplo). Sem endereço o contato não serve para
+          // nada: desfaz e deixa para uma pessoa.
+          await db.delete(contacts).where(eq(contacts.id, novo.id));
+          pendente({
+            linha: linha.linha,
+            nome: linha.nome,
+            valores: descrever(linha),
+            motivo: "e-mail/telefone já pertencem a outro contato",
+          });
+          continue;
         }
-      }
-      for (const r of rows) {
-        if (r.phone && inUse.has(r.phone)) {
-          r.phone = null;
-          r.whatsappSubscribed = false;
-          r.whatsappOptInAt = null;
-          r.smsSubscribed = false;
-          r.smsOptInAt = null;
+        criados++;
+        emailsAdicionados += r.emailsAdicionados.length;
+        telefonesAdicionados += r.telefonesAdicionados.length;
+        indexar(indice, {
+          id: novo.id,
+          nome: linha.nome,
+          emails: r.emailsAdicionados,
+          telefones: r.telefonesAdicionados,
+          porNome: true,
+        });
+        dados.set(novo.id, {
+          id: novo.id,
+          name: linha.nome,
+          company: linha.empresa,
+          tags: linha.tags,
+          lead: false,
+        });
+        eventos.push({ type: "contact_created", contactId: novo.id });
+        for (const tag of linha.tags) {
+          eventos.push({
+            type: "tag_added",
+            contactId: novo.id,
+            payload: { tag },
+          });
         }
+        await entrarNaLista(novo.id);
+        continue;
       }
+
+      // atualizar: acrescenta o que falta; o que o contato já tem fica.
+      const contato = dados.get(decisao.contactId);
+      const r = await adicionarEnderecos(db, decisao.contactId, entrada);
+      let mudou =
+        r.emailsAdicionados.length > 0 || r.telefonesAdicionados.length > 0;
+      emailsAdicionados += r.emailsAdicionados.length;
+      telefonesAdicionados += r.telefonesAdicionados.length;
+      indexar(indice, {
+        id: decisao.contactId,
+        nome: contato?.name ?? linha.nome,
+        emails: r.emailsAdicionados,
+        telefones: r.telefonesAdicionados,
+        porNome: false,
+      });
+
+      // Empresa só completa lacuna; tags somam.
+      const patch: Partial<typeof contacts.$inferInsert> = {};
+      if (contato && !contato.company && linha.empresa) {
+        patch.company = linha.empresa;
+        contato.company = linha.empresa;
+      }
+      const tagsAntes = contato?.tags ?? [];
+      const tagsDepois = [...new Set([...tagsAntes, ...linha.tags])];
+      if (tagsDepois.length !== tagsAntes.length) {
+        patch.tags = tagsDepois;
+        if (contato) contato.tags = tagsDepois;
+      }
+      if (Object.keys(patch).length > 0) {
+        await db
+          .update(contacts)
+          .set(patch)
+          .where(eq(contacts.id, decisao.contactId));
+        if (patch.tags)
+          await emitTagDiff(decisao.contactId, tagsAntes, tagsDepois);
+        mudou = true;
+      }
+
+      const naLista = addedToList;
+      await entrarNaLista(decisao.contactId);
+      if (addedToList > naLista) mudou = true;
+
+      if (mudou) atualizados++;
+      else semMudanca++;
     }
 
-    let imported = 0;
-
-    // Guarda os criados para registrar os eventos depois: o onConflictDoNothing
-    // só devolve quem entrou de fato, então esta é a lista dos NOVOS.
-    const criados: { id: string; email: string }[] = [];
-
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const inserted = await db
-        .insert(contacts)
-        .values(chunk)
-        .onConflictDoNothing({ target: contacts.email })
-        .returning({ id: contacts.id, email: contacts.email });
-      imported += inserted.length;
-      criados.push(...inserted);
-    }
-
-    // Associa à lista TODOS os contatos do arquivo (novos + já existentes).
-    let addedToList = 0;
-    const entraramNaLista: string[] = [];
-    if (listId && rows.length > 0) {
-      const emails = rows.map((r) => r.email);
-      const matched: { id: string }[] = [];
-      for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
-        const chunk = emails.slice(i, i + CHUNK_SIZE);
-        const found = await db
-          .select({ id: contacts.id })
-          .from(contacts)
-          .where(
-            soParceiros
-              ? and(inArray(contacts.email, chunk), naoEhLead())
-              : inArray(contacts.email, chunk)
-          );
-        matched.push(...found);
-      }
-      for (let i = 0; i < matched.length; i += CHUNK_SIZE) {
-        const chunk = matched.slice(i, i + CHUNK_SIZE);
-        const added = await db
-          .insert(contactLists)
-          .values(chunk.map((c) => ({ contactId: c.id, listId })))
-          .onConflictDoNothing()
-          .returning({ contactId: contactLists.contactId });
-        addedToList += added.length;
-        entraramNaLista.push(...added.map((a) => a.contactId));
-      }
-    }
-
-    // Eventos da importação. `entraramNaLista` traz só quem realmente entrou
-    // (o onConflictDoNothing filtra quem já estava), então reimportar o mesmo
-    // arquivo não gera evento repetido.
-    const tagsPorEmail = new Map(rows.map((r) => [r.email, r.tags ?? []]));
-    await emitContactEvents([
-      ...criados.map((c) => ({
-        type: "contact_created" as const,
-        contactId: c.id,
-      })),
-      ...criados.flatMap((c) =>
-        (tagsPorEmail.get(c.email) ?? []).map((tag) => ({
-          type: "tag_added" as const,
-          contactId: c.id,
-          payload: { tag },
-        }))
-      ),
-      ...entraramNaLista.map((contactId) => ({
-        type: "list_subscribed" as const,
-        contactId,
-        payload: { listId },
-      })),
-    ]);
+    await emitContactEvents(eventos);
+    // Na ordem da planilha, para quem for conferir linha a linha.
+    pendencias.sort((a, b) => a.linha - b.linha);
 
     return NextResponse.json({
       total,
-      imported,
-      duplicated: rows.length - imported + (total - invalid - rows.length),
-      invalid,
-      phoneInvalid,
+      criados,
+      atualizados,
+      semMudanca,
+      emailsAdicionados,
+      telefonesAdicionados,
+      telefonesInvalidos,
       addedToList,
+      pendencias,
+      pendenciasOmitidas,
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

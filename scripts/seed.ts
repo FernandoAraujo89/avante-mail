@@ -13,6 +13,7 @@ import {
   users,
   type NewContact,
 } from "../lib/db";
+import { importarEnderecosDasColunasAntigas } from "../lib/contatos/enderecos";
 import { hashPassword } from "../lib/passwords";
 import { compileDesignToMjml } from "../lib/email-builder/compile";
 import {
@@ -64,6 +65,8 @@ async function main() {
 
   console.log("👥 Inserindo 20 contatos...");
   await db.insert(contacts).values(SEED_CONTACTS);
+  // O e-mail de cada um vira o endereço principal (contact_emails).
+  await importarEnderecosDasColunasAntigas(db);
 
   console.log("📄 Inserindo 4 templates (Criador de email)...");
   const insertedTemplates = await db

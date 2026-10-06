@@ -6,6 +6,7 @@ import {
   count,
   desc,
   eq,
+  exists,
   ilike,
   inArray,
   isNotNull,
@@ -14,8 +15,17 @@ import {
   type SQL,
 } from "drizzle-orm";
 
+import { EnderecoInvalido, lerEnderecosDoCorpo } from "@/lib/contatos/corpo";
 import {
+  contatosPorEnderecos,
+  definirEnderecos,
+  listarEnderecos,
+  listarEnderecosDeVarios,
+} from "@/lib/contatos/enderecos";
+import {
+  contactEmails,
   contactLists,
+  contactPhones,
   contacts,
   getDb,
   lists,
@@ -23,15 +33,8 @@ import {
 import { listasRestritas, veSoParceiros } from "@/lib/escopo-parceiros";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
 import { ehLead, naoEhLead } from "@/lib/leads";
-import { normalizePhone } from "@/lib/phone";
 import { sessionUserFromRequest } from "@/lib/session";
-import { parseBrazilianMobile } from "@/lib/sms/phone";
-import {
-  EMAIL_REGEX,
-  errorMessage,
-  normalizeIds,
-  normalizeTags,
-} from "@/lib/utils";
+import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -70,10 +73,39 @@ export async function GET(request: NextRequest) {
 
     if (search) {
       const term = `%${search}%`;
+      // Também pelos e-mails e telefones secundários: quem procura um número
+      // precisa achar o contato, não importa qual dos números seja.
+      const digitos = search.replace(/\D/g, "");
       const searchCondition = or(
         ilike(contacts.name, term),
         ilike(contacts.email, term),
-        ilike(contacts.company, term)
+        ilike(contacts.company, term),
+        exists(
+          db
+            .select({ um: contactEmails.id })
+            .from(contactEmails)
+            .where(
+              and(
+                eq(contactEmails.contactId, contacts.id),
+                ilike(contactEmails.email, term)
+              )
+            )
+        ),
+        ...(digitos.length >= 4
+          ? [
+              exists(
+                db
+                  .select({ um: contactPhones.id })
+                  .from(contactPhones)
+                  .where(
+                    and(
+                      eq(contactPhones.contactId, contacts.id),
+                      ilike(contactPhones.phone, `%${digitos}%`)
+                    )
+                  )
+              ),
+            ]
+          : [])
       );
       if (searchCondition) conditions.push(searchCondition);
     }
@@ -169,8 +201,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Todos os endereços, não só o principal: a lista mostra "+2" e o
+    // seletor de destinatários conta por endereço.
+    const enderecos = await listarEnderecosDeVarios(db, ids);
+
     return NextResponse.json(
-      data.map((c) => ({ ...c, lists: byContact.get(c.id) ?? [] }))
+      data.map((c) => ({
+        ...c,
+        lists: byContact.get(c.id) ?? [],
+        emails: (enderecos.get(c.id)?.emails ?? []).map((e) => e.email),
+        phones: (enderecos.get(c.id)?.phones ?? []).map((p) => p.phone),
+      }))
     );
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
@@ -212,14 +253,26 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    const email =
-      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const company =
       typeof body.company === "string" && body.company.trim()
         ? body.company.trim()
         : null;
     const tags = normalizeTags(body.tags);
     const listIds = normalizeIds(body.listIds);
+
+    // Vários e-mails e vários telefones; ou um de cada, no formato antigo.
+    let enderecos;
+    try {
+      enderecos = lerEnderecosDoCorpo(body);
+    } catch (error) {
+      if (error instanceof EnderecoInvalido) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
+    const emails = enderecos.emails ?? [];
+    // No formato antigo sem telefone sobra só a caixa de consentimento.
+    const phones = (enderecos.phones ?? []).filter((p) => p.phone);
 
     if (
       veSoParceiros(await sessionUserFromRequest(request)) &&
@@ -237,84 +290,39 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!EMAIL_REGEX.test(email)) {
+    // E-mail deixou de ser obrigatório: contato só com telefone existe. Mas
+    // sem endereço nenhum não há para onde mandar nada.
+    if (emails.length === 0 && phones.length === 0) {
       return NextResponse.json(
-        { error: "Informe um e-mail válido." },
+        { error: "Informe pelo menos um e-mail ou um telefone." },
         { status: 400 }
       );
     }
 
-    // Telefone é opcional; quando informado, é validado e guardado em E.164.
-    const phoneRaw = typeof body.phone === "string" ? body.phone.trim() : "";
-    let phone: string | null = null;
-    if (phoneRaw) {
-      phone = normalizePhone(phoneRaw);
-      if (!phone) {
-        return NextResponse.json(
-          { error: "Informe um telefone válido com DDD (ex.: 48 99999-9999)." },
-          { status: 400 }
-        );
-      }
-    }
-
-    const existing = await db
-      .select({ id: contacts.id })
-      .from(contacts)
-      .where(eq(contacts.email, email));
-
-    if (existing.length > 0) {
+    const donos = await contatosPorEnderecos(db, {
+      emails: emails.map((e) => e.email),
+      phones: phones.map((p) => p.phone),
+    });
+    if (donos.porEmail.size > 0) {
       return NextResponse.json(
         { error: "Já existe um contato com este e-mail." },
         { status: 409 }
       );
     }
-
-    if (phone) {
-      const samePhone = await db
-        .select({ id: contacts.id })
-        .from(contacts)
-        .where(eq(contacts.phone, phone));
-      if (samePhone.length > 0) {
-        return NextResponse.json(
-          { error: "Já existe um contato com este telefone." },
-          { status: 409 }
-        );
-      }
+    if (donos.porTelefone.size > 0) {
+      return NextResponse.json(
+        { error: "Já existe um contato com este telefone." },
+        { status: 409 }
+      );
     }
-
-    // Opt-in de WhatsApp só com telefone; registra a data (prova LGPD).
-    // O padrão é "sim": só um `false` explícito (a pessoa desmarcou a opção)
-    // tira o consentimento.
-    const whatsappSubscribed =
-      body.whatsappSubscribed !== false && phone !== null;
-
-    // SMS tem consentimento próprio, com a mesma regra: o telefone é o mesmo,
-    // mas cada canal guarda o seu aceite — a pessoa pode sair do WhatsApp e
-    // continuar recebendo SMS (e vice-versa).
-    //
-    // Uma exigência a mais que o WhatsApp não tem: precisa ser CELULAR. Fixo
-    // aceito aqui não vira erro na hora — vira uma mensagem paga e um 21614 na
-    // primeira campanha, um por contato. Mesma peneira do backfill.
-    const smsSubscribed =
-      body.smsSubscribed !== false &&
-      phone !== null &&
-      parseBrazilianMobile(phone).ok;
 
     const [created] = await db
       .insert(contacts)
-      .values({
-        name,
-        email,
-        phone,
-        company,
-        tags,
-        subscribed: body.subscribed !== false,
-        whatsappSubscribed,
-        whatsappOptInAt: whatsappSubscribed ? new Date() : null,
-        smsSubscribed,
-        smsOptInAt: smsSubscribed ? new Date() : null,
-      })
-      .returning();
+      .values({ name, company, tags })
+      .returning({ id: contacts.id });
+
+    // Os endereços (e o resumo deles no contato) são do módulo de endereços.
+    await definirEnderecos(db, created.id, { emails, phones });
 
     if (listIds.length > 0) {
       await db
@@ -329,7 +337,14 @@ export async function POST(request: NextRequest) {
     await emitTagDiff(created.id, [], tags);
     await emitListDiff(created.id, [], listIds);
 
-    return NextResponse.json(created, { status: 201 });
+    const [contato] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, created.id));
+    return NextResponse.json(
+      { ...contato, ...(await listarEnderecos(db, created.id)) },
+      { status: 201 }
+    );
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

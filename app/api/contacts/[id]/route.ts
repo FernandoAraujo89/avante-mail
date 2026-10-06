@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, ne } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
+import { EnderecoInvalido, lerEnderecosDoCorpo } from "@/lib/contatos/corpo";
+import {
+  definirEnderecos,
+  EnderecoDeOutroContato,
+  listarEnderecos,
+  type EmailEntrada,
+  type TelefoneEntrada,
+} from "@/lib/contatos/enderecos";
 import { contactLists, contacts, getDb } from "@/lib/db";
 import {
   contatoEhLead,
@@ -8,14 +16,8 @@ import {
   veSoParceiros,
 } from "@/lib/escopo-parceiros";
 import { emitContactEvent, emitListDiff, emitTagDiff } from "@/lib/events";
-import { normalizePhone } from "@/lib/phone";
 import { sessionUserFromRequest } from "@/lib/session";
-import {
-  EMAIL_REGEX,
-  errorMessage,
-  normalizeIds,
-  normalizeTags,
-} from "@/lib/utils";
+import { errorMessage, normalizeIds, normalizeTags } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +70,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
       listIds = listIds.filter((l) => !restritas.includes(l));
     }
 
-    return NextResponse.json({ ...contact, listIds });
+    return NextResponse.json({
+      ...contact,
+      listIds,
+      ...(await listarEnderecos(db, id)),
+    });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
@@ -94,6 +100,20 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
+    // Vários e-mails e telefones (listas completas) ou, no formato antigo,
+    // um de cada — que então troca só o principal e deixa os outros.
+    let enderecos;
+    try {
+      enderecos = lerEnderecosDoCorpo(body);
+    } catch (error) {
+      if (error instanceof EnderecoInvalido) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
+    const mudaEnderecos =
+      enderecos.emails !== undefined || enderecos.phones !== undefined;
+
     const updates: Partial<typeof contacts.$inferInsert> = {};
 
     if (typeof body.name === "string") {
@@ -105,16 +125,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       updates.name = body.name.trim();
     }
-    if (typeof body.email === "string") {
-      const email = body.email.trim().toLowerCase();
-      if (!EMAIL_REGEX.test(email)) {
-        return NextResponse.json(
-          { error: "Informe um e-mail válido." },
-          { status: 400 }
-        );
-      }
-      updates.email = email;
-    }
     if ("company" in body) {
       updates.company =
         typeof body.company === "string" && body.company.trim()
@@ -123,89 +133,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     if ("tags" in body) {
       updates.tags = normalizeTags(body.tags);
-    }
-    if (typeof body.subscribed === "boolean") {
-      updates.subscribed = body.subscribed;
-      // Desmarcar na tela é supressão explícita; remarcar limpa a marca e
-      // devolve o contato às automações.
-      if (body.subscribed !== existing.subscribed) {
-        updates.emailOptOutAt = body.subscribed ? null : new Date();
-      }
-    }
-
-    if ("phone" in body) {
-      const raw = typeof body.phone === "string" ? body.phone.trim() : "";
-      if (!raw) {
-        updates.phone = null;
-      } else {
-        const phone = normalizePhone(raw);
-        if (!phone) {
-          return NextResponse.json(
-            {
-              error: "Informe um telefone válido com DDD (ex.: 48 99999-9999).",
-            },
-            { status: 400 }
-          );
-        }
-        if (phone !== existing.phone) {
-          const samePhone = await db
-            .select({ id: contacts.id })
-            .from(contacts)
-            .where(and(eq(contacts.phone, phone), ne(contacts.id, id)));
-          if (samePhone.length > 0) {
-            return NextResponse.json(
-              { error: "Já existe um contato com este telefone." },
-              { status: 409 }
-            );
-          }
-        }
-        updates.phone = phone;
-      }
-    }
-
-    if (typeof body.whatsappSubscribed === "boolean") {
-      const phoneAfter = "phone" in updates ? updates.phone : existing.phone;
-      const enable = body.whatsappSubscribed && Boolean(phoneAfter);
-      if (enable !== existing.whatsappSubscribed) {
-        updates.whatsappSubscribed = enable;
-        if (enable) {
-          // Preserva a data do primeiro consentimento (prova LGPD).
-          updates.whatsappOptInAt = existing.whatsappOptInAt ?? new Date();
-          updates.whatsappOptOutAt = null;
-        } else {
-          updates.whatsappOptOutAt = new Date();
-        }
-      }
-    }
-
-    if (typeof body.smsSubscribed === "boolean") {
-      const phoneAfter = "phone" in updates ? updates.phone : existing.phone;
-      const enable = body.smsSubscribed && Boolean(phoneAfter);
-      if (enable !== existing.smsSubscribed) {
-        updates.smsSubscribed = enable;
-        if (enable) {
-          // Preserva a data do primeiro consentimento (prova LGPD).
-          updates.smsOptInAt = existing.smsOptInAt ?? new Date();
-          updates.smsOptOutAt = null;
-        } else {
-          updates.smsOptOutAt = new Date();
-        }
-      }
-    }
-
-    // Sem telefone não há como manter o consentimento de WhatsApp nem de SMS.
-    if ("phone" in updates && updates.phone === null) {
-      const wasSubscribed =
-        updates.whatsappSubscribed ?? existing.whatsappSubscribed;
-      if (wasSubscribed) {
-        updates.whatsappSubscribed = false;
-        updates.whatsappOptOutAt = new Date();
-      }
-      const wasSmsSubscribed = updates.smsSubscribed ?? existing.smsSubscribed;
-      if (wasSmsSubscribed) {
-        updates.smsSubscribed = false;
-        updates.smsOptOutAt = new Date();
-      }
     }
 
     const changesLists = "listIds" in body;
@@ -221,21 +148,65 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ).map((l) => l.listId)
       : [];
 
-    if (Object.keys(updates).length === 0 && !changesLists) {
+    if (Object.keys(updates).length === 0 && !changesLists && !mudaEnderecos) {
       return NextResponse.json(
         { error: "Nenhum campo para atualizar." },
         { status: 400 }
       );
     }
 
-    let contact = existing;
     if (Object.keys(updates).length > 0) {
-      const [updated] = await db
-        .update(contacts)
-        .set(updates)
-        .where(eq(contacts.id, id))
-        .returning();
-      contact = updated ?? existing;
+      await db.update(contacts).set(updates).where(eq(contacts.id, id));
+    }
+
+    // Endereços e consentimento: pelo módulo, que mantém o resumo do contato.
+    let canais: Awaited<ReturnType<typeof definirEnderecos>> | null = null;
+    if (mudaEnderecos) {
+      const desejado: { emails?: EmailEntrada[]; phones?: TelefoneEntrada[] } =
+        {
+          emails: enderecos.emails,
+          phones: enderecos.phones,
+        };
+      if (enderecos.legado) {
+        const atuais = await listarEnderecos(db, id);
+        if (enderecos.emails) {
+          const principal = enderecos.emails[0];
+          desejado.emails = [
+            ...enderecos.emails,
+            ...atuais.emails
+              .filter((e) => !e.principal && e.email !== principal?.email)
+              .map((e) => ({ email: e.email })),
+          ];
+        }
+        if (enderecos.phones) {
+          const pedido = enderecos.phones[0];
+          const atualPrincipal =
+            atuais.phones.find((p) => p.principal) ?? atuais.phones[0] ?? null;
+          // Sem telefone no pedido, as caixas de consentimento valem para o
+          // principal que já existe.
+          const principal = pedido?.phone
+            ? pedido
+            : pedido && atualPrincipal
+              ? { ...pedido, phone: atualPrincipal.phone }
+              : null;
+          desejado.phones = [
+            ...(principal ? [principal] : []),
+            ...atuais.phones
+              .filter(
+                (p) => p !== atualPrincipal && p.phone !== principal?.phone
+              )
+              .map((p) => ({ phone: p.phone })),
+          ];
+        }
+      }
+      try {
+        canais = await definirEnderecos(db, id, desejado);
+      } catch (error) {
+        if (error instanceof EnderecoDeOutroContato) {
+          return NextResponse.json({ error: error.message }, { status: 409 });
+        }
+        throw error;
+      }
     }
 
     // Substitui as associações de lista pelo conjunto informado.
@@ -271,17 +242,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (changesLists) {
       await emitListDiff(id, listasAntes, listasDepois);
     }
-    if (updates.subscribed === false && existing.subscribed) {
-      await emitContactEvent("email_unsubscribed", id);
-    }
-    if (updates.whatsappSubscribed === false && existing.whatsappSubscribed) {
-      await emitContactEvent("whatsapp_unsubscribed", id);
-    }
-    if (updates.smsSubscribed === false && existing.smsSubscribed) {
-      await emitContactEvent("sms_unsubscribed", id);
+    // Saiu de um canal = ficou SEM endereço aceitando aquele canal.
+    if (canais) {
+      const { antes, depois } = canais;
+      if (antes.subscribed && !depois.subscribed) {
+        await emitContactEvent("email_unsubscribed", id);
+      }
+      if (antes.whatsappSubscribed && !depois.whatsappSubscribed) {
+        await emitContactEvent("whatsapp_unsubscribed", id);
+      }
+      if (antes.smsSubscribed && !depois.smsSubscribed) {
+        await emitContactEvent("sms_unsubscribed", id);
+      }
     }
 
-    return NextResponse.json(contact);
+    const [contact] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, id));
+    return NextResponse.json({
+      ...contact,
+      ...(await listarEnderecos(db, id)),
+    });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
