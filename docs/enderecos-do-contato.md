@@ -65,3 +65,15 @@ tabelas, copia o e-mail e o telefone de cada contato como principal, libera o
 nulo em `contacts.email`, cria `campaign_sends.address` e troca o índice único.
 Scripts que inserem em `contacts` direto (seed, testes) chamam
 `importarEnderecosDasColunasAntigas` depois.
+
+## Filtro de destinatários por planilha (assistente de campanha)
+
+`components/campaigns/planilha-filter-dialog.tsx` + `lib/contatos/filtro-planilha.ts`
+(06/10/2026). Vale para e-mail, WhatsApp e SMS. A planilha colada ou enviada
+(.csv) pode trazer o que tiver; a linha seleciona o contato se casar por:
+e-mail igual (qualquer célula com @), telefone de trás para frente (6 dígitos
+finais; com cabeçalho reconhecido, só as colunas de telefone — CNPJ e CEP não
+entram), ou nome igual (só com coluna de nome no cabeçalho: nome/name/contato/
+cliente/razão social). Nome repetido na base seleciona todos e avisa. Só
+seleciona entre os contatos já elegíveis da campanha; nada é criado.
+
