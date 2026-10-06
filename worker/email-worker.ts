@@ -4,6 +4,7 @@ import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
 import { conteudoDoPassoDeEmail } from "../lib/automations/envios";
+import { enderecoAceita } from "../lib/contatos/destinatarios";
 import {
   campaigns,
   campaignSends,
@@ -58,7 +59,8 @@ interface ConteudoDoEnvio {
 async function conteudoDaCampanha(
   campaignId: string,
   contact: Contact,
-  sendId: string
+  sendId: string,
+  email: string
 ): Promise<ConteudoDoEnvio> {
   const db = getDb();
   const [campaign] = await db
@@ -101,7 +103,7 @@ async function conteudoDaCampanha(
   return {
     subject: campaign.subject,
     mjmlContent,
-    variables: await buildCampaignVariables(campaign, contact, sendId),
+    variables: await buildCampaignVariables(campaign, contact, sendId, email),
   };
 }
 
@@ -109,7 +111,8 @@ async function conteudoDaCampanha(
 async function conteudoDaAutomacao(
   stepId: string | null,
   contact: Contact,
-  sendId: string
+  sendId: string,
+  email: string
 ): Promise<ConteudoDoEnvio> {
   if (!stepId) {
     throw new Error(
@@ -120,7 +123,7 @@ async function conteudoDaAutomacao(
   return {
     subject: passo.subject,
     mjmlContent: passo.mjmlContent,
-    variables: await buildSendVariables(passo.content, contact, sendId),
+    variables: await buildSendVariables(passo.content, contact, sendId, email),
   };
 }
 
@@ -153,18 +156,6 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
     throw new Error("Contato não encontrado no banco.");
   }
 
-  if (!contact.subscribed) {
-    // Descadastrou depois de entrar na fila: não envia.
-    console.log(
-      `[WORKER] ${contact.email} está descadastrado, envio cancelado.`
-    );
-    await db
-      .update(campaignSends)
-      .set({ status: "failed" })
-      .where(eq(campaignSends.id, sendId));
-    return;
-  }
-
   // Para onde vai: o endereço gravado no envio; nos envios de antes dos
   // endereços múltiplos, o e-mail principal do contato.
   const destino = send.address ?? contact.email;
@@ -177,11 +168,31 @@ async function processJob(job: Job<EmailJobData>): Promise<void> {
     return;
   }
 
+  // Consentimento DESTE e-mail na hora do envio (a campanha pode ter sido
+  // agendada semanas antes). Envio antigo, sem endereço: vale o do contato.
+  const aceita = send.address
+    ? await enderecoAceita(db, "email", send.address)
+    : contact.subscribed;
+  if (!aceita) {
+    // Descadastrou depois de entrar na fila: não envia.
+    console.log(`[WORKER] ${destino} está descadastrado, envio cancelado.`);
+    await db
+      .update(campaignSends)
+      .set({ status: "failed" })
+      .where(eq(campaignSends.id, sendId));
+    return;
+  }
+
   // De onde vem o conteúdo: da campanha ou do passo da automação. O resto do
   // envio (compilação, rastreio, descadastro, gravação) é idêntico nos dois.
   const conteudo = send.campaignId
-    ? await conteudoDaCampanha(send.campaignId, contact, sendId)
-    : await conteudoDaAutomacao(send.automationStepId, contact, sendId);
+    ? await conteudoDaCampanha(send.campaignId, contact, sendId, destino)
+    : await conteudoDaAutomacao(
+        send.automationStepId,
+        contact,
+        sendId,
+        destino
+      );
 
   try {
     const { html, errors } = await buildEmailHtml(
@@ -243,9 +254,7 @@ async function finalizeCampaignIfDone(campaignId: string): Promise<void> {
     const updated = await db
       .update(campaigns)
       .set({ status: "sent", sentAt: new Date() })
-      .where(
-        and(eq(campaigns.id, campaignId), eq(campaigns.status, "sending"))
-      )
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.status, "sending")))
       .returning({ id: campaigns.id, name: campaigns.name });
 
     if (updated.length > 0) {

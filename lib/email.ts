@@ -23,16 +23,22 @@ export interface SendContent {
  * <mj-title>/<mj-preview> do cabeçalho. corpo/cta_* são mantidos por
  * compatibilidade com e-mails/templates legados que ainda usem esses tokens.
  *
- * O descadastro é assinado com (contato, envio) — vale igual para campanha e
- * para automação, porque o token não sabe de qual das duas o envio veio.
+ * O descadastro é assinado com (contato, envio, e-mail) — vale igual para
+ * campanha e para automação, porque o token não sabe de qual das duas o
+ * envio veio. O e-mail é o endereço que RECEBE: é só ele que sai.
  */
 export async function buildSendVariables(
   content: SendContent,
   contact: Contact,
-  sendId: string
+  sendId: string,
+  email?: string
 ): Promise<TemplateVariables> {
   const baseUrl = getBaseUrl();
-  const unsubscribeToken = await signUnsubscribeToken(contact.id, sendId);
+  const unsubscribeToken = await signUnsubscribeToken(
+    contact.id,
+    sendId,
+    email
+  );
 
   return {
     nome_parceiro: contact.name,
@@ -52,7 +58,8 @@ export async function buildSendVariables(
 export async function buildCampaignVariables(
   campaign: Campaign,
   contact: Contact,
-  sendId: string
+  sendId: string,
+  email?: string
 ): Promise<TemplateVariables> {
   return buildSendVariables(
     {
@@ -63,7 +70,8 @@ export async function buildCampaignVariables(
       ctaUrl: campaign.ctaUrl,
     },
     contact,
-    sendId
+    sendId,
+    email
   );
 }
 

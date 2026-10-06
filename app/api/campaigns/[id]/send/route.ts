@@ -21,6 +21,7 @@ import {
   whatsappTemplates,
   type Campaign,
 } from "@/lib/db";
+import { enderecosElegiveis } from "@/lib/contatos/destinatarios";
 import { naoEhLead } from "@/lib/leads";
 import { getEmailQueue, getSmsQueue, getWhatsAppQueue } from "@/lib/queue";
 import { sessionUserFromRequest } from "@/lib/session";
@@ -120,11 +121,9 @@ async function dispatchWhatsApp(
     );
   }
 
-  // Contatos elegíveis: consentimento de WhatsApp + telefone + listas + tags.
-  const conditions: SQL[] = [
-    eq(contacts.whatsappSubscribed, true),
-    isNotNull(contacts.phone),
-  ];
+  // Contatos elegíveis: listas + tags + (abaixo) cada telefone que aceita
+  // WhatsApp — um contato com dois números recebe nos dois.
+  const conditions: SQL[] = [];
   // TRAVA 2 (docs/plano-webhooks-leads.md, seção 5): campanha é de parceiro,
   // cliente e colaborador — lead NUNCA entra, sem exceção nem opção. É aqui, e
   // não no seletor, que a regra vale: a escolha manual de destinatários e a
@@ -159,10 +158,7 @@ async function dispatchWhatsApp(
     conditions.push(inArray(contacts.id, campaign.recipientIds));
   }
 
-  const eligible = await db
-    .select({ id: contacts.id })
-    .from(contacts)
-    .where(and(...conditions));
+  const eligible = await enderecosElegiveis(db, "whatsapp", conditions);
 
   if (eligible.length === 0) {
     return NextResponse.json(
@@ -203,10 +199,11 @@ async function dispatchWhatsApp(
   const sends = await db
     .insert(campaignSends)
     .values(
-      eligible.map((contact) => ({
+      eligible.map((destino) => ({
         campaignId: campaign.id,
         channel: "whatsapp" as const,
-        contactId: contact.id,
+        contactId: destino.contactId,
+        address: destino.address,
       }))
     )
     .returning({ id: campaignSends.id, contactId: campaignSends.contactId });
@@ -305,11 +302,9 @@ async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
     );
   }
 
-  // Contatos elegíveis: consentimento de SMS + telefone + listas + tags.
-  const conditions: SQL[] = [
-    eq(contacts.smsSubscribed, true),
-    isNotNull(contacts.phone),
-  ];
+  // Contatos elegíveis: listas + tags + (abaixo) cada telefone que aceita
+  // SMS — um contato com dois números recebe nos dois.
+  const conditions: SQL[] = [];
   // TRAVA 2 (docs/plano-webhooks-leads.md, seção 5): campanha é de parceiro,
   // cliente e colaborador — lead NUNCA entra, sem exceção nem opção.
   conditions.push(naoEhLead());
@@ -341,10 +336,7 @@ async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
     conditions.push(inArray(contacts.id, campaign.recipientIds));
   }
 
-  const eligible = await db
-    .select({ id: contacts.id })
-    .from(contacts)
-    .where(and(...conditions));
+  const eligible = await enderecosElegiveis(db, "sms", conditions);
 
   if (eligible.length === 0) {
     return NextResponse.json(
@@ -359,10 +351,11 @@ async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
   const sends = await db
     .insert(campaignSends)
     .values(
-      eligible.map((contact) => ({
+      eligible.map((destino) => ({
         campaignId: campaign.id,
         channel: "sms" as const,
-        contactId: contact.id,
+        contactId: destino.contactId,
+        address: destino.address,
       }))
     )
     .returning({ id: campaignSends.id, contactId: campaignSends.contactId });
@@ -466,7 +459,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       if (!template) {
         return NextResponse.json(
-          { error: "Esta campanha não tem e-mail montado e o template de origem não existe mais." },
+          {
+            error:
+              "Esta campanha não tem e-mail montado e o template de origem não existe mais.",
+          },
           { status: 400 }
         );
       }
@@ -512,8 +508,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
         .where(eq(campaigns.id, campaign.id));
     }
 
-    // 1. Contatos elegíveis: inscritos + listas + tags.
-    const conditions: SQL[] = [eq(contacts.subscribed, true)];
+    // 1. Contatos elegíveis: listas + tags + (abaixo) cada e-mail que
+    // aceita — um contato com dois e-mails recebe nos dois.
+    const conditions: SQL[] = [];
     // TRAVA 2: lead não recebe campanha. Vale igual para o Avante News, que
     // nunca teve lead como público.
     conditions.push(naoEhLead());
@@ -546,10 +543,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       conditions.push(inArray(contacts.id, campaign.recipientIds));
     }
 
-    const eligible = await db
-      .select({ id: contacts.id })
-      .from(contacts)
-      .where(and(...conditions));
+    const eligible = await enderecosElegiveis(db, "email", conditions);
 
     if (eligible.length === 0) {
       return NextResponse.json(
@@ -561,14 +555,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // 2. Um registro de envio por contato.
+    // 2. Um registro de envio por endereço.
     const sends = await db
       .insert(campaignSends)
       .values(
-        eligible.map((contact) => ({
+        eligible.map((destino) => ({
           campaignId: campaign.id,
           channel: "email" as const,
-          contactId: contact.id,
+          contactId: destino.contactId,
+          address: destino.address,
         }))
       )
       .returning({

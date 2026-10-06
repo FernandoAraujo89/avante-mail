@@ -585,7 +585,9 @@ export function CampaignWizard({
 
         const res = await fetch(`/api/contacts?${params.toString()}`);
         const json = await res.json();
-        if (!cancelled && res.ok) setRecipientCount(json.count);
+        // Mensagens, não pessoas: quem tem dois telefones recebe nos dois, e
+        // é isso que custa e que conta no limite diário.
+        if (!cancelled && res.ok) setRecipientCount(json.addresses ?? json.count);
       } catch {
         // Silencioso: a contagem é informativa.
       }

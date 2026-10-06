@@ -11,6 +11,7 @@ import {
   type SendStatus,
   type WhatsAppTemplate,
 } from "@/lib/db";
+import { enderecoParaEnvioUnico } from "@/lib/contatos/destinatarios";
 import type { SendContent } from "@/lib/email";
 import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
@@ -176,6 +177,8 @@ async function registrarEnvio(args: {
   stepId: string;
   contactId: string;
   channel: CampaignChannel;
+  /** O endereço escolhido para este envio (o worker manda para ele). */
+  address: string;
 }): Promise<EnvioDoPasso> {
   const db = getDb();
 
@@ -187,6 +190,7 @@ async function registrarEnvio(args: {
       automationStepId: args.stepId,
       channel: args.channel,
       contactId: args.contactId,
+      address: args.address,
     })
     .onConflictDoNothing({
       target: [campaignSends.automationRunId, campaignSends.automationStepId],
@@ -264,11 +268,23 @@ export async function enviarEmailDoPasso(args: {
     };
   }
 
+  // Passo de automação manda UMA mensagem por contato: vai para o e-mail
+  // principal, se aceita; senão para o primeiro que aceita.
+  const address = await enderecoParaEnvioUnico(
+    getDb(),
+    "email",
+    args.contactId
+  );
+  if (!address) {
+    return { pulado: "contato ainda não deu aceite para e-mail" };
+  }
+
   const envio = await registrarEnvio({
     runId: args.runId,
     stepId: args.stepId,
     contactId: args.contactId,
     channel: "email",
+    address,
   });
 
   if (envio.reaproveitado && envio.status !== "pending") {
@@ -339,11 +355,23 @@ export async function enviarWhatsAppDoPasso(args: {
     );
   }
 
+  // Uma mensagem por contato: o telefone principal, se aceita; senão o
+  // primeiro que aceita.
+  const address = await enderecoParaEnvioUnico(
+    getDb(),
+    "whatsapp",
+    args.contactId
+  );
+  if (!address) {
+    return { pulado: "contato sem telefone ou sem consentimento de WhatsApp" };
+  }
+
   const envio = await registrarEnvio({
     runId: args.runId,
     stepId: args.stepId,
     contactId: args.contactId,
     channel: "whatsapp",
+    address,
   });
 
   if (envio.reaproveitado && envio.status !== "pending") {

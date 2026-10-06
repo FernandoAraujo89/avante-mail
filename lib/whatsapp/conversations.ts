@@ -185,6 +185,14 @@ export async function recordInboundMessage(
         and(
           eq(campaignSends.contactId, contact.id),
           eq(campaignSends.channel, "whatsapp"),
+          // O envio feito para o número que escreveu (envio antigo, sem
+          // endereço, vale para qualquer número do contato).
+          contact.phone
+            ? or(
+                isNull(campaignSends.address),
+                eq(campaignSends.address, contact.phone)
+              )
+            : undefined,
           // Mensagem que não chegou não recebe resposta.
           ne(campaignSends.status, "failed"),
           isNotNull(campaignSends.sentAt),

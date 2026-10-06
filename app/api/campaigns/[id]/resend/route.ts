@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, count, eq, gte, inArray, isNotNull, or } from "drizzle-orm";
 
+import { enderecosQueAceitam } from "@/lib/contatos/destinatarios";
 import { campaigns, campaignSends, contacts, getDb } from "@/lib/db";
 import { getWhatsAppQueue } from "@/lib/queue";
 import { errorMessage } from "@/lib/utils";
@@ -47,13 +48,17 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Só reenvia para quem CONTINUA elegível: se o contato pediu para sair
-    // (respondeu SAIR) ou perdeu o telefone depois do disparo, ele não volta
-    // para a fila — a mesma regra do envio original.
-    const alvos = await db
+    // Só reenvia para quem CONTINUA elegível: se o NÚMERO pediu para sair
+    // (respondeu SAIR) ou foi tirado do cadastro depois do disparo, ele não
+    // volta para a fila — a mesma regra do envio original. Envio de antes dos
+    // endereços múltiplos (address nulo) vale pelo consentimento do contato.
+    const candidatos = await db
       .select({
         id: campaignSends.id,
         contactId: campaignSends.contactId,
+        address: campaignSends.address,
+        contatoAceita: contacts.whatsappSubscribed,
+        contatoTemTelefone: contacts.phone,
       })
       .from(campaignSends)
       .innerJoin(contacts, eq(contacts.id, campaignSends.contactId))
@@ -61,11 +66,19 @@ export async function POST(_request: NextRequest, context: RouteContext) {
         and(
           eq(campaignSends.campaignId, campaign.id),
           eq(campaignSends.status, "failed"),
-          inArray(campaignSends.errorCode, RESENDABLE_ERROR_CODES),
-          eq(contacts.whatsappSubscribed, true),
-          isNotNull(contacts.phone)
+          inArray(campaignSends.errorCode, RESENDABLE_ERROR_CODES)
         )
       );
+    const aceitam = await enderecosQueAceitam(
+      db,
+      "whatsapp",
+      candidatos.flatMap((c) => (c.address ? [c.address] : []))
+    );
+    const alvos = candidatos.filter((c) =>
+      c.address
+        ? aceitam.has(c.address)
+        : c.contatoAceita && c.contatoTemTelefone !== null
+    );
 
     if (alvos.length === 0) {
       return NextResponse.json(

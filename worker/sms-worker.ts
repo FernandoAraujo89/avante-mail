@@ -3,9 +3,14 @@ import "./env";
 import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
+import { enderecoAceita } from "../lib/contatos/destinatarios";
 import { optOutTelefone } from "../lib/contatos/enderecos";
 import { campaigns, campaignSends, contacts, getDb } from "../lib/db";
-import { createRedisConnection, SMS_QUEUE_NAME, type SmsJobData } from "../lib/queue";
+import {
+  createRedisConnection,
+  SMS_QUEUE_NAME,
+  type SmsJobData,
+} from "../lib/queue";
 import {
   isRetryableSmsError,
   sendSms,
@@ -40,7 +45,7 @@ if (missingInfra.length > 0) {
 // incluir este serviço antes de a conta Twilio estar pronta.
 const smsProblems = isSmsEnabled()
   ? validateSmsEnv()
-  : ["TWILIO_SMS_ENABLED não está como \"true\""];
+  : ['TWILIO_SMS_ENABLED não está como "true"'];
 
 async function processJob(job: Job<SmsJobData>): Promise<void> {
   const { sendId, contactId } = job.data;
@@ -73,22 +78,32 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
     throw new Error("Contato não encontrado no banco.");
   }
 
+  // Para onde vai: o telefone gravado no envio; nos envios de antes dos
+  // endereços múltiplos, o telefone principal do contato.
+  const destino = send.address ?? contact.phone;
+
   // Falha definitiva sem retry: grava o motivo e completa o job.
   async function failPermanently(
     code: string | null,
     message: string
   ): Promise<void> {
-    console.log(`[WORKER-SMS] ${contact.phone ?? contactId}: ✗ ${message}`);
+    console.log(`[WORKER-SMS] ${destino ?? contactId}: ✗ ${message}`);
     await db
       .update(campaignSends)
       .set({ status: "failed", errorCode: code, errorMessage: message })
       .where(eq(campaignSends.id, sendId));
   }
 
-  if (!contact.phone || !contact.smsSubscribed) {
-    // Removeu o telefone ou descadastrou depois de entrar na fila. A campanha
-    // pode ter sido agendada semanas antes; o consentimento vale o do momento
-    // do envio, não o do disparo.
+  // Consentimento DESTE número na hora do envio. A campanha pode ter sido
+  // agendada semanas antes; o consentimento vale o do momento do envio, não
+  // o do disparo. Envio antigo, sem endereço: vale o do contato.
+  const aceita = destino
+    ? send.address
+      ? await enderecoAceita(db, "sms", send.address)
+      : contact.smsSubscribed
+    : false;
+  if (!destino || !aceita) {
+    // Removeu o telefone ou descadastrou depois de entrar na fila.
     await failPermanently(
       null,
       "Contato sem telefone ou sem consentimento de SMS."
@@ -142,7 +157,9 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
   // para UCS-2 e triplica a conta sem ninguém perceber.
   const sanitizado = sanitizeGsm7(body);
   if (!sanitizado.ok) {
-    const problemas = [...sanitizado.emojis, ...sanitizado.foraDoGsm7].join(" ");
+    const problemas = [...sanitizado.emojis, ...sanitizado.foraDoGsm7].join(
+      " "
+    );
     await failPermanently(
       null,
       `Texto do SMS tem caracteres que o GSM-7 não aceita: ${problemas}`
@@ -154,7 +171,7 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
 
   let sid: string;
   try {
-    ({ sid } = await sendSms({ to: contact.phone, body: sanitizado.texto }));
+    ({ sid } = await sendSms({ to: destino, body: sanitizado.texto }));
   } catch (error) {
     if (!isRetryableSmsError(error)) {
       const code =
@@ -169,9 +186,9 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
       // caso do 21610 é a Twilio dizendo que a pessoa mandou PARAR por um
       // caminho que nosso webhook não viu.
       if (shouldMarkSmsOptOut(error)) {
-        await optOutTelefone(db, send.address ?? contact.phone, "sms");
+        await optOutTelefone(db, destino, "sms");
         console.log(
-          `[WORKER-SMS] ${contact.phone} marcado fora do canal SMS (código ${
+          `[WORKER-SMS] ${destino} marcado fora do canal SMS (código ${
             error instanceof SmsApiError ? error.code : "?"
           }).`
         );
@@ -179,7 +196,7 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
       return;
     }
     console.log(
-      `[WORKER-SMS] Enviando para ${contact.phone}... ✗ (${errorMessage(error)}) — nova tentativa em instantes`
+      `[WORKER-SMS] Enviando para ${destino}... ✗ (${errorMessage(error)}) — nova tentativa em instantes`
     );
     throw error; // transitório: BullMQ reagenda com backoff
   }
@@ -203,7 +220,7 @@ async function processJob(job: Job<SmsJobData>): Promise<void> {
       .where(eq(campaignSends.id, sendId));
 
     console.log(
-      `[WORKER-SMS] Enviando para ${contact.phone}... ✓ (${segmentos} segmento${segmentos === 1 ? "" : "s"})`
+      `[WORKER-SMS] Enviando para ${destino}... ✓ (${segmentos} segmento${segmentos === 1 ? "" : "s"})`
     );
   } catch (updateError) {
     console.error(

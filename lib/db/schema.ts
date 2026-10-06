@@ -1052,15 +1052,16 @@ export const campaignSends = pgTable("campaign_sends", {
   uniqueIndex("campaign_sends_automacao_passo_idx")
     .on(t.automationRunId, t.automationStepId)
     .where(sql`${t.automationRunId} is not null`),
-  // Uma campanha manda UMA vez para cada contato. Sem isto, dois cliques em
-  // "Disparar" (ou um disparo de campanha já agendada) criavam a fila inteira
-  // de novo: todo mundo recebia duas vezes e a conta vinha dobrada. O guarda
-  // de status no /send fecha o caminho comum; este índice é a garantia dura,
-  // no banco, que também cobre a corrida entre duas requisições simultâneas.
-  // Parcial porque envio de automação tem campaign_id nulo e é controlado
-  // pelo índice acima.
-  uniqueIndex("campaign_sends_campanha_contato_idx")
-    .on(t.campaignId, t.contactId)
+  // Uma campanha manda UMA vez para cada endereço de cada contato. Sem isto,
+  // dois cliques em "Disparar" (ou um disparo de campanha já agendada)
+  // criavam a fila inteira de novo: todo mundo recebia duas vezes e a conta
+  // vinha dobrada. O guarda de status no /send fecha o caminho comum; este
+  // índice é a garantia dura, no banco, que também cobre a corrida entre
+  // duas requisições simultâneas. Parcial porque envio de automação tem
+  // campaign_id nulo e é controlado pelo índice acima. (Até os endereços
+  // múltiplos era por contato; os envios antigos têm address nulo.)
+  uniqueIndex("campaign_sends_campanha_endereco_idx")
+    .on(t.campaignId, t.contactId, t.address)
     .where(sql`${t.campaignId} is not null`),
 ]);
 

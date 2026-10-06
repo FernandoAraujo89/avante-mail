@@ -129,11 +129,27 @@ export async function SendReport({
       contactEmail: contacts.email,
       contactPhone: contacts.phone,
       contactCompany: contacts.company,
+      address: campaignSends.address,
     })
     .from(campaignSends)
     .innerJoin(contacts, eq(campaignSends.contactId, contacts.id))
     .where(eq(campaignSends.campaignId, id))
-    .orderBy(asc(contacts.name));
+    .orderBy(asc(contacts.name))
+    // O endereço para onde ESTE envio foi — um contato com dois telefones
+    // tem duas linhas. Envio antigo, sem endereço: o do contato.
+    .then((rows) =>
+      rows.map((s) => ({
+        ...s,
+        contactEmail:
+          campaign.channel === "email"
+            ? (s.address ?? s.contactEmail)
+            : s.contactEmail,
+        contactPhone:
+          campaign.channel === "email"
+            ? s.contactPhone
+            : (s.address ?? s.contactPhone),
+      }))
+    );
 
   const isWhatsApp = campaign.channel === "whatsapp";
   const isSms = campaign.channel === "sms";
@@ -214,15 +230,25 @@ export async function SendReport({
         body: whatsappMessages.body,
       })
       .from(whatsappMessages)
-      .innerJoin(campaignSends, eq(campaignSends.id, whatsappMessages.campaignSendId))
+      .innerJoin(
+        campaignSends,
+        eq(campaignSends.id, whatsappMessages.campaignSendId)
+      )
       .where(
         and(
           eq(campaignSends.campaignId, id),
           eq(whatsappMessages.direction, "inbound"),
-          notInArray(whatsappMessages.type, ["button", "interactive", "reaction"])
+          notInArray(whatsappMessages.type, [
+            "button",
+            "interactive",
+            "reaction",
+          ])
         )
       )
-      .orderBy(whatsappMessages.campaignSendId, desc(whatsappMessages.createdAt));
+      .orderBy(
+        whatsappMessages.campaignSendId,
+        desc(whatsappMessages.createdAt)
+      );
     const replyTextBySend = new Map(
       writtenReplies.map((r) => [r.sendId, messagePreview(r)])
     );
@@ -290,7 +316,9 @@ export async function SendReport({
             label="Respostas"
             value={String(replied)}
             hint={
-              replied > 0 ? "Contatos que responderam" : "Nenhuma resposta ainda"
+              replied > 0
+                ? "Contatos que responderam"
+                : "Nenhuma resposta ainda"
             }
             icon={MessageSquareReply}
           />
@@ -347,9 +375,9 @@ export async function SendReport({
                       ? "1 contato não recebeu"
                       : `${heldByMeta} contatos não receberam`}
                   </span>{" "}
-                  porque a Meta segurou a mensagem por limite de frequência.
-                  Não é falha técnica e não houve cobrança — dá para reenviar
-                  só para eles quando o limite liberar.
+                  porque a Meta segurou a mensagem por limite de frequência. Não
+                  é falha técnica e não houve cobrança — dá para reenviar só
+                  para eles quando o limite liberar.
                 </>
               )}
             </p>
@@ -444,7 +472,9 @@ export async function SendReport({
             label="Respostas"
             value={String(replied)}
             hint={
-              replied > 0 ? "Contatos que responderam" : "Nenhuma resposta ainda"
+              replied > 0
+                ? "Contatos que responderam"
+                : "Nenhuma resposta ainda"
             }
             icon={MessageSquareReply}
           />

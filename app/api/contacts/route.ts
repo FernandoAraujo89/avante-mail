@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm";
 
 import { EnderecoInvalido, lerEnderecosDoCorpo } from "@/lib/contatos/corpo";
+import { contarEnderecosElegiveis } from "@/lib/contatos/destinatarios";
 import {
   contatosPorEnderecos,
   definirEnderecos,
@@ -168,7 +169,20 @@ export async function GET(request: NextRequest) {
         .select({ count: count() })
         .from(contacts)
         .where(where);
-      return NextResponse.json({ count: row.count });
+      // Quantas MENSAGENS sairiam: um contato com dois telefones conta dois.
+      // É o número que custa e que entra no limite diário.
+      const canal =
+        params.get("whatsappEligible") === "true"
+          ? "whatsapp"
+          : params.get("smsEligible") === "true"
+            ? "sms"
+            : subscribed === "true"
+              ? "email"
+              : null;
+      const addresses = canal
+        ? await contarEnderecosElegiveis(db, canal, conditions)
+        : row.count;
+      return NextResponse.json({ count: row.count, addresses });
     }
 
     const data = await db

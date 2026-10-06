@@ -4,6 +4,7 @@ import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
 import { modeloDoPassoDeWhatsApp } from "../lib/automations/envios";
+import { enderecoAceita } from "../lib/contatos/destinatarios";
 import {
   campaigns,
   campaignSends,
@@ -87,19 +88,30 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     throw new Error("Contato não encontrado no banco.");
   }
 
+  // Para onde vai: o telefone gravado no envio; nos envios de antes dos
+  // endereços múltiplos, o telefone principal do contato.
+  const destino = send.address ?? contact.phone;
+
   // Falha definitiva sem retry: grava o motivo e completa o job.
   async function failPermanently(
     code: string | null,
     message: string
   ): Promise<void> {
-    console.log(`[WORKER-WA] ${contact.phone ?? contactId}: ✗ ${message}`);
+    console.log(`[WORKER-WA] ${destino ?? contactId}: ✗ ${message}`);
     await db
       .update(campaignSends)
       .set({ status: "failed", errorCode: code, errorMessage: message })
       .where(eq(campaignSends.id, sendId));
   }
 
-  if (!contact.phone || !contact.whatsappSubscribed) {
+  // Consentimento DESTE número na hora do envio: a campanha pode ter sido
+  // agendada semanas antes. Envio antigo, sem endereço: vale o do contato.
+  const aceita = destino
+    ? send.address
+      ? await enderecoAceita(db, "whatsapp", send.address)
+      : contact.whatsappSubscribed
+    : false;
+  if (!destino || !aceita) {
     // Removeu o telefone ou descadastrou depois de entrar na fila.
     await failPermanently(
       null,
@@ -137,10 +149,7 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
         .update(campaigns)
         .set({ status: "sending" })
         .where(
-          and(
-            eq(campaigns.id, campaign.id),
-            eq(campaigns.status, "scheduled")
-          )
+          and(eq(campaigns.id, campaign.id), eq(campaigns.status, "scheduled"))
         );
     }
   } else {
@@ -193,7 +202,7 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     });
 
     const { wamid } = await sendTemplateMessage({
-      to: phoneToWaId(contact.phone),
+      to: phoneToWaId(destino),
       templateName: template.name,
       language: template.language,
       components,
@@ -208,7 +217,7 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
       })
       .where(eq(campaignSends.id, sendId));
 
-    console.log(`[WORKER-WA] Enviando para ${contact.phone}... ✓`);
+    console.log(`[WORKER-WA] Enviando para ${destino}... ✓`);
   } catch (error) {
     if (isPermanentSendError(error)) {
       // Ex.: 131049 (limite de marketing do destinatário — esperado),
@@ -223,7 +232,7 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
       return;
     }
     console.log(
-      `[WORKER-WA] Enviando para ${contact.phone}... ✗ (${errorMessage(error)}) — nova tentativa em instantes`
+      `[WORKER-WA] Enviando para ${destino}... ✗ (${errorMessage(error)}) — nova tentativa em instantes`
     );
     throw error; // transitório: BullMQ reagenda com backoff
   }
@@ -301,9 +310,7 @@ async function finalizeCampaignIfDone(campaignId: string): Promise<void> {
     const updated = await db
       .update(campaigns)
       .set({ status: "sent", sentAt: new Date() })
-      .where(
-        and(eq(campaigns.id, campaignId), eq(campaigns.status, "sending"))
-      )
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.status, "sending")))
       .returning({ id: campaigns.id, name: campaigns.name });
 
     if (updated.length > 0) {
@@ -336,7 +343,10 @@ function startWorker() {
 
   worker.on("failed", async (job, error) => {
     if (!job) {
-      console.error("[WORKER-WA] Job desconhecido falhou:", errorMessage(error));
+      console.error(
+        "[WORKER-WA] Job desconhecido falhou:",
+        errorMessage(error)
+      );
       return;
     }
 

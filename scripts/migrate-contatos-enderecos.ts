@@ -74,6 +74,13 @@ async function main() {
   await client.query(
     `ALTER TABLE campaign_sends ADD COLUMN IF NOT EXISTS address text`
   );
+  // Uma campanha manda uma vez por ENDEREÇO do contato, não por contato.
+  await client.query(`DROP INDEX IF EXISTS campaign_sends_campanha_contato_idx`);
+  await client.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS campaign_sends_campanha_endereco_idx
+       ON campaign_sends (campaign_id, contact_id, address)
+       WHERE campaign_id IS NOT NULL`
+  );
 
   // O marcador que o webhook de leads inventava quando só vinha telefone
   // deixa de existir: agora o e-mail pode simplesmente faltar.

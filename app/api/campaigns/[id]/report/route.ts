@@ -52,11 +52,27 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         contactEmail: contacts.email,
         contactPhone: contacts.phone,
         contactCompany: contacts.company,
+        address: campaignSends.address,
       })
       .from(campaignSends)
       .innerJoin(contacts, eq(campaignSends.contactId, contacts.id))
       .where(eq(campaignSends.campaignId, id))
-      .orderBy(asc(contacts.name));
+      .orderBy(asc(contacts.name))
+      // O endereço para onde ESTE envio foi — um contato com dois telefones
+      // tem duas linhas. Envio antigo, sem endereço: o do contato.
+      .then((rows) =>
+        rows.map((s) => ({
+          ...s,
+          contactEmail:
+            campaign.channel === "email"
+              ? (s.address ?? s.contactEmail)
+              : s.contactEmail,
+          contactPhone:
+            campaign.channel === "email"
+              ? s.contactPhone
+              : (s.address ?? s.contactPhone),
+        }))
+      );
 
     const pending = sends.filter((s) => s.status === "pending").length;
     const failed = sends.filter((s) => s.status === "failed").length;
