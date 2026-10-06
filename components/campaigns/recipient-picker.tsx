@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Search } from "lucide-react";
 
 import {
-  NumberFilterDialog,
-  type NumberFilterResult,
-} from "@/components/campaigns/number-filter-dialog";
+  PlanilhaFilterDialog,
+  type PlanilhaFilterResult,
+} from "@/components/campaigns/planilha-filter-dialog";
 import { Paginacao, usePaginacao } from "@/components/paginacao";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,8 @@ export interface RecipientContact {
   email: string | null;
   company: string | null;
   phone: string | null;
-  /** Todos os telefones (o filtro por lista de números olha todos). */
+  /** Todos os e-mails e telefones (o filtro por planilha olha todos). */
+  emails: string[];
   phones: string[];
   /** Quantos endereços deste contato aceitam o canal: é o que ele recebe. */
   eligibleAddresses: number;
@@ -57,9 +58,9 @@ export function RecipientPicker({
   const [contacts, setContacts] = useState<RecipientContact[] | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
-  // Resumo do último filtro por lista de números, para o usuário não perder de
-  // vista o que a seleção atual significa depois de fechar a janela.
-  const [filtro, setFiltro] = useState<NumberFilterResult | null>(null);
+  // Resumo do último filtro por planilha, para o usuário não perder de vista
+  // o que a seleção atual significa depois de fechar a janela.
+  const [filtro, setFiltro] = useState<PlanilhaFilterResult | null>(null);
 
   // Callbacks e valor por ref: a lista só é recarregada quando o público muda
   // (canal/listas/tags), não a cada clique numa linha.
@@ -123,6 +124,7 @@ export function RecipientPicker({
             email: c.email ?? null,
             company: c.company ?? null,
             phone: c.phone ?? null,
+            emails: Array.isArray(c.emails) ? c.emails : [],
             phones: Array.isArray(c.phones) ? c.phones : [],
             eligibleAddresses:
               typeof c.eligibleAddresses === "number" ? c.eligibleAddresses : 1,
@@ -222,17 +224,16 @@ export function RecipientPicker({
           )}
         </p>
         <div className="flex flex-wrap gap-2">
-          {/* Colar uma lista de números vale para qualquer canal de telefone —
-              o diálogo só cruza o que já está cadastrado. */}
-          {channel !== "email" ? (
-            <NumberFilterDialog
-              contacts={contacts}
-              onApply={(ids, resultado) => {
-                onChange(ids);
-                setFiltro(resultado);
-              }}
-            />
-          ) : null}
+          {/* A planilha do comercial vale para qualquer canal: o diálogo só
+              cruza o que já está cadastrado (por e-mail, telefone ou nome). */}
+          <PlanilhaFilterDialog
+            channel={channel}
+            contacts={contacts}
+            onApply={(ids, resultado) => {
+              onChange(ids);
+              setFiltro(resultado);
+            }}
+          />
           <Button
             type="button"
             variant="outline"
@@ -262,20 +263,31 @@ export function RecipientPicker({
 
       {filtro ? (
         <p className="rounded-lg border border-border bg-accent/50 px-3 py-2 text-xs">
-          Filtrado por lista de números:{" "}
+          Filtrado por planilha:{" "}
           <span className="font-medium">
-            {filtro.encontrados} de {filtro.total}
+            {filtro.encontradas} de {filtro.total}
           </span>{" "}
-          encontrados
-          {filtro.naoEncontrados.length > 0 ? (
+          linhas encontradas
+          {filtro.naoEncontradas.length > 0 ? (
             <>
               {" "}
               ·{" "}
               <span className="font-medium text-destructive-hover">
-                {filtro.naoEncontrados.length} não encontrado
-                {filtro.naoEncontrados.length === 1 ? "" : "s"}
+                {filtro.naoEncontradas.length} não encontrada
+                {filtro.naoEncontradas.length === 1 ? "" : "s"}
               </span>{" "}
               (abra o filtro para ver quais)
+            </>
+          ) : null}
+          {filtro.nomesAmbiguos.length > 0 ? (
+            <>
+              {" "}
+              ·{" "}
+              <span className="font-medium">
+                {filtro.nomesAmbiguos.length} nome
+                {filtro.nomesAmbiguos.length === 1 ? "" : "s"} com mais de um
+                contato
+              </span>
             </>
           ) : null}
         </p>
