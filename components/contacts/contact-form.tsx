@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
+import { ArrowUp, Check, Plus, Trash2 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -15,35 +15,39 @@ import { cn } from "@/lib/utils";
 
 type ListOption = { id: string; name: string };
 
+// Um contato tem VÁRIOS e-mails e VÁRIOS telefones, cada um com o próprio
+// consentimento (lib/db/schema.ts, contact_emails/contact_phones). O
+// primeiro de cada lista é o principal — o que aparece na lista de contatos.
+type EmailRow = { email: string; subscribed: boolean };
+type PhoneRow = {
+  phone: string;
+  whatsappSubscribed: boolean;
+  smsSubscribed: boolean;
+};
+
+const EMAIL_VAZIO: EmailRow = { email: "", subscribed: true };
+// Contato novo já entra com consentimento de WhatsApp e SMS; quem não
+// autorizou é que precisa ser desmarcado. Na edição, o valor salvo manda.
+const PHONE_VAZIO: PhoneRow = {
+  phone: "",
+  whatsappSubscribed: true,
+  smsSubscribed: true,
+};
+
 export function ContactForm({ contactId }: { contactId?: string }) {
   const router = useRouter();
   const isEditing = Boolean(contactId);
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [emails, setEmails] = useState<EmailRow[]>([EMAIL_VAZIO]);
+  const [phones, setPhones] = useState<PhoneRow[]>([PHONE_VAZIO]);
   const [company, setCompany] = useState("");
   const [tags, setTags] = useState("");
-  const [subscribed, setSubscribed] = useState(true);
-  // Contato novo já entra com consentimento de WhatsApp; quem não autorizou é
-  // que precisa ser desmarcado. Na edição, o valor salvo é quem manda (abaixo).
-  const [whatsappSubscribed, setWhatsappSubscribed] = useState(true);
-  // Mesma regra para o SMS, em campo próprio: sair de um canal não tira a
-  // pessoa do outro.
-  const [smsSubscribed, setSmsSubscribed] = useState(true);
   const [availableLists, setAvailableLists] = useState<ListOption[]>([]);
   const [listIds, setListIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(isEditing);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-
-  // Motivo pelo qual o número digitado não recebe SMS, ou "" quando recebe.
-  // Só avalia número com cara de completo: reclamar a cada tecla, enquanto a
-  // pessoa ainda está digitando o DDD, seria só barulho.
-  const checagemSms =
-    phone.replace(/\D/g, "").length >= 10 ? parseBrazilianMobile(phone) : null;
-  const telefoneNaoRecebeSms =
-    checagemSms && !checagemSms.ok ? MOTIVO_LABEL[checagemSms.motivo] : "";
 
   // Listas disponíveis para associar.
   useEffect(() => {
@@ -65,13 +69,30 @@ export function ContactForm({ contactId }: { contactId?: string }) {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Erro ao carregar contato.");
         setName(json.name ?? "");
-        setEmail(json.email ?? "");
-        setPhone(json.phone ?? "");
+        const emailsSalvos: EmailRow[] = (
+          Array.isArray(json.emails) ? json.emails : []
+        ).map((e: { email: string; subscribed: boolean }) => ({
+          email: e.email,
+          subscribed: e.subscribed !== false,
+        }));
+        const phonesSalvos: PhoneRow[] = (
+          Array.isArray(json.phones) ? json.phones : []
+        ).map(
+          (p: {
+            phone: string;
+            whatsappSubscribed: boolean;
+            smsSubscribed: boolean;
+          }) => ({
+            phone: p.phone,
+            whatsappSubscribed: p.whatsappSubscribed === true,
+            smsSubscribed: p.smsSubscribed === true,
+          })
+        );
+        // Sem endereço salvo, uma linha vazia convida a preencher.
+        setEmails(emailsSalvos.length > 0 ? emailsSalvos : [EMAIL_VAZIO]);
+        setPhones(phonesSalvos.length > 0 ? phonesSalvos : [PHONE_VAZIO]);
         setCompany(json.company ?? "");
         setTags(Array.isArray(json.tags) ? json.tags.join(", ") : "");
-        setSubscribed(json.subscribed !== false);
-        setWhatsappSubscribed(json.whatsappSubscribed === true);
-        setSmsSubscribed(json.smsSubscribed === true);
         setListIds(Array.isArray(json.listIds) ? json.listIds : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -83,14 +104,49 @@ export function ContactForm({ contactId }: { contactId?: string }) {
 
   function toggleList(id: string) {
     setListIds((current) =>
-      current.includes(id)
-        ? current.filter((x) => x !== id)
-        : [...current, id]
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
     );
+  }
+
+  function atualizarEmail(indice: number, patch: Partial<EmailRow>) {
+    setEmails((atual) =>
+      atual.map((row, i) => (i === indice ? { ...row, ...patch } : row))
+    );
+  }
+
+  function atualizarTelefone(indice: number, patch: Partial<PhoneRow>) {
+    setPhones((atual) =>
+      atual.map((row, i) => (i === indice ? { ...row, ...patch } : row))
+    );
+  }
+
+  /** Move a linha para o topo: o primeiro é o principal. */
+  function tornarPrincipal<T>(lista: T[], indice: number): T[] {
+    return [lista[indice], ...lista.filter((_, i) => i !== indice)];
+  }
+
+  function remover<T>(lista: T[], indice: number, vazio: T): T[] {
+    const resto = lista.filter((_, i) => i !== indice);
+    return resto.length > 0 ? resto : [vazio];
+  }
+
+  // Motivo pelo qual um número não recebe SMS, ou "" quando recebe. Só avalia
+  // número com cara de completo: reclamar a cada tecla, enquanto a pessoa
+  // ainda está digitando o DDD, seria só barulho.
+  function motivoSemSms(phone: string): string {
+    if (phone.replace(/\D/g, "").length < 10) return "";
+    const checagem = parseBrazilianMobile(phone);
+    return checagem.ok ? "" : MOTIVO_LABEL[checagem.motivo];
   }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    const emailsPreenchidos = emails.filter((e) => e.email.trim());
+    const phonesPreenchidos = phones.filter((p) => p.phone.trim());
+    if (emailsPreenchidos.length === 0 && phonesPreenchidos.length === 0) {
+      setError("Informe pelo menos um e-mail ou um telefone.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -101,14 +157,11 @@ export function ContactForm({ contactId }: { contactId?: string }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name,
-            email,
-            phone,
             company,
             tags,
-            subscribed,
-            whatsappSubscribed,
-            smsSubscribed,
             listIds,
+            emails: emailsPreenchidos,
+            phones: phonesPreenchidos,
           }),
         }
       );
@@ -158,32 +211,229 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                 />
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="email">E-mail *</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="parceiro@empresa.com.br"
-                  required
-                />
-              </div>
+              {/* ── E-mails ─────────────────────────────────────────── */}
+              <fieldset className="grid gap-2">
+                <legend className="text-sm font-medium">
+                  E-mails{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (o primeiro é o principal)
+                  </span>
+                </legend>
+                {emails.map((row, indice) => (
+                  <div
+                    key={indice}
+                    className="grid gap-2 rounded-lg border border-border p-3 @container"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="email"
+                        value={row.email}
+                        onChange={(e) =>
+                          atualizarEmail(indice, { email: e.target.value })
+                        }
+                        placeholder="parceiro@empresa.com.br"
+                        aria-label={`E-mail ${indice + 1}`}
+                      />
+                      {indice > 0 ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          title="Tornar principal"
+                          aria-label="Tornar este e-mail o principal"
+                          onClick={() =>
+                            setEmails((atual) => tornarPrincipal(atual, indice))
+                          }
+                        >
+                          <ArrowUp />
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        title="Remover"
+                        aria-label="Remover este e-mail"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() =>
+                          setEmails((atual) =>
+                            remover(atual, indice, EMAIL_VAZIO)
+                          )
+                        }
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                    <label
+                      className={cn(
+                        "flex items-center gap-2 text-sm",
+                        row.email.trim()
+                          ? "cursor-pointer"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={row.subscribed && Boolean(row.email.trim())}
+                        onChange={(e) =>
+                          atualizarEmail(indice, {
+                            subscribed: e.target.checked,
+                          })
+                        }
+                        disabled={!row.email.trim()}
+                        className="size-4 accent-[#1D50DC]"
+                      />
+                      Recebe campanhas por e-mail
+                      {row.email.trim() && !row.subscribed ? (
+                        <span className="text-xs text-muted-foreground">
+                          (marque para reativar)
+                        </span>
+                      ) : null}
+                    </label>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={() => setEmails((atual) => [...atual, EMAIL_VAZIO])}
+                >
+                  <Plus />
+                  Adicionar e-mail
+                </Button>
+              </fieldset>
 
-              <div className="grid gap-2">
-                <Label htmlFor="phone">Telefone (WhatsApp e SMS)</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="(48) 99999-9999"
-                />
+              {/* ── Telefones ───────────────────────────────────────── */}
+              <fieldset className="grid gap-2">
+                <legend className="text-sm font-medium">
+                  Telefones{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (com DDD; o primeiro é o principal)
+                  </span>
+                </legend>
+                {phones.map((row, indice) => {
+                  const temNumero = Boolean(row.phone.trim());
+                  const semSms = motivoSemSms(row.phone);
+                  return (
+                    <div
+                      key={indice}
+                      className="grid gap-2 rounded-lg border border-border p-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="tel"
+                          value={row.phone}
+                          onChange={(e) =>
+                            atualizarTelefone(indice, { phone: e.target.value })
+                          }
+                          placeholder="(48) 99999-9999"
+                          aria-label={`Telefone ${indice + 1}`}
+                        />
+                        {indice > 0 ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            title="Tornar principal"
+                            aria-label="Tornar este telefone o principal"
+                            onClick={() =>
+                              setPhones((atual) =>
+                                tornarPrincipal(atual, indice)
+                              )
+                            }
+                          >
+                            <ArrowUp />
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          title="Remover"
+                          aria-label="Remover este telefone"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() =>
+                            setPhones((atual) =>
+                              remover(atual, indice, PHONE_VAZIO)
+                            )
+                          }
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap gap-x-5 gap-y-1">
+                        <label
+                          className={cn(
+                            "flex items-center gap-2 text-sm",
+                            temNumero
+                              ? "cursor-pointer"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={row.whatsappSubscribed && temNumero}
+                            onChange={(e) =>
+                              atualizarTelefone(indice, {
+                                whatsappSubscribed: e.target.checked,
+                              })
+                            }
+                            disabled={!temNumero}
+                            className="size-4 accent-[#1D50DC]"
+                          />
+                          Aceita WhatsApp
+                        </label>
+                        <label
+                          className={cn(
+                            "flex items-center gap-2 text-sm",
+                            temNumero
+                              ? "cursor-pointer"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={row.smsSubscribed && temNumero}
+                            onChange={(e) =>
+                              atualizarTelefone(indice, {
+                                smsSubscribed: e.target.checked,
+                              })
+                            }
+                            disabled={!temNumero}
+                            className="size-4 accent-[#1D50DC]"
+                          />
+                          Aceita SMS
+                        </label>
+                      </div>
+                      {/* SMS não chega em fixo. O aviso é aqui e não no
+                          salvamento porque o custo aparece só na primeira
+                          campanha: a mensagem é cobrada, a Twilio devolve
+                          21614 e o número sai do canal. */}
+                      {semSms ? (
+                        <p className="text-xs text-amber-700 dark:text-amber-500">
+                          Este número não recebe SMS ({semSms}). O WhatsApp
+                          funciona normalmente.
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="justify-self-start"
+                  onClick={() => setPhones((atual) => [...atual, PHONE_VAZIO])}
+                >
+                  <Plus />
+                  Adicionar telefone
+                </Button>
                 <p className="text-xs text-muted-foreground">
-                  Com DDD. Usado nas campanhas de WhatsApp e de SMS (SMS só
-                  chega em celular).
+                  A campanha vai para todos os telefones e e-mails que aceitam o
+                  canal. Desmarque o que o contato não autorizou (LGPD).
                 </p>
-              </div>
+              </fieldset>
 
               <div className="grid gap-2">
                 <Label htmlFor="company">Empresa</Label>
@@ -246,76 +496,6 @@ export function ContactForm({ contactId }: { contactId?: string }) {
                   Separadas por vírgula.
                 </p>
               </div>
-
-              {isEditing ? (
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={subscribed}
-                    onChange={(e) => setSubscribed(e.target.checked)}
-                    className="size-4 accent-[#1D50DC]"
-                  />
-                  Inscrito — recebe campanhas por e-mail
-                  {!subscribed ? (
-                    <span className="text-xs text-muted-foreground">
-                      (marque para reativar o recebimento)
-                    </span>
-                  ) : null}
-                </label>
-              ) : null}
-
-              <label
-                className={
-                  phone.trim()
-                    ? "flex cursor-pointer items-center gap-2 text-sm"
-                    : "flex items-center gap-2 text-sm text-muted-foreground"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={whatsappSubscribed && Boolean(phone.trim())}
-                  onChange={(e) => setWhatsappSubscribed(e.target.checked)}
-                  disabled={!phone.trim()}
-                  className="size-4 accent-[#1D50DC]"
-                />
-                Aceita campanhas por WhatsApp
-                <span className="text-xs text-muted-foreground">
-                  {phone.trim()
-                    ? "(desmarque se o contato não autorizou — LGPD)"
-                    : "(informe o telefone para habilitar)"}
-                </span>
-              </label>
-
-              <label
-                className={
-                  phone.trim()
-                    ? "flex cursor-pointer items-center gap-2 text-sm"
-                    : "flex items-center gap-2 text-sm text-muted-foreground"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={smsSubscribed && Boolean(phone.trim())}
-                  onChange={(e) => setSmsSubscribed(e.target.checked)}
-                  disabled={!phone.trim()}
-                  className="size-4 accent-[#1D50DC]"
-                />
-                Aceita campanhas por SMS
-                <span className="text-xs text-muted-foreground">
-                  {phone.trim()
-                    ? "(consentimento separado do WhatsApp — LGPD)"
-                    : "(informe o telefone para habilitar)"}
-                </span>
-              </label>
-              {/* SMS não chega em fixo. O aviso é aqui e não no salvamento
-                  porque o custo aparece só na primeira campanha: a mensagem é
-                  cobrada, a Twilio devolve 21614 e o contato sai do canal. */}
-              {telefoneNaoRecebeSms ? (
-                <p className="-mt-1 pl-6 text-xs text-amber-700 dark:text-amber-500">
-                  Este número não recebe SMS ({telefoneNaoRecebeSms}). O
-                  WhatsApp funciona normalmente.
-                </p>
-              ) : null}
 
               <div className="flex gap-2 pt-2">
                 <Button type="submit" disabled={saving}>

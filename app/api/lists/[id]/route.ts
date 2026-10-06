@@ -47,6 +47,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         id: contacts.id,
         name: contacts.name,
         email: contacts.email,
+        phone: contacts.phone,
         company: contacts.company,
         subscribed: contacts.subscribed,
         createdAt: contacts.createdAt,

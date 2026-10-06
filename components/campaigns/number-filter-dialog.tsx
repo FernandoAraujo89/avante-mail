@@ -27,7 +27,7 @@ export interface NumberFilterResult {
 
 interface NumberFilterDialogProps {
   /** Contatos elegíveis já carregados; null enquanto carrega. */
-  contacts: { id: string; phone: string | null }[] | null;
+  contacts: { id: string; phone: string | null; phones?: string[] }[] | null;
   onApply: (ids: string[], resultado: NumberFilterResult) => void;
 }
 
@@ -71,7 +71,8 @@ export function NumberFilterDialog({
     const naoEncontrados: string[] = [];
     for (const numero of numeros) {
       const casaram = contacts.filter(
-        (c) => c.phone && samePhone(c.phone, numero)
+        // Qualquer telefone do contato, não só o principal.
+        (c) => (c.phones ?? [c.phone]).some((p) => p && samePhone(p, numero))
       );
       if (casaram.length === 0) naoEncontrados.push(numero);
       else for (const c of casaram) ids.add(c.id);

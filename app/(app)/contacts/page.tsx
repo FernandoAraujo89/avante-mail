@@ -6,11 +6,7 @@ import { History, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 
 import { etapaLabel, type EtapaDto } from "@/components/leads/estagios";
 import { PageHeader } from "@/components/page-header";
-import {
-  CaixaDaPagina,
-  Paginacao,
-  usePaginacao,
-} from "@/components/paginacao";
+import { CaixaDaPagina, Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -48,8 +44,12 @@ type ListRef = { id: string; name: string };
 type ContactDto = {
   id: string;
   name: string;
-  email: string;
+  /** Principal; nulo = contato só com telefone. */
+  email: string | null;
   phone: string | null;
+  /** Todos, com o principal primeiro. */
+  emails: string[];
+  phones: string[];
   company: string | null;
   tags: string[] | null;
   lists: ListRef[];
@@ -66,6 +66,33 @@ type ContactDto = {
 // mesma tabela, então quem olha a tela precisa CONSEGUIR ver a diferença — sem
 // isso, a separação existe só no banco.
 //
+/**
+ * "e-mail principal (+1 e-mail) · telefone principal (+2 telefones)". Os
+ * endereços extras não cabem na linha; o "+N" diz que existem.
+ */
+function descreverEnderecos(c: ContactDto): string {
+  const partes: string[] = [];
+  const emailsExtras = Math.max(0, (c.emails?.length ?? 0) - 1);
+  const phonesExtras = Math.max(0, (c.phones?.length ?? 0) - 1);
+  if (c.email) {
+    partes.push(
+      c.email +
+        (emailsExtras > 0
+          ? ` (+${emailsExtras} e-mail${emailsExtras === 1 ? "" : "s"})`
+          : "")
+    );
+  }
+  if (c.phone) {
+    partes.push(
+      formatPhone(c.phone) +
+        (phonesExtras > 0
+          ? ` (+${phonesExtras} telefone${phonesExtras === 1 ? "" : "s"})`
+          : "")
+    );
+  }
+  return partes.length > 0 ? partes.join(" · ") : "sem e-mail nem telefone";
+}
+
 // As etapas vêm da API, não de constante: elas espelham o funil do Pipedrive.
 function filtrosDeEstagio(etapas: EtapaDto[]) {
   return [
@@ -389,8 +416,7 @@ export default function ContactsPage() {
                       ) : null}
                     </span>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {contact.email}
-                      {contact.phone ? ` · ${formatPhone(contact.phone)}` : ""}
+                      {descreverEnderecos(contact)}
                       {contact.company ? ` · ${contact.company}` : ""}
                       {contact.stage && contact.sourceChannel
                         ? ` · via ${contact.sourceChannel}`
@@ -425,8 +451,12 @@ export default function ContactsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
+                      {/* "Descadastrado" é quem TINHA e-mail e saiu; quem
+                          nunca teve e-mail não saiu de lugar nenhum. */}
                       {contact.subscribed ? (
                         <Badge variant="success">Ativo</Badge>
+                      ) : (contact.emails?.length ?? 0) === 0 ? (
+                        <Badge variant="secondary">Sem e-mail</Badge>
                       ) : (
                         <Badge variant="destructive">Descadastrado</Badge>
                       )}

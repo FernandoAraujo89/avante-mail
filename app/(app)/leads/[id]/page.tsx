@@ -31,10 +31,7 @@ import {
 } from "@/lib/db";
 import { formatDate, formatDateTime, formatInt } from "@/lib/format";
 import { recortar } from "@/lib/paginacao";
-import {
-  paginacaoDaUrl,
-  type ParametrosDaUrl,
-} from "@/lib/paginacao-servidor";
+import { paginacaoDaUrl, type ParametrosDaUrl } from "@/lib/paginacao-servidor";
 import { formatPhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
@@ -75,11 +72,13 @@ function detalheDoEvento(
   qualificacoes: QualificacaoDto[]
 ): string | null {
   const rotuloDaEtapa = (slug: string | null) =>
-    slug ? rotulos[slug] ?? slug : "—";
+    slug ? (rotulos[slug] ?? slug) : "—";
   if (!payload) return null;
   if (tipo === "lead_stage_changed") {
     const de = rotuloDaEtapa((payload.de as string) ?? null);
-    const para = payload.para ? rotuloDaEtapa(payload.para as string) : "parceiro";
+    const para = payload.para
+      ? rotuloDaEtapa(payload.para as string)
+      : "parceiro";
     return `${de} → ${para}`;
   }
   if (tipo === "lead_qualified") {
@@ -167,7 +166,9 @@ export default async function LeadPage({
             </p>
             <div>
               <Button variant="outline" asChild>
-                <Link href={`/contacts/${lead.id}`}>Ver na base de contatos</Link>
+                <Link href={`/contacts/${lead.id}`}>
+                  Ver na base de contatos
+                </Link>
               </Button>
             </div>
           </CardContent>
@@ -254,21 +255,21 @@ export default async function LeadPage({
           isNull(listsTable.kind)
       )
       .orderBy(asc(listsTable.name)),
-      // Os rótulos das etapas vêm da tabela: a linha do tempo guarda o slug, e
-      // sem a tradução ela mostraria "apresentacao-de-produto" para o operador.
-      listarEtapas(true),
-      lead.stage ? etapaPorSlug(lead.stage) : Promise.resolve(null),
-      // As qualificações também: a ficha e a linha do tempo guardam o slug, e
-      // o texto do playbook mora na tabela desde que a lista virou dado.
-      listarQualificacoes(true),
-      // Contagem REAL do que a exclusão apaga (a de eventos vem lá de cima).
-      // As mensagens recebidas são cortadas em 20; usar o tamanho da lista
-      // faria a janela dizer "20 mensagens" para quem tem 200.
-      db
-        .select({ total: count() })
-        .from(campaignSends)
-        .where(eq(campaignSends.contactId, id)),
-    ]);
+    // Os rótulos das etapas vêm da tabela: a linha do tempo guarda o slug, e
+    // sem a tradução ela mostraria "apresentacao-de-produto" para o operador.
+    listarEtapas(true),
+    lead.stage ? etapaPorSlug(lead.stage) : Promise.resolve(null),
+    // As qualificações também: a ficha e a linha do tempo guardam o slug, e
+    // o texto do playbook mora na tabela desde que a lista virou dado.
+    listarQualificacoes(true),
+    // Contagem REAL do que a exclusão apaga (a de eventos vem lá de cima).
+    // As mensagens recebidas são cortadas em 20; usar o tamanho da lista
+    // faria a janela dizer "20 mensagens" para quem tem 200.
+    db
+      .select({ total: count() })
+      .from(campaignSends)
+      .where(eq(campaignSends.contactId, id)),
+  ]);
 
   const rotulosDasEtapas = Object.fromEntries(
     etapas.map((e) => [e.slug, e.label])
@@ -306,7 +307,7 @@ export default async function LeadPage({
         </Button>
         <PageHeader
           title={lead.name}
-          description={`${lead.email}${
+          description={`${lead.email ?? formatPhone(lead.phone)}${
             lead.phone ? ` · ${formatPhone(lead.phone)}` : ""
           }${lead.company ? ` · ${lead.company}` : ""} · Cadastrado em ${formatDate(
             lead.createdAt
@@ -392,7 +393,10 @@ export default async function LeadPage({
                   origem
                     .filter((o) => o.valor)
                     .map((o) => (
-                      <div key={o.rotulo} className="flex justify-between gap-4">
+                      <div
+                        key={o.rotulo}
+                        className="flex justify-between gap-4"
+                      >
                         <dt className="shrink-0 text-muted-foreground">
                           {o.rotulo}
                         </dt>

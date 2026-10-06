@@ -15,9 +15,14 @@ import { cn } from "@/lib/utils";
 export interface RecipientContact {
   id: string;
   name: string;
-  email: string;
+  /** Principal; nulo = contato só com telefone. */
+  email: string | null;
   company: string | null;
   phone: string | null;
+  /** Todos os telefones (o filtro por lista de números olha todos). */
+  phones: string[];
+  /** Quantos endereços deste contato aceitam o canal: é o que ele recebe. */
+  eligibleAddresses: number;
   lists: { id: string; name: string }[];
 }
 
@@ -32,6 +37,11 @@ interface RecipientPickerProps {
   value: string[] | null;
   onChange: (value: string[] | null) => void;
   onEligibleCountChange?: (count: number) => void;
+  /**
+   * Quantas MENSAGENS a escolha atual gera (um contato com dois telefones
+   * conta dois). null enquanto a lista carrega.
+   */
+  onSelectedMessagesChange?: (messages: number | null) => void;
 }
 
 export function RecipientPicker({
@@ -42,6 +52,7 @@ export function RecipientPicker({
   value,
   onChange,
   onEligibleCountChange,
+  onSelectedMessagesChange,
 }: RecipientPickerProps) {
   const [contacts, setContacts] = useState<RecipientContact[] | null>(null);
   const [search, setSearch] = useState("");
@@ -55,11 +66,26 @@ export function RecipientPicker({
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const onCountRef = useRef(onEligibleCountChange);
+  const onMessagesRef = useRef(onSelectedMessagesChange);
   useEffect(() => {
     valueRef.current = value;
     onChangeRef.current = onChange;
     onCountRef.current = onEligibleCountChange;
+    onMessagesRef.current = onSelectedMessagesChange;
   });
+
+  // Mensagens da escolha atual: soma dos endereços que aceitam o canal.
+  useEffect(() => {
+    if (!contacts) {
+      onMessagesRef.current?.(null);
+      return;
+    }
+    const escolhidos =
+      value === null ? contacts : contacts.filter((c) => value.includes(c.id));
+    onMessagesRef.current?.(
+      escolhidos.reduce((soma, c) => soma + (c.eligibleAddresses || 1), 0)
+    );
+  }, [contacts, value]);
 
   const listsKey = lists.join(",");
   const tagsKey = tags.join(",");
@@ -90,16 +116,19 @@ export function RecipientPicker({
           throw new Error(json.error ?? "Erro ao carregar os contatos.");
         }
 
-        const rows: RecipientContact[] = (
-          Array.isArray(json) ? json : []
-        ).map((c: RecipientContact) => ({
-          id: c.id,
-          name: c.name,
-          email: c.email,
-          company: c.company ?? null,
-          phone: c.phone ?? null,
-          lists: Array.isArray(c.lists) ? c.lists : [],
-        }));
+        const rows: RecipientContact[] = (Array.isArray(json) ? json : []).map(
+          (c: RecipientContact) => ({
+            id: c.id,
+            name: c.name,
+            email: c.email ?? null,
+            company: c.company ?? null,
+            phone: c.phone ?? null,
+            phones: Array.isArray(c.phones) ? c.phones : [],
+            eligibleAddresses:
+              typeof c.eligibleAddresses === "number" ? c.eligibleAddresses : 1,
+            lists: Array.isArray(c.lists) ? c.lists : [],
+          })
+        );
 
         setContacts(rows);
         onCountRef.current?.(rows.length);
@@ -129,7 +158,7 @@ export function RecipientPicker({
     const term = search.trim().toLowerCase();
     if (!term) return contacts;
     return contacts.filter((c) =>
-      [c.name, c.email, c.company ?? "", c.phone ?? ""].some((field) =>
+      [c.name, c.email ?? "", c.company ?? "", ...c.phones].some((field) =>
         field.toLowerCase().includes(term)
       )
     );
@@ -305,8 +334,14 @@ export function RecipientPicker({
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">
                     {channel === "email"
-                      ? contact.email
+                      ? (contact.email ?? "sem e-mail")
                       : (contact.phone ?? "sem telefone")}
+                    {/* Recebe em mais de um endereço: cada um é uma mensagem. */}
+                    {contact.eligibleAddresses > 1
+                      ? ` (+${contact.eligibleAddresses - 1} ${
+                          channel === "email" ? "e-mail" : "número"
+                        }${contact.eligibleAddresses > 2 ? "s" : ""})`
+                      : ""}
                     {contact.company ? ` · ${contact.company}` : ""}
                     {contact.lists.length > 0
                       ? ` · ${contact.lists.map((l) => l.name).join(", ")}`

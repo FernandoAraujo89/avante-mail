@@ -222,6 +222,9 @@ export function CampaignWizard({
   const [previewError, setPreviewError] = useState("");
   const [confirmModelSwitch, setConfirmModelSwitch] = useState(false);
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
+  // Mensagens da escolha manual (passo Destinatários): um contato com dois
+  // telefones conta dois. Sem o passo aberto, vale o número de contatos.
+  const [selectedMessages, setSelectedMessages] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [dispatching, setDispatching] = useState(false);
@@ -315,7 +318,8 @@ export function CampaignWizard({
       try {
         const res = await fetch(`/api/campaigns/${sourceId}`);
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar campanha.");
+        if (!res.ok)
+          throw new Error(json.error ?? "Erro ao carregar campanha.");
 
         let design: EmailDesign | null = json.design ?? null;
         // Campanha antiga (sem e-mail próprio): parte do design do modelo de origem.
@@ -404,7 +408,9 @@ export function CampaignWizard({
           count: contactIds.length,
         });
         if (contactIds.length === 0) {
-          setError("Ninguém está neste grupo de resposta — não há para quem enviar.");
+          setError(
+            "Ninguém está neste grupo de resposta — não há para quem enviar."
+          );
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -462,7 +468,10 @@ export function CampaignWizard({
 
   // Texto do SMS já transliterado — é ele que sai e é ele que é cobrado, então
   // é dele que saem a validação, a prévia e a contagem de segmentos.
-  const smsSanitized = useMemo(() => sanitizeGsm7(data.smsBody), [data.smsBody]);
+  const smsSanitized = useMemo(
+    () => sanitizeGsm7(data.smsBody),
+    [data.smsBody]
+  );
   const smsCount = useMemo(
     () => countSms(smsSanitized.texto),
     [smsSanitized.texto]
@@ -587,7 +596,8 @@ export function CampaignWizard({
         const json = await res.json();
         // Mensagens, não pessoas: quem tem dois telefones recebe nos dois, e
         // é isso que custa e que conta no limite diário.
-        if (!cancelled && res.ok) setRecipientCount(json.addresses ?? json.count);
+        if (!cancelled && res.ok)
+          setRecipientCount(json.addresses ?? json.count);
       } catch {
         // Silencioso: a contagem é informativa.
       }
@@ -601,7 +611,9 @@ export function CampaignWizard({
   // Público efetivo: a escolha manual manda; sem ela, vale a contagem por
   // listas/tags. Alimenta a contagem, o custo estimado e o aviso de limite.
   const effectiveRecipients =
-    data.recipientIds !== null ? data.recipientIds.length : recipientCount;
+    data.recipientIds !== null
+      ? (selectedMessages ?? data.recipientIds.length)
+      : recipientCount;
 
   function update(patch: Partial<WizardData>) {
     setData((current) => ({ ...current, ...patch }));
@@ -647,7 +659,10 @@ export function CampaignWizard({
       // O que virou bloco e o que não virou, mais as imagens que já foram
       // salvas no servidor pelo import — tudo antes do disparo.
       setModelMessage(
-        [descreverImportacao(importado), descreverRelatorioDeImagens(json.imagens)]
+        [
+          descreverImportacao(importado),
+          descreverRelatorioDeImagens(json.imagens),
+        ]
           .filter(Boolean)
           .join(" ")
       );
@@ -659,7 +674,11 @@ export function CampaignWizard({
   }
 
   function startFromScratch() {
-    update({ design: createDefaultDesign(), templateId: "", editorType: "builder" });
+    update({
+      design: createDefaultDesign(),
+      templateId: "",
+      editorType: "builder",
+    });
     setError("");
   }
 
@@ -816,7 +835,8 @@ export function CampaignWizard({
         method: "POST",
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Erro ao disparar a campanha.");
+      if (!res.ok)
+        throw new Error(json.error ?? "Erro ao disparar a campanha.");
       router.push(
         json.scheduled ? "/campaigns" : `/campaigns/${campaign.id}/report`
       );
@@ -1017,874 +1037,904 @@ export function CampaignWizard({
     <>
       {/* Espaço no fim para nada ficar escondido atrás da barra fixa. */}
       <div className="pb-24">
-      <PageHeader
-        title={editId ? "Editar campanha" : "Nova campanha"}
-        description={
-          data.channel === "whatsapp"
-            ? "Configure, escolha o modelo aprovado da mensagem, selecione os destinatários e revise antes de disparar."
-            : data.channel === "sms"
-              ? "Configure, escreva o texto da mensagem, selecione os destinatários e revise antes de disparar."
-              : "Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
-        }
-      />
-
-      {groupOrigin ? (
-        <div className="mb-6 flex max-w-3xl items-start gap-3 rounded-lg border border-info/30 bg-info-light/40 px-4 py-3 text-sm">
-          <MessageSquareReply className="mt-0.5 size-4 shrink-0 text-info-dark" aria-hidden="true" />
-          <p className="min-w-0">
-            Campanha para os{" "}
-            <span className="font-semibold">
-              {groupOrigin.count} contato{groupOrigin.count === 1 ? "" : "s"}
-            </span>{" "}
-            {groupOrigin.sentence} em{" "}
-            <Link
-              href={`/campaigns/${groupOrigin.campaignId}/report`}
-              className="font-semibold text-primary underline-offset-2 hover:underline"
-            >
-              {groupOrigin.campaignName}
-            </Link>
-            . Eles já estão escolhidos no passo Destinatários — falta escolher a
-            mensagem.
-          </p>
-        </div>
-      ) : null}
-
-      {requestOrigin ? (
-        <div className="mb-6 flex max-w-3xl items-start gap-3 rounded-lg border border-info/30 bg-info-light/40 px-4 py-3 text-sm">
-          <ClipboardList className="mt-0.5 size-4 shrink-0 text-info-dark" aria-hidden="true" />
-          <div className="min-w-0">
-            <p>
-              Solicitação{" "}
-              <Link
-                href="/solicitacoes"
-                className="font-semibold text-primary underline-offset-2 hover:underline"
-              >
-                {requestOrigin.title}
-              </Link>
-              {requestOrigin.requestedBy ? `, de ${requestOrigin.requestedBy}` : ""}
-              {requestOrigin.desiredAt
-                ? ` — para ${formatDateTime(requestOrigin.desiredAt)}`
-                : ""}
-              . Canal e listas já vêm do pedido.
-            </p>
-            <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-              {requestOrigin.briefing}
-            </p>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Stepper */}
-      <div className="mb-8 flex flex-wrap items-center gap-2">
-        {STEPS.map((raw) =>
-          raw.number === 2 && data.channel !== "email"
-            ? { ...raw, title: "Mensagem" }
-            : raw
-        ).map((s, index) => (
-          <div key={s.number} className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={s.number > step}
-              aria-current={step === s.number ? "step" : undefined}
-              onClick={() => {
-                if (s.number < step) {
-                  setError("");
-                  setStep(s.number);
-                }
-              }}
-              className={cn(
-                "flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition-colors",
-                step === s.number
-                  ? "bg-primary/10 font-medium text-primary"
-                  : s.number < step
-                    ? "cursor-pointer text-success-dark hover:bg-muted"
-                    : "text-muted-foreground"
-              )}
-            >
-              <span
-                className={cn(
-                  "flex size-5 items-center justify-center rounded-full border text-xs",
-                  step === s.number
-                    ? "border-primary"
-                    : s.number < step
-                      ? "border-success-dark bg-success-light/30"
-                      : "border-border"
-                )}
-              >
-                {s.number < step ? <Check className="size-3" /> : s.number}
-              </span>
-              {s.title}
-            </button>
-            {index < STEPS.length - 1 ? (
-              <div className="h-px w-6 bg-border" />
-            ) : null}
-          </div>
-        ))}
-      </div>
-
-      {error ? (
-        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
-          {error}
-        </div>
-      ) : null}
-
-      {/* Passo 1 — Configurar */}
-      {step === 1 ? (
-        <Card className="max-w-3xl">
-          <CardContent className="grid gap-5 p-6">
-            <div className="grid gap-2">
-              <Label>Canal de envio</Label>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {(
-                  [
-                    {
-                      value: "email",
-                      label: "E-mail",
-                      description: "Newsletter montada no Criador de e-mails",
-                      icon: Mail,
-                    },
-                    {
-                      value: "whatsapp",
-                      label: "WhatsApp",
-                      description: "Modelo aprovado pela Meta, via Cloud API",
-                      icon: MessageCircle,
-                    },
-                    {
-                      value: "sms",
-                      label: "SMS",
-                      description: "Texto curto, sem link rastreado, via Twilio",
-                      icon: MessageSquareText,
-                    },
-                  ] as const
-                ).map((option) => {
-                  const active = data.channel === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      disabled={Boolean(editId)}
-                      onClick={() => update({ channel: option.value })}
-                      aria-pressed={active}
-                      className={cn(
-                        "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
-                        active
-                          ? "border-primary bg-primary/5"
-                          : "border-border bg-card hover:border-muted-foreground/40",
-                        editId ? "cursor-not-allowed opacity-60" : ""
-                      )}
-                    >
-                      <option.icon
-                        className={cn(
-                          "mt-0.5 size-5 shrink-0",
-                          active ? "text-primary" : "text-muted-foreground"
-                        )}
-                      />
-                      <span>
-                        <span className="block font-medium">{option.label}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {option.description}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              {editId ? (
-                <p className="text-xs text-muted-foreground">
-                  O canal não pode ser alterado depois que a campanha é criada.
-                </p>
-              ) : null}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="campaign-name">Nome da campanha *</Label>
-              <Input
-                id="campaign-name"
-                value={data.name}
-                onChange={(e) => update({ name: e.target.value })}
-                placeholder="Ex.: Lançamento do módulo financeiro"
-              />
-              <p className="text-xs text-muted-foreground">
-                {data.channel === "email"
-                  ? "Uso interno e título do e-mail (aba do navegador / cliente)."
-                  : "Uso interno — não aparece na mensagem."}
-              </p>
-            </div>
-
-            {data.channel === "email" ? (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="campaign-subject">Assunto do e-mail *</Label>
-                  <Input
-                    id="campaign-subject"
-                    value={data.subject}
-                    onChange={(e) => update({ subject: e.target.value })}
-                    placeholder="Ex.: Chegou o novo módulo financeiro do seu sistema"
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="campaign-preheader">Preheader</Label>
-                  <Input
-                    id="campaign-preheader"
-                    value={data.preheader}
-                    onChange={(e) => update({ preheader: e.target.value })}
-                    placeholder="Texto curto exibido após o assunto na caixa de entrada"
-                  />
-                </div>
-              </>
-            ) : null}
-
-            <div className="grid gap-2 sm:max-w-xs">
-              <Label htmlFor="campaign-scheduled">Agendar para</Label>
-              <Input
-                id="campaign-scheduled"
-                type="datetime-local"
-                value={data.scheduledAt}
-                min={toLocalInputValue(new Date().toISOString())}
-                onChange={(e) => update({ scheduledAt: e.target.value })}
-              />
-              <p className="text-xs text-muted-foreground">
-                Deixe vazio para disparar imediatamente.
-              </p>
-            </div>
-
-            <p className="rounded-lg bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
-              {data.channel === "whatsapp"
-                ? "O conteúdo da mensagem é um modelo pré-aprovado pela Meta, escolhido no próximo passo."
-                : data.channel === "sms"
-                  ? "O texto da mensagem é escrito no próximo passo. SMS não tem imagem, formatação nem rastreio de clique — só texto, cobrado por segmento de 160 caracteres."
-                  : "O conteúdo do e-mail (textos, imagens, botões) é montado no próximo passo, no Criador de e-mails."}
-            </p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Passo 2 — Mensagem (SMS) */}
-      {step === 2 && data.channel === "sms" ? (
-        <SmsMessageStep
-          value={data.smsBody}
-          onChange={(smsBody) => update({ smsBody })}
-          recipientCount={effectiveRecipients}
-          pricePerSegmentUsd={smsConfig?.pricePerSegmentUsd ?? null}
-          usdBrlRate={smsConfig?.usdBrlRate ?? null}
-        />
-      ) : null}
-
-      {/* Passo 2 — Mensagem (WhatsApp) */}
-      {step === 2 && data.channel === "whatsapp" ? (
-        <WhatsAppMessageStep
-          templates={waTemplates}
-          selectedId={data.whatsappTemplateId}
-          variables={data.whatsappVariables}
-          onSelect={(id) => update({ whatsappTemplateId: id })}
-          onVariablesChange={(whatsappVariables) =>
-            update({ whatsappVariables })
+        <PageHeader
+          title={editId ? "Editar campanha" : "Nova campanha"}
+          description={
+            data.channel === "whatsapp"
+              ? "Configure, escolha o modelo aprovado da mensagem, selecione os destinatários e revise antes de disparar."
+              : data.channel === "sms"
+                ? "Configure, escreva o texto da mensagem, selecione os destinatários e revise antes de disparar."
+                : "Configure, monte o e-mail a partir de um modelo, selecione os destinatários e revise antes de disparar."
           }
         />
-      ) : null}
 
-      {/* Passo 2 — E-mail */}
-      {step === 2 && data.channel === "email" ? (
-        !data.design ? (
-          // Galeria de modelos
-          templates === null ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              Carregando modelos...
+        {groupOrigin ? (
+          <div className="mb-6 flex max-w-3xl items-start gap-3 rounded-lg border border-info/30 bg-info-light/40 px-4 py-3 text-sm">
+            <MessageSquareReply
+              className="mt-0.5 size-4 shrink-0 text-info-dark"
+              aria-hidden="true"
+            />
+            <p className="min-w-0">
+              Campanha para os{" "}
+              <span className="font-semibold">
+                {groupOrigin.count} contato{groupOrigin.count === 1 ? "" : "s"}
+              </span>{" "}
+              {groupOrigin.sentence} em{" "}
+              <Link
+                href={`/campaigns/${groupOrigin.campaignId}/report`}
+                className="font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                {groupOrigin.campaignName}
+              </Link>
+              . Eles já estão escolhidos no passo Destinatários — falta escolher
+              a mensagem.
             </p>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">
-                    Escolha um modelo para começar
-                  </h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    O modelo é só o ponto de partida — no passo seguinte você
-                    edita todo o layout livremente.
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={loadTemplates}>
-                  <RotateCcw />
-                  Atualizar lista
-                </Button>
-              </div>
+          </div>
+        ) : null}
 
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <button
-                  type="button"
-                  onClick={startFromScratch}
-                  className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card p-6 text-center transition-colors hover:border-primary hover:bg-primary/5"
+        {requestOrigin ? (
+          <div className="mb-6 flex max-w-3xl items-start gap-3 rounded-lg border border-info/30 bg-info-light/40 px-4 py-3 text-sm">
+            <ClipboardList
+              className="mt-0.5 size-4 shrink-0 text-info-dark"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <p>
+                Solicitação{" "}
+                <Link
+                  href="/solicitacoes"
+                  className="font-semibold text-primary underline-offset-2 hover:underline"
                 >
-                  <Plus className="size-6 text-primary" />
-                  <span className="font-medium">Começar do zero</span>
-                  <span className="text-xs text-muted-foreground">
-                    E-mail em branco no Criador
-                  </span>
-                </button>
+                  {requestOrigin.title}
+                </Link>
+                {requestOrigin.requestedBy
+                  ? `, de ${requestOrigin.requestedBy}`
+                  : ""}
+                {requestOrigin.desiredAt
+                  ? ` — para ${formatDateTime(requestOrigin.desiredAt)}`
+                  : ""}
+                . Canal e listas já vêm do pedido.
+              </p>
+              <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+                {requestOrigin.briefing}
+              </p>
+            </div>
+          </div>
+        ) : null}
 
-                {availableModels.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => pickModel(model)}
-                    disabled={importingModelId !== null}
-                    className="flex min-h-32 flex-col justify-between rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:opacity-60"
-                  >
-                    <div className="flex items-start gap-2">
-                      <LayoutTemplate className="mt-0.5 size-5 shrink-0 text-primary" />
-                      <p className="font-medium">{model.name}</p>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                      {model.category ? (
-                        <Badge variant="outline">{model.category}</Badge>
-                      ) : null}
-                      {model.editorType === "builder" ? null : (
-                        <Badge variant="outline">Código</Badge>
-                      )}
-                      {importingModelId === model.id ? (
-                        <span className="text-xs text-muted-foreground">
-                          Abrindo no criador...
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {availableModels.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum modelo cadastrado ainda — comece do zero acima, ou crie
-                  modelos em Templates.
-                </p>
+        {/* Stepper */}
+        <div className="mb-8 flex flex-wrap items-center gap-2">
+          {STEPS.map((raw) =>
+            raw.number === 2 && data.channel !== "email"
+              ? { ...raw, title: "Mensagem" }
+              : raw
+          ).map((s, index) => (
+            <div key={s.number} className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={s.number > step}
+                aria-current={step === s.number ? "step" : undefined}
+                onClick={() => {
+                  if (s.number < step) {
+                    setError("");
+                    setStep(s.number);
+                  }
+                }}
+                className={cn(
+                  "flex items-center gap-2 rounded-full px-3 py-1.5 text-sm transition-colors",
+                  step === s.number
+                    ? "bg-primary/10 font-medium text-primary"
+                    : s.number < step
+                      ? "cursor-pointer text-success-dark hover:bg-muted"
+                      : "text-muted-foreground"
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex size-5 items-center justify-center rounded-full border text-xs",
+                    step === s.number
+                      ? "border-primary"
+                      : s.number < step
+                        ? "border-success-dark bg-success-light/30"
+                        : "border-border"
+                  )}
+                >
+                  {s.number < step ? <Check className="size-3" /> : s.number}
+                </span>
+                {s.title}
+              </button>
+              {index < STEPS.length - 1 ? (
+                <div className="h-px w-6 bg-border" />
               ) : null}
             </div>
-          )
-        ) : (
-          // Criador de e-mail embutido
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-sm text-muted-foreground">
-                {originTemplate ? (
-                  <>
-                    Editando a partir de{" "}
-                    <span className="font-medium text-foreground">
-                      {originTemplate.name}
-                    </span>
-                  </>
-                ) : (
-                  "E-mail personalizado desta campanha"
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={handlePreview}>
-                  <Eye />
-                  Pré-visualizar
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setModelName(data.name ? `${data.name}` : "");
-                    setModelMessage("");
-                    setSaveModelOpen(true);
-                  }}
-                >
-                  <Save />
-                  Salvar como novo modelo
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setConfirmModelSwitch(true)}
-                >
-                  <RotateCcw />
-                  Trocar modelo
-                </Button>
-              </div>
-            </div>
-
-            {modelMessage ? (
-              <div className="rounded-lg border border-success-dark/30 bg-success-light/20 px-4 py-2.5 text-sm text-success-dark">
-                {modelMessage}
-              </div>
-            ) : null}
-
-            <DesignEditor
-              value={data.design}
-              onChange={(design) => update({ design })}
-              onError={setError}
-            />
-          </div>
-        )
-      ) : null}
-
-      {/* Passo 3 — Destinatários */}
-      {step === 3 ? (
-        <div className="grid max-w-3xl gap-6">
-          <Card>
-            <CardContent className="grid gap-6 p-6">
-              <div className="grid gap-2.5">
-                <Label>Listas</Label>
-                {availableLists.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Nenhuma lista criada ainda. Crie listas em{" "}
-                    <span className="font-medium">Listas</span> para segmentar os
-                    envios.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {availableLists.map((list) => {
-                      const active = data.lists.includes(list.id);
-                      return (
-                        <button
-                          key={list.id}
-                          type="button"
-                          onClick={() => toggleList(list.id)}
-                          aria-pressed={active}
-                          className={cn(
-                            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
-                            active
-                              ? "border-primary bg-primary/10 font-medium text-primary"
-                              : "border-border bg-card text-muted-foreground hover:border-muted-foreground/40"
-                          )}
-                        >
-                          {active ? <Check className="size-3.5" /> : null}
-                          {list.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Selecione uma ou mais listas. Nenhuma selecionada = todas as
-                  listas de relacionamento.{" "}
-                  <span className="font-medium">
-                    Leads não entram em campanha
-                  </span>{" "}
-                  — eles são trabalhados em Leads e nutridos por automação.
-                </p>
-              </div>
-
-              <div className="grid gap-2.5">
-                <Label htmlFor="campaign-tags">Filtrar por tags</Label>
-                <Input
-                  id="campaign-tags"
-                  value={data.tagsFilter}
-                  onChange={(e) => update({ tagsFilter: e.target.value })}
-                  placeholder="food, pdv, nfe"
-                />
-                {parseTags(data.tagsFilter).length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {parseTags(data.tagsFilter).map((tag) => (
-                      <Badge key={tag} variant="secondary">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-                <p className="text-xs text-muted-foreground">
-                  Separadas por vírgula. O contato entra se tiver qualquer uma
-                  delas.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Quem vai receber</CardTitle>
-              <CardDescription>
-                Todos vêm marcados. Desmarque quem não deve receber — ou
-                desmarque todos e escolha um a um.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <RecipientPicker
-                channel={data.channel}
-                lists={data.lists}
-                listNames={data.lists.map(
-                  (id) =>
-                    availableLists.find((l) => l.id === id)?.name ?? id
-                )}
-                tags={parseTags(data.tagsFilter)}
-                value={data.recipientIds}
-                onChange={(recipientIds) => update({ recipientIds })}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="flex size-12 items-center justify-center rounded-lg bg-primary/10">
-                <Users className="size-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold tracking-tight">
-                  {effectiveRecipients === null ? "..." : effectiveRecipients}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {data.recipientIds !== null
-                    ? "destinatários escolhidos a dedo"
-                    : data.channel === "whatsapp"
-                      ? "destinatários elegíveis (apenas contatos com telefone e consentimento de WhatsApp)"
-                      : data.channel === "sms"
-                        ? "destinatários elegíveis (apenas contatos com celular e consentimento de SMS)"
-                        : "destinatários elegíveis (contatos descadastrados são excluídos automaticamente)"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          ))}
         </div>
-      ) : null}
 
-      {/* Passo 4 — Revisar */}
-      {step === 4 ? (
-        <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
-          <div className="space-y-6">
+        {error ? (
+          <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+            {error}
+          </div>
+        ) : null}
+
+        {/* Passo 1 — Configurar */}
+        {step === 1 ? (
+          <Card className="max-w-3xl">
+            <CardContent className="grid gap-5 p-6">
+              <div className="grid gap-2">
+                <Label>Canal de envio</Label>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {(
+                    [
+                      {
+                        value: "email",
+                        label: "E-mail",
+                        description: "Newsletter montada no Criador de e-mails",
+                        icon: Mail,
+                      },
+                      {
+                        value: "whatsapp",
+                        label: "WhatsApp",
+                        description: "Modelo aprovado pela Meta, via Cloud API",
+                        icon: MessageCircle,
+                      },
+                      {
+                        value: "sms",
+                        label: "SMS",
+                        description:
+                          "Texto curto, sem link rastreado, via Twilio",
+                        icon: MessageSquareText,
+                      },
+                    ] as const
+                  ).map((option) => {
+                    const active = data.channel === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={Boolean(editId)}
+                        onClick={() => update({ channel: option.value })}
+                        aria-pressed={active}
+                        className={cn(
+                          "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
+                          active
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-card hover:border-muted-foreground/40",
+                          editId ? "cursor-not-allowed opacity-60" : ""
+                        )}
+                      >
+                        <option.icon
+                          className={cn(
+                            "mt-0.5 size-5 shrink-0",
+                            active ? "text-primary" : "text-muted-foreground"
+                          )}
+                        />
+                        <span>
+                          <span className="block font-medium">
+                            {option.label}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {option.description}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {editId ? (
+                  <p className="text-xs text-muted-foreground">
+                    O canal não pode ser alterado depois que a campanha é
+                    criada.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="campaign-name">Nome da campanha *</Label>
+                <Input
+                  id="campaign-name"
+                  value={data.name}
+                  onChange={(e) => update({ name: e.target.value })}
+                  placeholder="Ex.: Lançamento do módulo financeiro"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {data.channel === "email"
+                    ? "Uso interno e título do e-mail (aba do navegador / cliente)."
+                    : "Uso interno — não aparece na mensagem."}
+                </p>
+              </div>
+
+              {data.channel === "email" ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label htmlFor="campaign-subject">
+                      Assunto do e-mail *
+                    </Label>
+                    <Input
+                      id="campaign-subject"
+                      value={data.subject}
+                      onChange={(e) => update({ subject: e.target.value })}
+                      placeholder="Ex.: Chegou o novo módulo financeiro do seu sistema"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="campaign-preheader">Preheader</Label>
+                    <Input
+                      id="campaign-preheader"
+                      value={data.preheader}
+                      onChange={(e) => update({ preheader: e.target.value })}
+                      placeholder="Texto curto exibido após o assunto na caixa de entrada"
+                    />
+                  </div>
+                </>
+              ) : null}
+
+              <div className="grid gap-2 sm:max-w-xs">
+                <Label htmlFor="campaign-scheduled">Agendar para</Label>
+                <Input
+                  id="campaign-scheduled"
+                  type="datetime-local"
+                  value={data.scheduledAt}
+                  min={toLocalInputValue(new Date().toISOString())}
+                  onChange={(e) => update({ scheduledAt: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Deixe vazio para disparar imediatamente.
+                </p>
+              </div>
+
+              <p className="rounded-lg bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
+                {data.channel === "whatsapp"
+                  ? "O conteúdo da mensagem é um modelo pré-aprovado pela Meta, escolhido no próximo passo."
+                  : data.channel === "sms"
+                    ? "O texto da mensagem é escrito no próximo passo. SMS não tem imagem, formatação nem rastreio de clique — só texto, cobrado por segmento de 160 caracteres."
+                    : "O conteúdo do e-mail (textos, imagens, botões) é montado no próximo passo, no Criador de e-mails."}
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {/* Passo 2 — Mensagem (SMS) */}
+        {step === 2 && data.channel === "sms" ? (
+          <SmsMessageStep
+            value={data.smsBody}
+            onChange={(smsBody) => update({ smsBody })}
+            recipientCount={effectiveRecipients}
+            pricePerSegmentUsd={smsConfig?.pricePerSegmentUsd ?? null}
+            usdBrlRate={smsConfig?.usdBrlRate ?? null}
+          />
+        ) : null}
+
+        {/* Passo 2 — Mensagem (WhatsApp) */}
+        {step === 2 && data.channel === "whatsapp" ? (
+          <WhatsAppMessageStep
+            templates={waTemplates}
+            selectedId={data.whatsappTemplateId}
+            variables={data.whatsappVariables}
+            onSelect={(id) => update({ whatsappTemplateId: id })}
+            onVariablesChange={(whatsappVariables) =>
+              update({ whatsappVariables })
+            }
+          />
+        ) : null}
+
+        {/* Passo 2 — E-mail */}
+        {step === 2 && data.channel === "email" ? (
+          !data.design ? (
+            // Galeria de modelos
+            templates === null ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                Carregando modelos...
+              </p>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">
+                      Escolha um modelo para começar
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      O modelo é só o ponto de partida — no passo seguinte você
+                      edita todo o layout livremente.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={loadTemplates}>
+                    <RotateCcw />
+                    Atualizar lista
+                  </Button>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={startFromScratch}
+                    className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card p-6 text-center transition-colors hover:border-primary hover:bg-primary/5"
+                  >
+                    <Plus className="size-6 text-primary" />
+                    <span className="font-medium">Começar do zero</span>
+                    <span className="text-xs text-muted-foreground">
+                      E-mail em branco no Criador
+                    </span>
+                  </button>
+
+                  {availableModels.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => pickModel(model)}
+                      disabled={importingModelId !== null}
+                      className="flex min-h-32 flex-col justify-between rounded-xl border border-border bg-card p-5 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:opacity-60"
+                    >
+                      <div className="flex items-start gap-2">
+                        <LayoutTemplate className="mt-0.5 size-5 shrink-0 text-primary" />
+                        <p className="font-medium">{model.name}</p>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        {model.category ? (
+                          <Badge variant="outline">{model.category}</Badge>
+                        ) : null}
+                        {model.editorType === "builder" ? null : (
+                          <Badge variant="outline">Código</Badge>
+                        )}
+                        {importingModelId === model.id ? (
+                          <span className="text-xs text-muted-foreground">
+                            Abrindo no criador...
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {availableModels.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum modelo cadastrado ainda — comece do zero acima, ou
+                    crie modelos em Templates.
+                  </p>
+                ) : null}
+              </div>
+            )
+          ) : (
+            // Criador de e-mail embutido
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-muted-foreground">
+                  {originTemplate ? (
+                    <>
+                      Editando a partir de{" "}
+                      <span className="font-medium text-foreground">
+                        {originTemplate.name}
+                      </span>
+                    </>
+                  ) : (
+                    "E-mail personalizado desta campanha"
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={handlePreview}>
+                    <Eye />
+                    Pré-visualizar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setModelName(data.name ? `${data.name}` : "");
+                      setModelMessage("");
+                      setSaveModelOpen(true);
+                    }}
+                  >
+                    <Save />
+                    Salvar como novo modelo
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmModelSwitch(true)}
+                  >
+                    <RotateCcw />
+                    Trocar modelo
+                  </Button>
+                </div>
+              </div>
+
+              {modelMessage ? (
+                <div className="rounded-lg border border-success-dark/30 bg-success-light/20 px-4 py-2.5 text-sm text-success-dark">
+                  {modelMessage}
+                </div>
+              ) : null}
+
+              <DesignEditor
+                value={data.design}
+                onChange={(design) => update({ design })}
+                onError={setError}
+              />
+            </div>
+          )
+        ) : null}
+
+        {/* Passo 3 — Destinatários */}
+        {step === 3 ? (
+          <div className="grid max-w-3xl gap-6">
+            <Card>
+              <CardContent className="grid gap-6 p-6">
+                <div className="grid gap-2.5">
+                  <Label>Listas</Label>
+                  {availableLists.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Nenhuma lista criada ainda. Crie listas em{" "}
+                      <span className="font-medium">Listas</span> para segmentar
+                      os envios.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {availableLists.map((list) => {
+                        const active = data.lists.includes(list.id);
+                        return (
+                          <button
+                            key={list.id}
+                            type="button"
+                            onClick={() => toggleList(list.id)}
+                            aria-pressed={active}
+                            className={cn(
+                              "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
+                              active
+                                ? "border-primary bg-primary/10 font-medium text-primary"
+                                : "border-border bg-card text-muted-foreground hover:border-muted-foreground/40"
+                            )}
+                          >
+                            {active ? <Check className="size-3.5" /> : null}
+                            {list.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Selecione uma ou mais listas. Nenhuma selecionada = todas as
+                    listas de relacionamento.{" "}
+                    <span className="font-medium">
+                      Leads não entram em campanha
+                    </span>{" "}
+                    — eles são trabalhados em Leads e nutridos por automação.
+                  </p>
+                </div>
+
+                <div className="grid gap-2.5">
+                  <Label htmlFor="campaign-tags">Filtrar por tags</Label>
+                  <Input
+                    id="campaign-tags"
+                    value={data.tagsFilter}
+                    onChange={(e) => update({ tagsFilter: e.target.value })}
+                    placeholder="food, pdv, nfe"
+                  />
+                  {parseTags(data.tagsFilter).length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {parseTags(data.tagsFilter).map((tag) => (
+                        <Badge key={tag} variant="secondary">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    Separadas por vírgula. O contato entra se tiver qualquer uma
+                    delas.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
-                <CardTitle>Resumo da campanha</CardTitle>
+                <CardTitle>Quem vai receber</CardTitle>
                 <CardDescription>
-                  Confira tudo antes de disparar.
+                  Todos vêm marcados. Desmarque quem não deve receber — ou
+                  desmarque todos e escolha um a um.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <dl className="space-y-3 text-sm">
-                  {[
-                    { label: "Nome", value: data.name },
-                    ...(data.channel === "whatsapp"
-                      ? [
-                          {
-                            label: "Modelo",
-                            value: selectedWaTemplate?.name ?? "—",
-                          },
-                          {
-                            label: "Categoria",
-                            value:
-                              selectedWaTemplate?.category === "UTILITY"
-                                ? "Utilidade"
-                                : "Marketing",
-                          },
-                        ]
-                      : data.channel === "sms"
-                      ? [
-                          {
-                            label: "Caracteres",
-                            value: String(smsCount.caracteres),
-                          },
-                          {
-                            label: "Segmentos por pessoa",
-                            value: String(smsCount.segmentos),
-                          },
-                        ]
-                      : [
-                          { label: "Assunto", value: data.subject },
-                          { label: "Preheader", value: data.preheader || "—" },
-                          {
-                            label: "Modelo de origem",
-                            value: originTemplate?.name ?? "Começado do zero",
-                          },
-                        ]),
-                    {
-                      label: "Listas",
-                      value: listsLabel(
-                        data.lists.map(
-                          (id) =>
-                            availableLists.find((l) => l.id === id)?.name ?? id
-                        )
-                      ),
-                    },
-                    {
-                      label: "Tags",
-                      value: parseTags(data.tagsFilter).join(", ") || "Sem filtro",
-                    },
-                    {
-                      label: "Disparo",
-                      value: isScheduled
-                        ? `Agendado para ${new Date(
-                            data.scheduledAt
-                          ).toLocaleString("pt-BR")}`
-                        : "Imediato",
-                    },
-                  ].map((row) => (
-                    <div key={row.label} className="flex justify-between gap-4">
-                      <dt className="shrink-0 text-muted-foreground">
-                        {row.label}
-                      </dt>
-                      <dd className="truncate text-right font-medium">
-                        {row.value}
-                      </dd>
-                    </div>
-                  ))}
-                  <div className="flex justify-between gap-4 border-t border-border pt-3">
-                    <dt className="text-muted-foreground">
-                      Destinatários
-                      {data.recipientIds !== null
-                        ? " (escolhidos a dedo)"
-                        : null}
-                    </dt>
-                    <dd className="text-right font-bold text-primary">
-                      {effectiveRecipients === null
-                        ? "..."
-                        : effectiveRecipients}
-                    </dd>
-                  </div>
-                  {data.channel === "whatsapp" ? (
-                    <div className="flex justify-between gap-4">
-                      <dt className="shrink-0 text-muted-foreground">
-                        Custo estimado (Meta)
-                      </dt>
-                      <dd className="text-right font-medium">
-                        {effectiveRecipients === null
-                          ? "..."
-                          : (() => {
-                              const unit =
-                                (waConfig?.pricesUsd ??
-                                  WHATSAPP_BRAZIL_PRICE_USD)[
-                                  selectedWaTemplate?.category ?? "MARKETING"
-                                ] ?? WHATSAPP_BRAZIL_PRICE_USD.MARKETING;
-                              const usd = effectiveRecipients * unit;
-                              const rate = waConfig?.usdBrlRate;
-                              return rate
-                                ? `~US$ ${usd.toFixed(2)} (≈ R$ ${(usd * rate)
-                                    .toFixed(2)
-                                    .replace(".", ",")})`
-                                : `~US$ ${usd.toFixed(2)}`;
-                            })()}
-                      </dd>
-                    </div>
-                  ) : null}
-                  {data.channel === "sms" ? (
-                    <div className="flex justify-between gap-4">
-                      <dt className="shrink-0 text-muted-foreground">
-                        Custo estimado (Twilio)
-                      </dt>
-                      <dd className="text-right font-medium">
-                        {effectiveRecipients === null || !smsConfig
-                          ? "..."
-                          : (() => {
-                              // Segmentos × destinatários: em SMS o texto longo
-                              // não custa "um pouco mais", custa o dobro.
-                              const usd = estimateSmsCostUsd(
-                                smsCount.segmentos,
-                                effectiveRecipients,
-                                smsConfig.pricePerSegmentUsd
-                              );
-                              return `~US$ ${usd.toFixed(2)} (≈ ${formatBrl(
-                                usd * smsConfig.usdBrlRate
-                              )})`;
-                            })()}
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
+                <RecipientPicker
+                  channel={data.channel}
+                  lists={data.lists}
+                  listNames={data.lists.map(
+                    (id) => availableLists.find((l) => l.id === id)?.name ?? id
+                  )}
+                  tags={parseTags(data.tagsFilter)}
+                  value={data.recipientIds}
+                  onChange={(recipientIds) => update({ recipientIds })}
+                  onSelectedMessagesChange={setSelectedMessages}
+                />
               </CardContent>
             </Card>
 
-            {data.channel === "whatsapp" && waConfig && !waConfig.configured ? (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
-                O canal WhatsApp ainda não foi configurado no servidor (Fase 0
-                do plano). Salve como rascunho — o disparo fica bloqueado até
-                lá.
-              </div>
-            ) : null}
-
-            {data.channel === "sms" && smsConfig && !smsConfig.configured ? (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
-                O canal SMS ainda não foi configurado no servidor. Salve como
-                rascunho — o disparo fica bloqueado até as variáveis TWILIO_*
-                entrarem no .env.local.
-              </div>
-            ) : null}
-
-            {data.channel === "whatsapp" &&
-            waConfig?.dailyLimit != null &&
-            effectiveRecipients !== null &&
-            effectiveRecipients > waConfig.dailyLimit ? (
-              <div className="rounded-lg border border-border bg-accent/50 px-4 py-3 text-sm">
-                Seu limite atual é de{" "}
-                <span className="font-medium">
-                  {waConfig.dailyLimit} conversas/24h
-                </span>{" "}
-                e a campanha tem {effectiveRecipients} destinatários — o
-                disparo será parcelado automaticamente: o que couber na janela
-                de hoje sai agora e o restante sai em lotes de 24 em 24 horas.
-              </div>
-            ) : null}
-
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  {data.channel === "whatsapp" ? (
-                    <MessageCircle className="size-4 text-primary" />
-                  ) : data.channel === "sms" ? (
-                    <MessageSquareText className="size-4 text-primary" />
-                  ) : (
-                    <Mail className="size-4 text-primary" />
-                  )}
-                  {data.channel === "whatsapp"
-                    ? "Enviar teste por WhatsApp"
-                    : data.channel === "sms"
-                      ? "Enviar SMS de teste"
-                      : "Enviar e-mail de teste"}
-                </CardTitle>
-                <CardDescription>
-                  {data.channel === "whatsapp"
-                    ? `Envia o modelo real (cobrado pela Meta) para até ${MAX_TEST_EMAILS} números, separados por vírgula.`
-                    : data.channel === "sms"
-                      ? `Envia a mensagem real (cobrada por segmento) para até ${MAX_TEST_EMAILS} celulares. Vale conferir no aparelho antes do disparo.`
-                      : `Envie para você antes do disparo real. Até ${MAX_TEST_EMAILS} e-mails, separados por vírgula.`}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                {data.channel === "whatsapp" || data.channel === "sms" ? (
-                  <>
-                    <Input
-                      value={testPhones}
-                      onChange={(e) => {
-                        setTestPhones(e.target.value);
-                        setTestMessage("");
-                      }}
-                      placeholder="(48) 99999-9999, (11) 98888-7777"
-                    />
-                    {parsedTestPhones.length > MAX_TEST_EMAILS ? (
-                      <p className="text-xs text-destructive-hover">
-                        Máximo de {MAX_TEST_EMAILS} telefones.
-                      </p>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      onClick={handleSendTest}
-                      disabled={
-                        sendingTest ||
-                        (data.channel === "whatsapp"
-                          ? !waConfig?.configured
-                          : !smsConfig?.configured) ||
-                        parsedTestPhones.length === 0 ||
-                        parsedTestPhones.length > MAX_TEST_EMAILS
-                      }
-                    >
-                      <Send />
-                      {sendingTest ? "Enviando teste..." : "Enviar teste"}
-                    </Button>
-                    {data.channel === "whatsapp" && waConfig && !waConfig.configured ? (
-                      <p className="text-xs text-muted-foreground">
-                        Disponível depois de configurar o canal (Fase 0).
-                      </p>
-                    ) : null}
-                    {data.channel === "sms" && smsConfig && !smsConfig.configured ? (
-                      <p className="text-xs text-muted-foreground">
-                        Disponível depois de configurar o canal SMS no servidor.
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <Input
-                      value={testEmails}
-                      onChange={(e) => {
-                        setTestEmails(e.target.value);
-                        setTestMessage("");
-                      }}
-                      placeholder="voce@empresa.com, colega@empresa.com"
-                    />
-                    {parsedTestEmails.length > MAX_TEST_EMAILS ? (
-                      <p className="text-xs text-destructive-hover">
-                        Máximo de {MAX_TEST_EMAILS} e-mails.
-                      </p>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      onClick={handleSendTest}
-                      disabled={
-                        sendingTest ||
-                        !data.design ||
-                        parsedTestEmails.length === 0 ||
-                        parsedTestEmails.length > MAX_TEST_EMAILS
-                      }
-                    >
-                      <Send />
-                      {sendingTest ? "Enviando teste..." : "Enviar teste"}
-                    </Button>
-                  </>
-                )}
-                {testMessage ? (
-                  <p
-                    className={cn(
-                      "text-xs",
-                      testFailed
-                        ? "text-destructive-hover"
-                        : "text-success-dark"
-                    )}
-                  >
-                    {testMessage}
+              <CardContent className="flex items-center gap-4 p-6">
+                <div className="flex size-12 items-center justify-center rounded-lg bg-primary/10">
+                  <Users className="size-6 text-primary" />
+                </div>
+                <div>
+                  <p className="text-3xl font-bold tracking-tight">
+                    {effectiveRecipients === null ? "..." : effectiveRecipients}
                   </p>
-                ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    {data.recipientIds !== null
+                      ? "mensagens para os contatos escolhidos a dedo (quem tem mais de um telefone ou e-mail recebe em todos)"
+                      : data.channel === "whatsapp"
+                        ? "mensagens — uma por telefone com consentimento de WhatsApp (quem tem dois números recebe nos dois)"
+                        : data.channel === "sms"
+                          ? "mensagens — uma por celular com consentimento de SMS (quem tem dois números recebe nos dois)"
+                          : "mensagens — uma por e-mail inscrito (quem tem dois e-mails recebe nos dois)"}
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </div>
+        ) : null}
 
-          <Card className="overflow-hidden">
-            {data.channel === "sms" ? (
-              smsSanitized.texto.trim() ? (
-                <div className="mx-auto w-full max-w-md p-6">
-                  <SmsPhonePreview
-                    bodyText={smsSanitized.texto}
-                    senderLabel="Avante"
-                  />
+        {/* Passo 4 — Revisar */}
+        {step === 4 ? (
+          <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Resumo da campanha</CardTitle>
+                  <CardDescription>
+                    Confira tudo antes de disparar.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <dl className="space-y-3 text-sm">
+                    {[
+                      { label: "Nome", value: data.name },
+                      ...(data.channel === "whatsapp"
+                        ? [
+                            {
+                              label: "Modelo",
+                              value: selectedWaTemplate?.name ?? "—",
+                            },
+                            {
+                              label: "Categoria",
+                              value:
+                                selectedWaTemplate?.category === "UTILITY"
+                                  ? "Utilidade"
+                                  : "Marketing",
+                            },
+                          ]
+                        : data.channel === "sms"
+                          ? [
+                              {
+                                label: "Caracteres",
+                                value: String(smsCount.caracteres),
+                              },
+                              {
+                                label: "Segmentos por pessoa",
+                                value: String(smsCount.segmentos),
+                              },
+                            ]
+                          : [
+                              { label: "Assunto", value: data.subject },
+                              {
+                                label: "Preheader",
+                                value: data.preheader || "—",
+                              },
+                              {
+                                label: "Modelo de origem",
+                                value:
+                                  originTemplate?.name ?? "Começado do zero",
+                              },
+                            ]),
+                      {
+                        label: "Listas",
+                        value: listsLabel(
+                          data.lists.map(
+                            (id) =>
+                              availableLists.find((l) => l.id === id)?.name ??
+                              id
+                          )
+                        ),
+                      },
+                      {
+                        label: "Tags",
+                        value:
+                          parseTags(data.tagsFilter).join(", ") || "Sem filtro",
+                      },
+                      {
+                        label: "Disparo",
+                        value: isScheduled
+                          ? `Agendado para ${new Date(
+                              data.scheduledAt
+                            ).toLocaleString("pt-BR")}`
+                          : "Imediato",
+                      },
+                    ].map((row) => (
+                      <div
+                        key={row.label}
+                        className="flex justify-between gap-4"
+                      >
+                        <dt className="shrink-0 text-muted-foreground">
+                          {row.label}
+                        </dt>
+                        <dd className="truncate text-right font-medium">
+                          {row.value}
+                        </dd>
+                      </div>
+                    ))}
+                    <div className="flex justify-between gap-4 border-t border-border pt-3">
+                      <dt className="text-muted-foreground">
+                        Destinatários
+                        {data.recipientIds !== null
+                          ? " (escolhidos a dedo)"
+                          : null}
+                      </dt>
+                      <dd className="text-right font-bold text-primary">
+                        {effectiveRecipients === null
+                          ? "..."
+                          : effectiveRecipients}
+                      </dd>
+                    </div>
+                    {data.channel === "whatsapp" ? (
+                      <div className="flex justify-between gap-4">
+                        <dt className="shrink-0 text-muted-foreground">
+                          Custo estimado (Meta)
+                        </dt>
+                        <dd className="text-right font-medium">
+                          {effectiveRecipients === null
+                            ? "..."
+                            : (() => {
+                                const unit =
+                                  (waConfig?.pricesUsd ??
+                                    WHATSAPP_BRAZIL_PRICE_USD)[
+                                    selectedWaTemplate?.category ?? "MARKETING"
+                                  ] ?? WHATSAPP_BRAZIL_PRICE_USD.MARKETING;
+                                const usd = effectiveRecipients * unit;
+                                const rate = waConfig?.usdBrlRate;
+                                return rate
+                                  ? `~US$ ${usd.toFixed(2)} (≈ R$ ${(usd * rate)
+                                      .toFixed(2)
+                                      .replace(".", ",")})`
+                                  : `~US$ ${usd.toFixed(2)}`;
+                              })()}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {data.channel === "sms" ? (
+                      <div className="flex justify-between gap-4">
+                        <dt className="shrink-0 text-muted-foreground">
+                          Custo estimado (Twilio)
+                        </dt>
+                        <dd className="text-right font-medium">
+                          {effectiveRecipients === null || !smsConfig
+                            ? "..."
+                            : (() => {
+                                // Segmentos × destinatários: em SMS o texto longo
+                                // não custa "um pouco mais", custa o dobro.
+                                const usd = estimateSmsCostUsd(
+                                  smsCount.segmentos,
+                                  effectiveRecipients,
+                                  smsConfig.pricePerSegmentUsd
+                                );
+                                return `~US$ ${usd.toFixed(2)} (≈ ${formatBrl(
+                                  usd * smsConfig.usdBrlRate
+                                )})`;
+                              })()}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                </CardContent>
+              </Card>
+
+              {data.channel === "whatsapp" &&
+              waConfig &&
+              !waConfig.configured ? (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+                  O canal WhatsApp ainda não foi configurado no servidor (Fase 0
+                  do plano). Salve como rascunho — o disparo fica bloqueado até
+                  lá.
                 </div>
-              ) : (
-                <p className="py-24 text-center text-sm text-muted-foreground">
-                  Nenhum texto escrito.
-                </p>
-              )
-            ) : data.channel === "whatsapp" ? (
-              selectedWaTemplate ? (
-                <div className="mx-auto w-full max-w-md p-6">
-                  <WhatsAppBubblePreview
-                    headerText={
-                      selectedWaTemplate.headerType === "text"
-                        ? selectedWaTemplate.headerText
-                        : null
-                    }
-                    headerMedia={headerMediaOf(selectedWaTemplate)}
-                    bodyText={fillVariables(
-                      selectedWaTemplate.bodyText,
-                      waPreviewValues
+              ) : null}
+
+              {data.channel === "sms" && smsConfig && !smsConfig.configured ? (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+                  O canal SMS ainda não foi configurado no servidor. Salve como
+                  rascunho — o disparo fica bloqueado até as variáveis TWILIO_*
+                  entrarem no .env.local.
+                </div>
+              ) : null}
+
+              {data.channel === "whatsapp" &&
+              waConfig?.dailyLimit != null &&
+              effectiveRecipients !== null &&
+              effectiveRecipients > waConfig.dailyLimit ? (
+                <div className="rounded-lg border border-border bg-accent/50 px-4 py-3 text-sm">
+                  Seu limite atual é de{" "}
+                  <span className="font-medium">
+                    {waConfig.dailyLimit} conversas/24h
+                  </span>{" "}
+                  e a campanha tem {effectiveRecipients} mensagens — o disparo
+                  será parcelado automaticamente: o que couber na janela de hoje
+                  sai agora e o restante sai em lotes de 24 em 24 horas.
+                </div>
+              ) : null}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    {data.channel === "whatsapp" ? (
+                      <MessageCircle className="size-4 text-primary" />
+                    ) : data.channel === "sms" ? (
+                      <MessageSquareText className="size-4 text-primary" />
+                    ) : (
+                      <Mail className="size-4 text-primary" />
                     )}
-                    footerText={selectedWaTemplate.footerText}
-                    buttons={selectedWaTemplate.buttons ?? []}
-                  />
-                </div>
-              ) : (
+                    {data.channel === "whatsapp"
+                      ? "Enviar teste por WhatsApp"
+                      : data.channel === "sms"
+                        ? "Enviar SMS de teste"
+                        : "Enviar e-mail de teste"}
+                  </CardTitle>
+                  <CardDescription>
+                    {data.channel === "whatsapp"
+                      ? `Envia o modelo real (cobrado pela Meta) para até ${MAX_TEST_EMAILS} números, separados por vírgula.`
+                      : data.channel === "sms"
+                        ? `Envia a mensagem real (cobrada por segmento) para até ${MAX_TEST_EMAILS} celulares. Vale conferir no aparelho antes do disparo.`
+                        : `Envie para você antes do disparo real. Até ${MAX_TEST_EMAILS} e-mails, separados por vírgula.`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  {data.channel === "whatsapp" || data.channel === "sms" ? (
+                    <>
+                      <Input
+                        value={testPhones}
+                        onChange={(e) => {
+                          setTestPhones(e.target.value);
+                          setTestMessage("");
+                        }}
+                        placeholder="(48) 99999-9999, (11) 98888-7777"
+                      />
+                      {parsedTestPhones.length > MAX_TEST_EMAILS ? (
+                        <p className="text-xs text-destructive-hover">
+                          Máximo de {MAX_TEST_EMAILS} telefones.
+                        </p>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        onClick={handleSendTest}
+                        disabled={
+                          sendingTest ||
+                          (data.channel === "whatsapp"
+                            ? !waConfig?.configured
+                            : !smsConfig?.configured) ||
+                          parsedTestPhones.length === 0 ||
+                          parsedTestPhones.length > MAX_TEST_EMAILS
+                        }
+                      >
+                        <Send />
+                        {sendingTest ? "Enviando teste..." : "Enviar teste"}
+                      </Button>
+                      {data.channel === "whatsapp" &&
+                      waConfig &&
+                      !waConfig.configured ? (
+                        <p className="text-xs text-muted-foreground">
+                          Disponível depois de configurar o canal (Fase 0).
+                        </p>
+                      ) : null}
+                      {data.channel === "sms" &&
+                      smsConfig &&
+                      !smsConfig.configured ? (
+                        <p className="text-xs text-muted-foreground">
+                          Disponível depois de configurar o canal SMS no
+                          servidor.
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <Input
+                        value={testEmails}
+                        onChange={(e) => {
+                          setTestEmails(e.target.value);
+                          setTestMessage("");
+                        }}
+                        placeholder="voce@empresa.com, colega@empresa.com"
+                      />
+                      {parsedTestEmails.length > MAX_TEST_EMAILS ? (
+                        <p className="text-xs text-destructive-hover">
+                          Máximo de {MAX_TEST_EMAILS} e-mails.
+                        </p>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        onClick={handleSendTest}
+                        disabled={
+                          sendingTest ||
+                          !data.design ||
+                          parsedTestEmails.length === 0 ||
+                          parsedTestEmails.length > MAX_TEST_EMAILS
+                        }
+                      >
+                        <Send />
+                        {sendingTest ? "Enviando teste..." : "Enviar teste"}
+                      </Button>
+                    </>
+                  )}
+                  {testMessage ? (
+                    <p
+                      className={cn(
+                        "text-xs",
+                        testFailed
+                          ? "text-destructive-hover"
+                          : "text-success-dark"
+                      )}
+                    >
+                      {testMessage}
+                    </p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="overflow-hidden">
+              {data.channel === "sms" ? (
+                smsSanitized.texto.trim() ? (
+                  <div className="mx-auto w-full max-w-md p-6">
+                    <SmsPhonePreview
+                      bodyText={smsSanitized.texto}
+                      senderLabel="Avante"
+                    />
+                  </div>
+                ) : (
+                  <p className="py-24 text-center text-sm text-muted-foreground">
+                    Nenhum texto escrito.
+                  </p>
+                )
+              ) : data.channel === "whatsapp" ? (
+                selectedWaTemplate ? (
+                  <div className="mx-auto w-full max-w-md p-6">
+                    <WhatsAppBubblePreview
+                      headerText={
+                        selectedWaTemplate.headerType === "text"
+                          ? selectedWaTemplate.headerText
+                          : null
+                      }
+                      headerMedia={headerMediaOf(selectedWaTemplate)}
+                      bodyText={fillVariables(
+                        selectedWaTemplate.bodyText,
+                        waPreviewValues
+                      )}
+                      footerText={selectedWaTemplate.footerText}
+                      buttons={selectedWaTemplate.buttons ?? []}
+                    />
+                  </div>
+                ) : (
+                  <p className="py-24 text-center text-sm text-muted-foreground">
+                    Nenhum modelo selecionado.
+                  </p>
+                )
+              ) : !data.design ? (
                 <p className="py-24 text-center text-sm text-muted-foreground">
-                  Nenhum modelo selecionado.
+                  Nenhum e-mail montado.
                 </p>
-              )
-            ) : !data.design ? (
-              <p className="py-24 text-center text-sm text-muted-foreground">
-                Nenhum e-mail montado.
-              </p>
-            ) : previewError ? (
-              <p className="px-6 py-24 text-center text-sm text-destructive-hover">
-                {previewError}
-              </p>
-            ) : previewLoading && !previewHtml ? (
-              <p className="py-24 text-center text-sm text-muted-foreground">
-                Gerando preview...
-              </p>
-            ) : (
-              <iframe
-                srcDoc={previewHtml}
-                sandbox=""
-                title="Preview final do e-mail"
-                className="h-[560px] w-full bg-white"
-              />
-            )}
-          </Card>
-        </div>
-      ) : null}
+              ) : previewError ? (
+                <p className="px-6 py-24 text-center text-sm text-destructive-hover">
+                  {previewError}
+                </p>
+              ) : previewLoading && !previewHtml ? (
+                <p className="py-24 text-center text-sm text-muted-foreground">
+                  Gerando preview...
+                </p>
+              ) : (
+                <iframe
+                  srcDoc={previewHtml}
+                  sandbox=""
+                  title="Preview final do e-mail"
+                  className="h-[560px] w-full bg-white"
+                />
+              )}
+            </Card>
+          </div>
+        ) : null}
       </div>
 
       {/* Navegação — fixa na viewport, sempre visível independente da altura da página.
@@ -2048,7 +2098,7 @@ export function CampaignWizard({
               {isScheduled
                 ? `A campanha "${data.name}" será enviada para ${
                     effectiveRecipients ?? "—"
-                  } contatos em ${new Date(data.scheduledAt).toLocaleString(
+                  } mensagens em ${new Date(data.scheduledAt).toLocaleString(
                     "pt-BR"
                   )}.`
                 : `${
@@ -2061,7 +2111,7 @@ export function CampaignWizard({
                         : "O e-mail será enviado"
                   } agora para ${
                     effectiveRecipients ?? "—"
-                  } contatos. Essa ação não pode ser desfeita.`}
+                  } mensagens. Essa ação não pode ser desfeita.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

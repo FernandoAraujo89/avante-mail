@@ -218,14 +218,35 @@ export async function GET(request: NextRequest) {
     // Todos os endereços, não só o principal: a lista mostra "+2" e o
     // seletor de destinatários conta por endereço.
     const enderecos = await listarEnderecosDeVarios(db, ids);
+    const canal =
+      params.get("whatsappEligible") === "true"
+        ? "whatsapp"
+        : params.get("smsEligible") === "true"
+          ? "sms"
+          : subscribed === "true"
+            ? "email"
+            : null;
 
     return NextResponse.json(
-      data.map((c) => ({
-        ...c,
-        lists: byContact.get(c.id) ?? [],
-        emails: (enderecos.get(c.id)?.emails ?? []).map((e) => e.email),
-        phones: (enderecos.get(c.id)?.phones ?? []).map((p) => p.phone),
-      }))
+      data.map((c) => {
+        const e = enderecos.get(c.id) ?? { emails: [], phones: [] };
+        return {
+          ...c,
+          lists: byContact.get(c.id) ?? [],
+          emails: e.emails.map((x) => x.email),
+          phones: e.phones.map((x) => x.phone),
+          // Quantos endereços deste contato aceitam o canal pedido: é quantas
+          // mensagens ele recebe.
+          eligibleAddresses:
+            canal === "whatsapp"
+              ? e.phones.filter((p) => p.whatsappSubscribed).length
+              : canal === "sms"
+                ? e.phones.filter((p) => p.smsSubscribed).length
+                : canal === "email"
+                  ? e.emails.filter((x) => x.subscribed).length
+                  : null,
+        };
+      })
     );
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

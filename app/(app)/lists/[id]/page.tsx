@@ -29,11 +29,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatPhone } from "@/lib/phone";
 
 type Member = {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   company: string | null;
   subscribed: boolean;
   createdAt: string;
@@ -44,7 +46,8 @@ type ListInfo = { id: string; name: string; description: string | null };
 type ContactOption = {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   lists: { id: string; name: string }[];
 };
 
@@ -101,9 +104,7 @@ export default function ListDetailPage() {
         const json = await res.json();
         if (!cancelled && res.ok) {
           setOptions(
-            json.filter(
-              (c: ContactOption) => !c.lists.some((l) => l.id === id)
-            )
+            json.filter((c: ContactOption) => !c.lists.some((l) => l.id === id))
           );
         }
       } catch {
@@ -245,7 +246,7 @@ export default function ListDetailPage() {
                       {contact.name}
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {contact.email}
+                      {contact.email ?? formatPhone(contact.phone) ?? ""}
                       {contact.company ? ` · ${contact.company}` : ""}
                     </p>
                   </TableCell>
@@ -334,7 +335,7 @@ export default function ListDetailPage() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{c.name}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {c.email}
+                          {c.email ?? formatPhone(c.phone) ?? ""}
                         </p>
                       </div>
                     </label>

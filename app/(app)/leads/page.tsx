@@ -18,11 +18,7 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
-import {
-  CaixaDaPagina,
-  Paginacao,
-  usePaginacao,
-} from "@/components/paginacao";
+import { CaixaDaPagina, Paginacao, usePaginacao } from "@/components/paginacao";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -86,12 +82,7 @@ interface Resposta {
 }
 
 type ChaveDeOrdenacao =
-  | "lead"
-  | "pontuacao"
-  | "qualificacao"
-  | "etapa"
-  | "origem"
-  | "entrada";
+  "lead" | "pontuacao" | "qualificacao" | "etapa" | "origem" | "entrada";
 
 /**
  * As colunas ordenáveis, na ordem da tabela. O primeiro clique usa a direção
@@ -147,16 +138,15 @@ export default function LeadsPage() {
 
         const res = await fetch(`/api/leads?${params.toString()}`);
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar os leads.");
+        if (!res.ok)
+          throw new Error(json.error ?? "Erro ao carregar os leads.");
         setDados(json);
         setAtualizadoEm(new Date());
         if (silencioso) {
           // A atualização de fundo não pode roubar o trabalho de ninguém: a
           // seleção fica — só perde quem saiu da lista, senão o "excluir
           // selecionados" levaria junto alguém que ninguém está vendo.
-          const visiveis = new Set(
-            (json.leads as LeadDto[]).map((l) => l.id)
-          );
+          const visiveis = new Set((json.leads as LeadDto[]).map((l) => l.id));
           setSelecionados(
             (antes) => new Set([...antes].filter((id) => visiveis.has(id)))
           );
@@ -273,7 +263,9 @@ export default function LeadsPage() {
   // estável, então empates preservam o "mais quente primeiro" que vem de lá.
   const leads = useMemo(() => {
     if (!dados) return null;
-    const posicaoDaEtapa = new Map(dados.etapas.map((e) => [e.slug, e.position]));
+    const posicaoDaEtapa = new Map(
+      dados.etapas.map((e) => [e.slug, e.position])
+    );
     const posicaoDaQualificacao = new Map(
       dados.qualificacoesLista.map((q) => [q.slug, q.position])
     );
@@ -714,7 +706,7 @@ export default function LeadsPage() {
                       {lead.name}
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {lead.email}
+                      {lead.email ?? formatPhone(lead.phone)}
                       {lead.phone ? ` · ${formatPhone(lead.phone)}` : ""}
                       {lead.company ? ` · ${lead.company}` : ""}
                     </p>
@@ -777,9 +769,7 @@ export default function LeadsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm">
-                      {lead.sourceChannel ?? "—"}
-                    </span>
+                    <span className="text-sm">{lead.sourceChannel ?? "—"}</span>
                     {lead.utmCampaign ? (
                       <p className="mt-0.5 max-w-56 truncate text-xs text-muted-foreground">
                         {lead.utmCampaign}

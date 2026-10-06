@@ -38,14 +38,13 @@ import {
   getDb,
   lists as listsTable,
 } from "@/lib/db";
+import { listarEnderecos } from "@/lib/contatos/enderecos";
 import { usuarioDaSessao, veSoParceiros } from "@/lib/escopo-parceiros";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { formatPhone } from "@/lib/phone";
 import { naoEhLead } from "@/lib/leads";
 import { recortar } from "@/lib/paginacao";
-import {
-  paginacaoDaUrl,
-  type ParametrosDaUrl,
-} from "@/lib/paginacao-servidor";
+import { paginacaoDaUrl, type ParametrosDaUrl } from "@/lib/paginacao-servidor";
 import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
 
 export const dynamic = "force-dynamic";
@@ -70,6 +69,23 @@ export default async function ContactHistoryPage({
     );
 
   if (!contact) notFound();
+
+  // Todos os e-mails e telefones, com o principal primeiro e o consentimento
+  // de cada um — a campanha vai para todos os que aceitam.
+  const enderecos = await listarEnderecos(db, id);
+  const linhaDeEnderecos = [
+    ...enderecos.emails.map(
+      (e) => `${e.email}${e.subscribed ? "" : " (fora do e-mail)"}`
+    ),
+    ...enderecos.phones.map(
+      (p) =>
+        `${formatPhone(p.phone)}${
+          p.whatsappSubscribed || p.smsSubscribed
+            ? ""
+            : " (fora do WhatsApp e do SMS)"
+        }`
+    ),
+  ].join(" · ");
 
   const contactListNames = (
     await db
@@ -120,7 +136,10 @@ export default async function ContactHistoryPage({
   const replied = history.filter((h) => h.repliedAt !== null).length;
 
   // As métricas contam o histórico inteiro; a tabela mostra uma página dele.
-  const pedido = await paginacaoDaUrl(await searchParams, "historico-do-contato");
+  const pedido = await paginacaoDaUrl(
+    await searchParams,
+    "historico-do-contato"
+  );
   const { pagina, inicio, fim } = recortar(
     history.length,
     pedido.pagina,
@@ -139,7 +158,7 @@ export default async function ContactHistoryPage({
         </Button>
         <PageHeader
           title={contact.name}
-          description={`${contact.email}${
+          description={`${linhaDeEnderecos || "sem e-mail nem telefone"}${
             contact.company ? ` · ${contact.company}` : ""
           } · ${
             contactListNames.length > 0
@@ -149,6 +168,8 @@ export default async function ContactHistoryPage({
         >
           {contact.subscribed ? (
             <Badge variant="success">Ativo</Badge>
+          ) : enderecos.emails.length === 0 ? (
+            <Badge variant="secondary">Sem e-mail</Badge>
           ) : (
             <Badge variant="destructive">Descadastrado</Badge>
           )}
@@ -176,21 +197,13 @@ export default async function ContactHistoryPage({
           hint={`${history.length} envio${history.length === 1 ? "" : "s"} no total`}
           icon={Send}
         />
-        <MetricCard
-          label="Abertos"
-          value={String(opened)}
-          icon={MailOpen}
-        />
+        <MetricCard label="Abertos" value={String(opened)} icon={MailOpen} />
         <MetricCard
           label="Clicados"
           value={String(clicked)}
           icon={MousePointerClick}
         />
-        <MetricCard
-          label="Respondidos"
-          value={String(replied)}
-          icon={Reply}
-        />
+        <MetricCard label="Respondidos" value={String(replied)} icon={Reply} />
       </div>
 
       <h2 className="mt-8 mb-3 text-sm font-semibold text-muted-foreground">
