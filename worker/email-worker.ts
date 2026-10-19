@@ -3,6 +3,7 @@ import "./env";
 import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
+import { montarCopia } from "../lib/acompanhamento";
 import { conteudoDoPassoDeEmail } from "../lib/automations/envios";
 import { enderecoAceita } from "../lib/contatos/destinatarios";
 import {
@@ -21,7 +22,10 @@ import {
 import {
   createRedisConnection,
   EMAIL_QUEUE_NAME,
+  ehCopia,
+  type CopiaJobData,
   type EmailJobData,
+  type EmailQueueData,
 } from "../lib/queue";
 import type { TemplateVariables } from "../lib/render";
 import { sendEmail } from "../lib/ses";
@@ -127,8 +131,30 @@ async function conteudoDaAutomacao(
   };
 }
 
-async function processJob(job: Job<EmailJobData>): Promise<void> {
-  const { sendId, contactId } = job.data;
+/**
+ * Cópia de acompanhamento para um líder (lib/acompanhamento): montada na hora,
+ * como o envio de verdade, sem rastreio e fora de campaign_sends — não entra no
+ * relatório nem fecha a campanha.
+ */
+async function processarCopia(data: CopiaJobData): Promise<void> {
+  const copia = await montarCopia(data.campaignId);
+  if (!copia) {
+    console.log(
+      `[WORKER] Cópia de acompanhamento para ${data.email}: campanha não está mais de pé, ignorada.`
+    );
+    return;
+  }
+  await sendEmail({ to: data.email, subject: copia.assunto, html: copia.html });
+  console.log(`[WORKER] Cópia de acompanhamento para ${data.email}... ✓`);
+}
+
+async function processJob(job: Job<EmailQueueData>): Promise<void> {
+  if (ehCopia(job.data)) return processarCopia(job.data);
+  return processarEnvio(job.data);
+}
+
+async function processarEnvio(data: EmailJobData): Promise<void> {
+  const { sendId, contactId } = data;
   const db = getDb();
 
   const [send] = await db
@@ -265,7 +291,7 @@ async function finalizeCampaignIfDone(campaignId: string): Promise<void> {
   }
 }
 
-const worker = new Worker<EmailJobData>(EMAIL_QUEUE_NAME, processJob, {
+const worker = new Worker<EmailQueueData>(EMAIL_QUEUE_NAME, processJob, {
   connection: createRedisConnection(),
   concurrency: 5,
   // Respeita o limite de envio do SES (SES_MAX_SEND_RATE e-mails/segundo).
@@ -273,8 +299,9 @@ const worker = new Worker<EmailJobData>(EMAIL_QUEUE_NAME, processJob, {
 });
 
 worker.on("completed", async (job) => {
-  // Envio de automação não fecha campanha nenhuma — cada passo é um envio só.
-  if (!job.data.campaignId) return;
+  // A cópia não é envio da campanha: não a fecha. E envio de automação não
+  // fecha campanha nenhuma — cada passo é um envio só.
+  if (ehCopia(job.data) || !job.data.campaignId) return;
   try {
     await finalizeCampaignIfDone(job.data.campaignId);
   } catch (error) {
@@ -289,6 +316,15 @@ worker.on("failed", async (job, error) => {
   }
 
   const attempts = job.opts.attempts ?? 1;
+  if (ehCopia(job.data)) {
+    // Cópia perdida não muda nada na campanha: só fica no log.
+    if (job.attemptsMade >= attempts) {
+      console.error(
+        `[WORKER] Cópia de acompanhamento para ${job.data.email} falhou: ${errorMessage(error)}`
+      );
+    }
+    return;
+  }
   if (job.attemptsMade >= attempts) {
     // Esgotou as tentativas: marca o envio como falho.
     try {

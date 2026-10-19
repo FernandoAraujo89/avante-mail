@@ -28,8 +28,25 @@ export function createRedisConnection(): IORedis {
   });
 }
 
+/**
+ * Cópia de acompanhamento de uma campanha para um líder (lib/acompanhamento).
+ * Vai pela mesma fila do e-mail para passar pelo mesmo limitador do SES.
+ */
+export interface CopiaJobData {
+  tipo: "copia";
+  campaignId: string;
+  email: string;
+}
+
+/** O que a fila de e-mail carrega: envio de campanha/automação ou cópia. */
+export type EmailQueueData = EmailJobData | CopiaJobData;
+
+export function ehCopia(data: EmailQueueData): data is CopiaJobData {
+  return "tipo" in data && data.tipo === "copia";
+}
+
 function createQueue() {
-  return new Queue<EmailJobData>(EMAIL_QUEUE_NAME, {
+  return new Queue<EmailQueueData>(EMAIL_QUEUE_NAME, {
     connection: createRedisConnection(),
   });
 }

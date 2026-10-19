@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BarChart2, Copy, Pencil, Plus } from "lucide-react";
 import { count, desc, eq, inArray, sql } from "drizzle-orm";
 
+import { AcompanhamentoDialog } from "@/components/campaigns/acompanhamento-dialog";
 import { DeleteButton } from "@/components/delete-button";
 import { PageHeader } from "@/components/page-header";
 import { PaginacaoNaUrl } from "@/components/paginacao";
@@ -167,6 +168,7 @@ export default async function CampaignsPage({
         title="Campanhas"
         description="Crie, edite e acompanhe os disparos para os parceiros."
       >
+        <AcompanhamentoDialog />
         <Button asChild>
           <Link href="/campaigns/new">
             <Plus />

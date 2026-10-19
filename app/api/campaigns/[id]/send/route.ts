@@ -21,6 +21,7 @@ import {
   whatsappTemplates,
   type Campaign,
 } from "@/lib/db";
+import { agendarCopias } from "@/lib/acompanhamento";
 import { enderecosElegiveis } from "@/lib/contatos/destinatarios";
 import { naoEhLead } from "@/lib/leads";
 import { getEmailQueue, getSmsQueue, getWhatsAppQueue } from "@/lib/queue";
@@ -61,6 +62,26 @@ async function enfileirarOuDesfazer(
       .delete(campaignSends)
       .where(eq(campaignSends.campaignId, campaignId));
     throw error;
+  }
+}
+
+/**
+ * Cópia de acompanhamento para os líderes (lib/acompanhamento), no mesmo
+ * horário da campanha. Melhor esforço: a campanha já está na fila, e uma falha
+ * aqui não pode desfazê-la nem virar erro para quem disparou.
+ */
+async function agendarCopiasSemDerrubar(args: {
+  campaignId: string;
+  delay: number;
+  enderecosDaCampanha?: string[];
+}): Promise<void> {
+  try {
+    await agendarCopias(args);
+  } catch (error) {
+    console.error(
+      "[ACOMPANHAMENTO] Não foi possível agendar as cópias:",
+      errorMessage(error)
+    );
   }
 }
 
@@ -252,6 +273,9 @@ async function dispatchWhatsApp(
     .set({ status: delay > 0 ? "scheduled" : "sending" })
     .where(eq(campaigns.id, campaign.id));
 
+  // A cópia sai com o primeiro lote (o resto pode ser parcelado em dias).
+  await agendarCopiasSemDerrubar({ campaignId: campaign.id, delay });
+
   return NextResponse.json({
     queued: sends.length,
     scheduled: delay > 0,
@@ -389,6 +413,8 @@ async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
     .update(campaigns)
     .set({ status: delay > 0 ? "scheduled" : "sending" })
     .where(eq(campaigns.id, campaign.id));
+
+  await agendarCopiasSemDerrubar({ campaignId: campaign.id, delay });
 
   return NextResponse.json({
     queued: sends.length,
@@ -602,6 +628,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .update(campaigns)
       .set({ status: delay > 0 ? "scheduled" : "sending" })
       .where(eq(campaigns.id, campaign.id));
+
+    // Cópia para os líderes — menos para quem já está entre os destinatários.
+    await agendarCopiasSemDerrubar({
+      campaignId: campaign.id,
+      delay,
+      enderecosDaCampanha: eligible.map((d) => d.address),
+    });
 
     // 5. Resultado.
     return NextResponse.json({
