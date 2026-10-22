@@ -65,3 +65,20 @@ export function normalizeIds(value: unknown): string[] {
       : [];
   return [...new Set(raw.filter(Boolean))];
 }
+
+/**
+ * O erro é violação de unicidade do Postgres (23505)? Olha também o `cause`:
+ * o Drizzle embrulha o erro do driver (DrizzleQueryError), e o código fica
+ * no de dentro. Com `indice`, exige que seja daquele índice/constraint.
+ */
+export function ehViolacaoDeUnico(error: unknown, indice?: string): boolean {
+  let atual: unknown = error;
+  for (let i = 0; i < 5 && atual && typeof atual === "object"; i++) {
+    const e = atual as { code?: unknown; constraint?: unknown; cause?: unknown };
+    if (e.code === "23505") {
+      return !indice || e.constraint === indice;
+    }
+    atual = e.cause;
+  }
+  return false;
+}

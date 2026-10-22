@@ -29,7 +29,7 @@ import { sessionUserFromRequest } from "@/lib/session";
 import { isSmsEnabled } from "@/lib/sms/config";
 import { countSms, sanitizeGsm7 } from "@/lib/sms/gsm7";
 import { resolveNewsList, resolveTeamList } from "@/lib/settings";
-import { errorMessage } from "@/lib/utils";
+import { ehViolacaoDeUnico, errorMessage } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { planBatchDelays, whatsappDailyLimit } from "@/lib/whatsapp/pacing";
 import { missingVariableSources } from "@/lib/whatsapp/variables";
@@ -647,11 +647,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // (clique duplo, aba repetida). A segunda perde a corrida e o INSERT
     // inteiro é recusado pelo Postgres — nenhuma linha parcial, ninguém
     // recebe duas vezes. Vira 409 porque é conflito, não falha do servidor.
-    if (
-      error &&
-      typeof error === "object" &&
-      (error as { code?: unknown }).code === "23505"
-    ) {
+    if (ehViolacaoDeUnico(error)) {
       return NextResponse.json(
         { error: "Esta campanha já está sendo disparada." },
         { status: 409 }

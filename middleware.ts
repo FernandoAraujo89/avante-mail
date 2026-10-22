@@ -15,6 +15,10 @@ const PUBLIC_PREFIXES = [
   "/api/health",
   "/unsubscribe",
   "/api/unsubscribe",
+  // Página de resposta da pesquisa: o parceiro chega pelo link, sem conta.
+  // "/pesquisa/" com barra: "/pesquisas" (a tela da Expansão) continua logada.
+  "/pesquisa/",
+  "/api/pesquisa/",
   "/api/track/",
   "/api/webhooks/",
   "/uploads/",
