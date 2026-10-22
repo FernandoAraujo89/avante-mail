@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { paginaInicial, rotaPermitida } from "./perfis";
+import { paginaInicial, PERFIS, rotaPermitida } from "./perfis";
 
 describe("rotaPermitida", () => {
   it("admin alcança tudo", () => {
@@ -43,13 +43,49 @@ describe("rotaPermitida", () => {
     }
   });
 
-  it("nada da área de leads", () => {
-    expect(rotaPermitida("sucesso_cliente", "/api/leads/etapas", "GET")).toBe(false);
-    expect(rotaPermitida("sucesso_cliente", "/api/leads", "GET")).toBe(false);
+  it("expansão mexe na base de parceiros, como o sucesso do cliente", () => {
+    for (const rota of [
+      "/contacts",
+      "/contacts/abc/edit",
+      "/contacts/import",
+      "/lists/abc",
+      "/api/contacts/import",
+      "/api/lists/abc/contacts",
+      "/api/auth/me",
+    ]) {
+      expect(rotaPermitida("expansao", rota, "POST")).toBe(true);
+    }
   });
 
-  it("cada perfil tem seu início", () => {
+  it("expansão não pede campanha, não dispara e não vê o resto", () => {
+    for (const rota of [
+      "/solicitacoes",
+      "/api/solicitacoes",
+      "/dashboard",
+      "/campaigns",
+      "/api/campaigns/abc/send",
+      "/automations",
+      "/users",
+      "/api/users",
+      "/api/whatsapp/unread",
+      "/contactsx",
+    ]) {
+      expect(rotaPermitida("expansao", rota, "GET")).toBe(false);
+    }
+  });
+
+  it("nada da área de leads para os perfis restritos", () => {
+    for (const perfil of ["sucesso_cliente", "expansao"] as const) {
+      expect(rotaPermitida(perfil, "/api/leads/etapas", "GET")).toBe(false);
+      expect(rotaPermitida(perfil, "/api/leads", "GET")).toBe(false);
+      expect(rotaPermitida(perfil, "/leads", "GET")).toBe(false);
+    }
+  });
+
+  it("cada perfil tem seu início, e ele é alcançável", () => {
     expect(paginaInicial("admin")).toBe("/dashboard");
-    expect(rotaPermitida("sucesso_cliente", paginaInicial("sucesso_cliente"), "GET")).toBe(true);
+    for (const perfil of PERFIS) {
+      expect(rotaPermitida(perfil, paginaInicial(perfil), "GET")).toBe(true);
+    }
   });
 });

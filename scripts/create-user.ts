@@ -1,6 +1,6 @@
 // Cria (ou redefine a senha de) um usuário do sistema.
 // Uso: npx tsx scripts/create-user.ts "Nome Completo" email@dominio.com senha [perfil]
-// perfil: admin (padrão) ou sucesso_cliente — ver lib/perfis.ts.
+// perfil: admin (padrão), sucesso_cliente ou expansao — ver lib/perfis.ts.
 import { config } from "dotenv";
 import path from "path";
 

@@ -1,7 +1,7 @@
-// O Sucesso do cliente enxerga só PARCEIROS: nem os leads (contato com etapa
-// do funil) nem a lista de leads aparecem para ele, e ele não consegue mexer
-// neles por nenhuma rota. O middleware decide QUAIS rotas o perfil abre; este
-// módulo decide O QUE ele vê dentro delas.
+// Os perfis restritos (Sucesso do cliente e Expansão) enxergam só PARCEIROS:
+// nem os leads (contato com etapa do funil) nem a lista de leads aparecem para
+// eles, e eles não conseguem mexer nos leads por nenhuma rota. O middleware
+// decide QUAIS rotas o perfil abre; este módulo decide O QUE ele vê dentro delas.
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 
