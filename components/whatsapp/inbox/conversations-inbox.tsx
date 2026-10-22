@@ -7,7 +7,9 @@ import { MessagesSquare } from "lucide-react";
 import { AutoReplySettingsButton } from "@/components/whatsapp/inbox/auto-reply-settings";
 import { ConversationList } from "@/components/whatsapp/inbox/conversation-list";
 import { ConversationThread } from "@/components/whatsapp/inbox/conversation-thread";
+import type { Perfil } from "@/lib/perfis";
 import { UNREAD_CHANGED_EVENT } from "@/lib/whatsapp/inbox-events";
+import { LINHA_LABEL, linhasDoPerfil, type Linha } from "@/lib/whatsapp/linhas";
 import type { ConversationSummary } from "@/lib/whatsapp/thread-types";
 import { cn } from "@/lib/utils";
 
@@ -32,11 +34,30 @@ export function ConversationsInbox() {
   const [search, setSearch] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [error, setError] = useState("");
+  // As linhas de WhatsApp que o perfil alcança (lib/whatsapp/linhas.ts). Com
+  // mais de uma, dá para olhar uma só; "todas" é o padrão.
+  const [minhasLinhas, setMinhasLinhas] = useState<Linha[] | null>(null);
+  const [linha, setLinha] = useState<Linha | "todas">("todas");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const me = (await res.json()) as { role: Perfil };
+          setMinhasLinhas(linhasDoPerfil(me.role));
+        }
+      } catch {
+        // sem sessão: o middleware cuida do redirecionamento
+      }
+    })();
+  }, []);
 
   const loadList = useCallback(async () => {
     const params = new URLSearchParams();
     if (search.trim()) params.set("q", search.trim());
     if (unreadOnly) params.set("unread", "1");
+    if (linha !== "todas") params.set("linha", linha);
     try {
       const res = await fetch(`/api/whatsapp/conversations?${params.toString()}`, {
         cache: "no-store",
@@ -48,7 +69,7 @@ export function ConversationsInbox() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [search, unreadOnly]);
+  }, [search, unreadOnly, linha]);
 
   // Busca com respiro de digitação; atualização periódica com a aba visível.
   useEffect(() => {
@@ -89,13 +110,39 @@ export function ConversationsInbox() {
         )}
       >
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">Conversas</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {minhasLinhas && minhasLinhas.length === 1
+              ? `Conversas · ${LINHA_LABEL[minhasLinhas[0]]}`
+              : "Conversas"}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             O que os contatos respondem no WhatsApp. Até 24h depois da última
             mensagem do contato, dá para responder por aqui.
           </p>
         </div>
-        <AutoReplySettingsButton />
+        <div className="flex flex-wrap items-center gap-2">
+          {minhasLinhas && minhasLinhas.length > 1 ? (
+            <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="Linha de WhatsApp">
+              {(["todas", ...minhasLinhas] as const).map((valor) => (
+                <button
+                  key={valor}
+                  type="button"
+                  aria-pressed={linha === valor}
+                  onClick={() => setLinha(valor)}
+                  className={cn(
+                    "rounded px-2.5 py-1 text-xs font-medium",
+                    linha === valor
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  )}
+                >
+                  {valor === "todas" ? "Todas as linhas" : LINHA_LABEL[valor]}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {minhasLinhas?.includes("comunicados") ? <AutoReplySettingsButton /> : null}
+        </div>
       </div>
 
       <div className="@container flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -107,6 +154,7 @@ export function ConversationsInbox() {
         >
           <ConversationList
             conversations={conversations}
+            mostrarLinha={linha === "todas" && (minhasLinhas?.length ?? 0) > 1}
             selectedId={selectedId}
             search={search}
             onSearch={setSearch}

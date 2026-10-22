@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { dayKey, formatDateTime, formatDayLabel } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { WHATSAPP_TEXT_MAX } from "@/lib/whatsapp/inbound";
+import { LINHA_LABEL } from "@/lib/whatsapp/linhas";
 import type {
   ConversationThread as Thread,
   ThreadMessage,
@@ -279,6 +280,8 @@ export function ConversationThread({
             {[
               conversation.displayName !== phone ? phone : null,
               conversation.company,
+              // De que número nosso é esta conversa.
+              LINHA_LABEL[conversation.line],
               // Sem contato, o nome no topo é o do perfil do WhatsApp — que
               // a pessoa escolhe e pode ser qualquer coisa.
               !conversation.contactId ? "Fora da base de contatos" : null,

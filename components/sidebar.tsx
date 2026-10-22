@@ -159,6 +159,8 @@ export function Sidebar() {
   }, []);
 
   const isAdmin = me?.role === "admin";
+  // A caixa de conversas é de quem tem linha de WhatsApp (admin, Expansão).
+  const veConversas = me ? rotaPermitida(me.role, "/api/whatsapp/unread", "GET") : false;
 
   // Menu do perfil: só os itens que ele alcança (a trava de verdade é o
   // middleware; aqui é só não mostrar porta fechada). Grupo vazio some.
@@ -172,7 +174,7 @@ export function Sidebar() {
   // Resposta nova no WhatsApp precisa ser vista de qualquer tela, não só de
   // quem está com a caixa de conversas aberta.
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!veConversas) return;
     let active = true;
     const load = async () => {
       if (document.visibilityState !== "visible") return;
@@ -193,7 +195,7 @@ export function Sidebar() {
       document.removeEventListener("visibilitychange", load);
       window.removeEventListener(UNREAD_CHANGED_EVENT, load);
     };
-  }, [isAdmin]);
+  }, [veConversas]);
 
   // Pedido de campanha novo, para o marketing ver de qualquer tela.
   useEffect(() => {

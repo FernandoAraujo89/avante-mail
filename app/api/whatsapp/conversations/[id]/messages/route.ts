@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 
-import { getDb, whatsappConversations } from "@/lib/db";
 import { sessionUserFromRequest } from "@/lib/session";
 import { errorMessage, UUID_REGEX } from "@/lib/utils";
-import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
+import { isLinhaConfigurada } from "@/lib/whatsapp/client";
 import { sendTextInConversation } from "@/lib/whatsapp/conversations";
+import { LINHA_LABEL } from "@/lib/whatsapp/linhas";
+import { conversaAlcancavel } from "@/lib/whatsapp/linhas-acesso";
 import { serviceWindow, WHATSAPP_TEXT_MAX } from "@/lib/whatsapp/inbound";
 
 export const dynamic = "force-dynamic";
@@ -36,12 +36,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const [conversation] = UUID_REGEX.test(id)
-      ? await getDb()
-          .select()
-          .from(whatsappConversations)
-          .where(eq(whatsappConversations.id, id))
-      : [];
+    const conversation = UUID_REGEX.test(id) ? await conversaAlcancavel(request, id) : null;
     if (!conversation) {
       return NextResponse.json(
         { error: "Conversa não encontrada." },
@@ -49,11 +44,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    if (!isWhatsAppConfigured()) {
+    if (!isLinhaConfigurada(conversation.line)) {
       return NextResponse.json(
         {
-          error:
-            "Canal WhatsApp não configurado neste servidor — não há como enviar a resposta.",
+          error: `O número "${LINHA_LABEL[conversation.line]}" ainda não está configurado neste servidor — não há como enviar a resposta.`,
         },
         { status: 503 }
       );
@@ -72,6 +66,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const user = await sessionUserFromRequest(request);
     const { message, error } = await sendTextInConversation({
       conversationId: conversation.id,
+      linha: conversation.line,
       to: conversation.waId ?? conversation.phone.replace(/^\+/, ""),
       text,
       sentBy: { id: user?.id ?? null, name: user?.name || "Equipe" },

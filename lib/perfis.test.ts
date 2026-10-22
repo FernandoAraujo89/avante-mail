@@ -50,11 +50,15 @@ describe("rotaPermitida", () => {
     for (const rota of [
       "/pesquisas",
       "/pesquisas/abc/editar",
+      "/conversations",
       "/contacts",
       "/contacts/abc/edit",
       "/contacts/import",
       "/lists/abc",
       "/api/pesquisas/abc/perguntas",
+      "/api/whatsapp/conversations/abc/messages",
+      "/api/whatsapp/unread",
+      "/api/whatsapp/media/abc",
       "/api/contacts/import",
       "/api/lists/abc/contacts",
       "/api/auth/me",
@@ -73,7 +77,10 @@ describe("rotaPermitida", () => {
       "/automations",
       "/users",
       "/api/users",
-      "/api/whatsapp/unread",
+      // a resposta automática e a configuração do canal são do marketing
+      "/api/whatsapp/auto-reply",
+      "/api/whatsapp/config",
+      "/whatsapp-templates",
       "/contactsx",
     ]) {
       expect(rotaPermitida("expansao", rota, "GET")).toBe(false);

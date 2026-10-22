@@ -1,5 +1,12 @@
 import { RESTRICTION_ERROR_CODES } from "./errors";
 import {
+  envDaLinha,
+  LINHA_PADRAO,
+  linhaConfigurada,
+  phoneNumberIdDaLinha,
+  type Linha,
+} from "./linhas";
+import {
   extractVariables,
   isMediaHeader,
   WHATSAPP_MEDIA_HEADERS,
@@ -49,6 +56,20 @@ function requireEnv(name: string): string {
     );
   }
   return value;
+}
+
+/**
+ * O número remetente: cada linha (lib/whatsapp/linhas.ts) tem o seu. Sem
+ * linha, vale a de comunicados — o comportamento de antes das linhas.
+ */
+function phoneIdDaLinha(linha: Linha | undefined): string {
+  const id = phoneNumberIdDaLinha(linha ?? LINHA_PADRAO);
+  if (!id) {
+    throw new Error(
+      `${envDaLinha(linha ?? LINHA_PADRAO)} não definida no .env.local — a linha "${linha ?? LINHA_PADRAO}" ainda não tem número.`
+    );
+  }
+  return id;
 }
 
 /** Erro da Graph API, preservando o código original da Meta. */
@@ -144,9 +165,11 @@ export async function sendTemplateMessage(args: {
   templateName: string;
   language: string;
   components?: TemplateMessageComponent[];
+  /** De qual número sai (padrão: comunicados). */
+  linha?: Linha;
 }): Promise<{ wamid: string }> {
   const json = await graphRequest<{ messages?: { id: string }[] }>(
-    `${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`,
+    `${phoneIdDaLinha(args.linha)}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -181,9 +204,10 @@ export async function sendTextMessage(args: {
   text: string;
   /** Mostra a prévia do primeiro link do texto na conversa. */
   previewUrl?: boolean;
+  linha?: Linha;
 }): Promise<{ wamid: string }> {
   const json = await graphRequest<{ messages?: { id: string }[] }>(
-    `${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`,
+    `${phoneIdDaLinha(args.linha)}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -216,9 +240,10 @@ export async function sendCtaUrlMessage(args: {
   body: string;
   buttonText: string;
   url: string;
+  linha?: Linha;
 }): Promise<{ wamid: string }> {
   const json = await graphRequest<{ messages?: { id: string }[] }>(
-    `${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`,
+    `${phoneIdDaLinha(args.linha)}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -249,8 +274,8 @@ export async function sendCtaUrlMessage(args: {
  * Confirmação de leitura: o contato vê os dois tiques azuis na mensagem dele
  * (e em todas as anteriores). Marca a mais recente e vale para a conversa.
  */
-export async function markMessageAsRead(wamid: string): Promise<void> {
-  await graphRequest(`${requireEnv("WHATSAPP_PHONE_NUMBER_ID")}/messages`, {
+export async function markMessageAsRead(wamid: string, linha?: Linha): Promise<void> {
+  await graphRequest(`${phoneIdDaLinha(linha)}/messages`, {
     method: "POST",
     body: JSON.stringify({
       messaging_product: "whatsapp",
@@ -517,6 +542,11 @@ export async function fetchAllTemplates(): Promise<MetaTemplate[]> {
 }
 
 /** As três envs mínimas para enviar mensagens e gerir templates. */
+/** A linha tem número e o token do canal existe. */
+export function isLinhaConfigurada(linha: Linha): boolean {
+  return Boolean(process.env.WHATSAPP_ACCESS_TOKEN) && linhaConfigurada(linha);
+}
+
 export function isWhatsAppConfigured(): boolean {
   return Boolean(
     process.env.WHATSAPP_ACCESS_TOKEN &&

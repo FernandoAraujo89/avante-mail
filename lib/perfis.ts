@@ -7,8 +7,9 @@
 // sempre o marketing. Não mexe em leads, automações nem configurações.
 // "expansao" acompanha os parceiros de perto (docs/plano-expansao.md): mexe na
 // mesma base de parceiros que o Sucesso do cliente, monta e acompanha as
-// pesquisas com eles e, nas partes seguintes do plano, ganha a caixa de
-// conversas da própria linha de WhatsApp. Também não dispara campanha.
+// pesquisas com eles e atende pela própria linha de WhatsApp (a caixa de
+// conversas mostra só a linha dela — lib/whatsapp/linhas.ts). Também não
+// dispara campanha.
 //
 // Dentro das telas, todo perfil que não é admin enxerga só parceiros
 // (lib/escopo-parceiros.ts): nem os leads nem a lista de leads.
@@ -27,7 +28,7 @@ export const PERFIL_DESCRICAO: Record<Perfil, string> = {
   sucesso_cliente:
     "Contatos e listas, e pede campanhas ao marketing — não dispara.",
   expansao:
-    "Pesquisas com os parceiros, contatos e listas — não dispara campanha.",
+    "Pesquisas e conversas com os parceiros (linha da Expansão), contatos e listas — não dispara campanha.",
 };
 
 export function ehPerfil(valor: unknown): valor is Perfil {
@@ -60,9 +61,13 @@ const PREFIXOS_POR_PERFIL: Record<PerfilRestrito, readonly string[]> = {
   ],
   expansao: [
     "/pesquisas",
+    "/conversations",
     "/contacts",
     "/lists",
     "/api/pesquisas",
+    "/api/whatsapp/conversations",
+    "/api/whatsapp/unread",
+    "/api/whatsapp/media",
     "/api/contacts",
     "/api/lists",
     "/api/auth/",

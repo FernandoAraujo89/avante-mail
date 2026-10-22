@@ -53,6 +53,7 @@ import { CONVITE_STATUS_LABEL, OBJETIVO_LABEL } from "@/lib/pesquisas/rotulos";
 import { recortar } from "@/lib/paginacao";
 import { paginacaoDaUrl, type ParametrosDaUrl } from "@/lib/paginacao-servidor";
 import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
+import { linhasDoPerfil } from "@/lib/whatsapp/linhas";
 
 export const dynamic = "force-dynamic";
 
@@ -140,7 +141,10 @@ export default async function ContactHistoryPage({
     // critério pode trocar a ordem entre uma e outra.
     .orderBy(desc(campaignSends.sentAt), desc(campaignSends.id));
 
-  const conversationId = (await conversationIdsByContact([id])).get(id);
+  // A conversa mais recente nas linhas que o perfil alcança.
+  const conversationId = usuario
+    ? (await conversationIdsByContact([id], linhasDoPerfil(usuario.role))).get(id)
+    : undefined;
 
   // As 3 frentes da Expansão, para quem alcança o painel (admin, Expansão e,
   // em leitura, o Sucesso do cliente). Lead não tem pesquisa.

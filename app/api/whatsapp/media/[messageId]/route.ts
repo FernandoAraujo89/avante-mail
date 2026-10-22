@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { getDb, whatsappMessages } from "@/lib/db";
 import { errorMessage, UUID_REGEX } from "@/lib/utils";
+import { conversaAlcancavel } from "@/lib/whatsapp/linhas-acesso";
 import {
   downloadInboundMedia,
   isWhatsAppConfigured,
@@ -19,7 +20,7 @@ type RouteContext = { params: Promise<{ messageId: string }> };
  * de ir para /uploads (que é público: o conteúdo de um contato não pode ficar
  * a um link de qualquer um).
  */
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { messageId } = await context.params;
     const [message] = UUID_REGEX.test(messageId)
@@ -28,11 +29,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             mediaId: whatsappMessages.mediaId,
             mediaMimeType: whatsappMessages.mediaMimeType,
             mediaFilename: whatsappMessages.mediaFilename,
+            conversationId: whatsappMessages.conversationId,
           })
           .from(whatsappMessages)
           .where(eq(whatsappMessages.id, messageId))
       : [];
-    if (!message?.mediaId) {
+    // Mídia de conversa em linha que o perfil não alcança: não existe para ele.
+    if (!message?.mediaId || !(await conversaAlcancavel(request, message.conversationId))) {
       return NextResponse.json({ error: "Mídia não encontrada." }, { status: 404 });
     }
     if (!isWhatsAppConfigured()) {

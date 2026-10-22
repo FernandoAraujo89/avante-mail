@@ -25,6 +25,11 @@ import {
   type WebhookInboundMessage,
 } from "@/lib/whatsapp/inbound";
 import {
+  LINHA_PADRAO,
+  linhaDoPhoneNumberId,
+  type Linha,
+} from "@/lib/whatsapp/linhas";
+import {
   isOptOutMessage,
   parseWebhookTimestamp,
   verifySignature,
@@ -89,6 +94,8 @@ interface WebhookStatus {
 interface WebhookChange {
   field?: string;
   value?: {
+    /** O NOSSO número que recebeu o evento: diz de que linha é a conversa. */
+    metadata?: { phone_number_id?: string; display_phone_number?: string };
     statuses?: WebhookStatus[];
     messages?: WebhookInboundMessage[];
     /** Perfis de quem escreveu: o nome que a pessoa usa no WhatsApp. */
@@ -140,8 +147,9 @@ export async function POST(request: NextRequest) {
             for (const status of change.value?.statuses ?? []) {
               await handleStatus(status);
             }
+            const linha = linhaDoEvento(change.value?.metadata?.phone_number_id);
             for (const message of change.value?.messages ?? []) {
-              await handleInboundMessage(message, change.value?.contacts ?? []);
+              await handleInboundMessage(message, change.value?.contacts ?? [], linha);
             }
           } else if (change.field === "message_template_status_update") {
             await handleTemplateStatus(change);
@@ -167,6 +175,22 @@ export async function POST(request: NextRequest) {
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────
+
+/**
+ * De que linha veio a mensagem. Id desconhecido (número novo ainda sem env,
+ * ou evento de teste) cai na linha de comunicados, com aviso no log — melhor
+ * que perder a mensagem.
+ */
+function linhaDoEvento(phoneNumberId: string | undefined): Linha {
+  const linha = linhaDoPhoneNumberId(phoneNumberId);
+  if (linha) return linha;
+  if (phoneNumberId) {
+    console.warn(
+      `[WEBHOOK-WA] phone_number_id ${phoneNumberId} não é de nenhuma linha configurada; tratando como ${LINHA_PADRAO}.`
+    );
+  }
+  return LINHA_PADRAO;
+}
 
 /** Status de mensagem: casa o wamid e aplica a transição monotônica. */
 async function handleStatus(status: WebhookStatus): Promise<void> {
@@ -216,7 +240,8 @@ async function handleStatus(status: WebhookStatus): Promise<void> {
  */
 async function handleInboundMessage(
   raw: WebhookInboundMessage,
-  profiles: { wa_id?: string; profile?: { name?: string } }[]
+  profiles: { wa_id?: string; profile?: { name?: string } }[],
+  linha: Linha
 ): Promise<void> {
   const message = parseInboundMessage(raw);
   if (!message) return;
@@ -229,20 +254,24 @@ async function handleInboundMessage(
   const record = await recordInboundMessage(message, {
     profileName,
     raw: raw as Record<string, unknown>,
+    linha,
   });
   // Reentrega de um evento já gravado: tudo abaixo já aconteceu uma vez.
   if (!record) return;
 
   // "Este número não é canal de atendimento" — vale também para quem não está
-  // na base. As regras (SAIR, toque de botão, equipe atendendo, uma vez a cada
-  // 24h) moram em lib/whatsapp/auto-reply.ts.
-  const autoReply = await sendAutoReplyIfNeeded({
-    conversationId: record.conversationId,
-    to: message.waId,
-    message,
-  });
-  if (autoReply === "failed") {
-    console.error("[WEBHOOK-WA] Resposta automática não foi entregue à Meta.");
+  // na base, e SÓ na linha de comunicados: a da Expansão é atendimento. As
+  // regras (SAIR, toque de botão, equipe atendendo, uma vez a cada 24h) moram
+  // em lib/whatsapp/auto-reply.ts.
+  if (linha === "comunicados") {
+    const autoReply = await sendAutoReplyIfNeeded({
+      conversationId: record.conversationId,
+      to: message.waId,
+      message,
+    });
+    if (autoReply === "failed") {
+      console.error("[WEBHOOK-WA] Resposta automática não foi entregue à Meta.");
+    }
   }
 
   const { contact, send } = record;
@@ -284,6 +313,7 @@ async function handleInboundMessage(
     if (isWhatsAppConfigured()) {
       const { error } = await sendTextInConversation({
         conversationId: record.conversationId,
+        linha,
         to: message.waId,
         text: "Pronto! Você não vai mais receber nossas mensagens por aqui. Se mudar de ideia, é só responder.",
         sentBy: { id: null, name: "Resposta automática (descadastro)" },

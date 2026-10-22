@@ -5,6 +5,7 @@ import { LoaderCircle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatShortWhen } from "@/lib/format";
 import { plainWhatsAppText } from "@/lib/whatsapp/format";
+import { LINHA_LABEL } from "@/lib/whatsapp/linhas";
 import type { ConversationSummary } from "@/lib/whatsapp/thread-types";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ function initials(name: string): string {
 
 export function ConversationList({
   conversations,
+  mostrarLinha = false,
   selectedId,
   search,
   onSearch,
@@ -31,6 +33,8 @@ export function ConversationList({
   error,
 }: {
   conversations: ConversationSummary[] | null;
+  /** Mostra de que linha é cada conversa (quando a lista mistura as duas). */
+  mostrarLinha?: boolean;
   selectedId: string | null;
   search: string;
   onSearch: (value: string) => void;
@@ -131,6 +135,14 @@ export function ConversationList({
                       >
                         {conversation.displayName}
                       </span>
+                      {mostrarLinha ? (
+                        <span
+                          className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+                          title={LINHA_LABEL[conversation.line]}
+                        >
+                          {conversation.line === "expansao" ? "Expansão" : "Comunicados"}
+                        </span>
+                      ) : null}
                       <time
                         dateTime={conversation.lastMessageAt}
                         className={cn(

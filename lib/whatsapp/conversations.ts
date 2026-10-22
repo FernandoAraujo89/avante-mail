@@ -46,11 +46,13 @@ import {
   type AutoReplySkipReason,
 } from "./auto-reply";
 import {
+  isLinhaConfigurada,
   isWhatsAppConfigured,
   sendCtaUrlMessage,
   sendTextMessage,
   WhatsAppApiError,
 } from "./client";
+import { LINHA_PADRAO, type Linha } from "./linhas";
 import {
   attributionStrategy,
   messagePreview,
@@ -129,7 +131,7 @@ export interface InboundRecord {
  */
 export async function recordInboundMessage(
   message: ParsedInboundMessage,
-  extra: { profileName: string | null; raw: Record<string, unknown> }
+  extra: { profileName: string | null; raw: Record<string, unknown>; linha: Linha }
 ): Promise<InboundRecord | null> {
   const db = getDb();
   const strategy = attributionStrategy(message);
@@ -215,7 +217,12 @@ export async function recordInboundMessage(
     const existing = await tx
       .select()
       .from(whatsappConversations)
-      .where(inArray(whatsappConversations.phone, lookupPhones))
+      .where(
+        and(
+          eq(whatsappConversations.line, extra.linha),
+          inArray(whatsappConversations.phone, lookupPhones)
+        )
+      )
       .for("update");
     let conversation =
       existing.find((c) => c.phone === conversationPhone) ?? existing[0];
@@ -233,6 +240,7 @@ export async function recordInboundMessage(
       [conversation] = await tx
         .insert(whatsappConversations)
         .values({
+          line: extra.linha,
           phone: conversationPhone,
           waId: message.waId,
           contactId: contact?.id ?? null,
@@ -241,7 +249,7 @@ export async function recordInboundMessage(
         })
         // Duas entregas simultâneas do primeiro contato de um número.
         .onConflictDoUpdate({
-          target: whatsappConversations.phone,
+          target: [whatsappConversations.line, whatsappConversations.phone],
           set: { waId: message.waId },
         })
         .returning();
@@ -329,6 +337,8 @@ export async function recordInboundMessage(
  */
 export async function sendTextInConversation(args: {
   conversationId: string;
+  /** A linha da conversa: a resposta sai pelo mesmo número que o contato chamou. */
+  linha: Linha;
   to: string;
   text: string;
   sentBy: { id: string | null; name: string };
@@ -371,6 +381,7 @@ export async function sendTextInConversation(args: {
       to: args.to,
       text: args.text,
       previewUrl: /https?:\/\//i.test(args.text),
+      linha: args.linha,
     });
     const [sent] = await db
       .update(whatsappMessages)
@@ -613,12 +624,15 @@ export async function markConversationRead(
   return { lastInboundWamid: last?.wamid ?? null };
 }
 
-/** Conversas com mensagem por ler — o número ao lado de "Conversas" no menu. */
-export async function countUnreadConversations(): Promise<number> {
+/** Conversas com mensagem por ler nas linhas dadas — o número ao lado de "Conversas" no menu. */
+export async function countUnreadConversations(linhas: Linha[]): Promise<number> {
+  if (linhas.length === 0) return 0;
   const [row] = await getDb()
     .select({ total: count() })
     .from(whatsappConversations)
-    .where(gt(whatsappConversations.unreadCount, 0));
+    .where(
+      and(gt(whatsappConversations.unreadCount, 0), inArray(whatsappConversations.line, linhas))
+    );
   return row?.total ?? 0;
 }
 
@@ -632,6 +646,7 @@ function displayName(row: {
 
 const SUMMARY_FIELDS = {
   id: whatsappConversations.id,
+  line: whatsappConversations.line,
   phone: whatsappConversations.phone,
   contactId: whatsappConversations.contactId,
   profileName: whatsappConversations.profileName,
@@ -648,6 +663,7 @@ const SUMMARY_FIELDS = {
 
 type SummaryRow = {
   id: string;
+  line: Linha;
   phone: string;
   contactId: string | null;
   profileName: string | null;
@@ -663,6 +679,7 @@ type SummaryRow = {
 function toSummary(row: SummaryRow): ConversationSummary {
   return {
     id: row.id,
+    line: row.line,
     phone: row.phone,
     contactId: row.contactId,
     displayName: displayName(row),
@@ -681,8 +698,11 @@ export const CONVERSATION_LIST_LIMIT = 200;
 export async function listConversations(opts: {
   search?: string;
   unreadOnly?: boolean;
+  /** As linhas que quem olha alcança (lib/whatsapp/linhas.ts). */
+  linhas: Linha[];
 }): Promise<ConversationSummary[]> {
-  const conditions: SQL[] = [];
+  if (opts.linhas.length === 0) return [];
+  const conditions: SQL[] = [inArray(whatsappConversations.line, opts.linhas)];
   if (opts.unreadOnly) conditions.push(gt(whatsappConversations.unreadCount, 0));
   const search = opts.search?.trim();
   if (search) {
@@ -711,19 +731,28 @@ export async function listConversations(opts: {
   return rows.map(toSummary);
 }
 
-/** A conversa mais recente de cada contato (para os atalhos do relatório e da ficha). */
+/**
+ * A conversa mais recente de cada contato (para os atalhos do relatório e da
+ * ficha), só nas linhas dadas — sem linhas, a de comunicados.
+ */
 export async function conversationIdsByContact(
-  contactIds: string[]
+  contactIds: string[],
+  linhas: Linha[] = [LINHA_PADRAO]
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
-  if (contactIds.length === 0) return map;
+  if (contactIds.length === 0 || linhas.length === 0) return map;
   const rows = await getDb()
     .select({
       id: whatsappConversations.id,
       contactId: whatsappConversations.contactId,
     })
     .from(whatsappConversations)
-    .where(inArray(whatsappConversations.contactId, contactIds))
+    .where(
+      and(
+        inArray(whatsappConversations.contactId, contactIds),
+        inArray(whatsappConversations.line, linhas)
+      )
+    )
     .orderBy(desc(whatsappConversations.lastMessageAt));
   for (const row of rows) {
     if (row.contactId && !map.has(row.contactId)) map.set(row.contactId, row.id);
@@ -951,6 +980,6 @@ export async function loadConversationThread(
     },
     items,
     window: { open: window.open, closesAt: window.closesAt?.toISOString() ?? null },
-    canSend: isWhatsAppConfigured(),
+    canSend: isLinhaConfigurada(row.line),
   };
 }

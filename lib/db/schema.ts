@@ -15,6 +15,7 @@ import {
 
 import type { EmailDesign, EditorType, Row } from "../email-builder/types";
 import type { Perfil } from "../perfis";
+import type { Linha } from "../whatsapp/linhas";
 import type {
   WhatsAppButton,
   WhatsAppHeaderType,
@@ -1083,9 +1084,11 @@ export type WhatsAppMessageDirection =
   (typeof WHATSAPP_MESSAGE_DIRECTIONS)[number];
 
 /**
- * Uma conversa por NÚMERO, como no próprio WhatsApp. O contato é vínculo, não
- * chave: a mensagem de um número que não está na base também precisa chegar a
- * alguém, e o telefone do contato pode mudar depois.
+ * Uma conversa por LINHA e NÚMERO, como no próprio WhatsApp: o mesmo parceiro
+ * que fala com o número de comunicados e com o da Expansão tem duas conversas
+ * (docs/plano-expansao.md, parte 5). O contato é vínculo, não chave: a
+ * mensagem de um número que não está na base também precisa chegar a alguém,
+ * e o telefone do contato pode mudar depois.
  *
  * Os campos "last*" e o `unreadCount` são cópias mantidas a cada mensagem —
  * é o que deixa a lista de conversas ser uma consulta simples e ordenada, em
@@ -1095,8 +1098,10 @@ export const whatsappConversations = pgTable(
   "whatsapp_conversations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** O nosso número desta conversa (lib/whatsapp/linhas.ts). */
+    line: text("line").$type<Linha>().notNull().default("comunicados"),
     /** E.164 do contato cadastrado ou, sem contato, o número de quem escreveu. */
-    phone: text("phone").notNull().unique(),
+    phone: text("phone").notNull(),
     /**
      * Número como o WhatsApp o conhece (sem "+"). No Brasil pode vir sem o
      * nono dígito do celular — é para ele que a resposta é enviada.
@@ -1132,6 +1137,7 @@ export const whatsappConversations = pgTable(
       .defaultNow(),
   },
   (t) => [
+    uniqueIndex("whatsapp_conversations_linha_telefone_idx").on(t.line, t.phone),
     index("whatsapp_conversations_recentes_idx").on(t.lastMessageAt),
     index("whatsapp_conversations_contato_idx").on(t.contactId),
   ]

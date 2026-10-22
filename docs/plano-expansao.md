@@ -372,7 +372,7 @@ tipo, funil) — a tela, a rota JSON e o CSV leem do mesmo lugar, como em
 | **2. Pesquisas: modelo e construtor** ✅ 22/10/2026 | Tabelas + migração (`migrate-pesquisas.ts`), CRUD, construtor em `/pesquisas/[id]/editar` com pré-visualização, seed das 3 pesquisas sugeridas (`seed-pesquisas.ts`, roda à mão), regras puras em `lib/pesquisas/{perguntas,respostas}.ts` com testes | 1 | 3–4 |
 | **3. Página pública de resposta** ✅ 22/10/2026 | `/pesquisa/[token]` (server) + `components/pesquisas/pagina-de-resposta.tsx`; gravação por pergunta com atraso de 600 ms (`PUT /api/pesquisa/[token]/respostas/[perguntaId]`), funil pending → opened → in_progress → completed, concluir trava, rate limit fechado por IP; convite mínimo por contato em `POST /api/pesquisas/[id]/convites` (reabrir fica para a parte 4) | 2 | 2–3 |
 | **4. Convites e lembretes** ✅ e-mail 22/10/2026 · WhatsApp pendente | Convidar por lista (`/pesquisas/[id]`, endereço principal), e-mail transacional com `Reply-To` de quem convidou (`lib/pesquisas/mensagens.ts`, ramo em `worker/email-worker.ts`), `campaign_sends.survey_invite_id` + `survey_message_kind` (`migrate-sends-pesquisa.ts`), lembrar em lote com teto/intervalo em `app_settings` (`pesquisas_lembrete_maximo`, `pesquisas_lembrete_intervalo_horas`), copiar link, encerrar/reabrir. Token do convite ficou em claro (o link precisa ser recuperável). WhatsApp (modelo com botão de URL + linha expansao) depende da fase 5 | 3; WhatsApp precisa da fase 5 e do número | 3–4 |
-| **5. Linhas de WhatsApp e caixa da Expansão** | `linhas.ts`, cliente por linha, webhook por `phone_number_id`, migração `(line, phone)`, caixa com filtro, contador por linha, resposta automática só em comunicados, ficha do contato | 1; número registrado para testar de verdade | 2–3 |
+| **5. Linhas de WhatsApp e caixa da Expansão** ✅ 22/10/2026 | `lib/whatsapp/linhas.ts` (comunicados = `WHATSAPP_PHONE_NUMBER_ID`, expansao = `WHATSAPP_EXPANSAO_PHONE_NUMBER_ID`), cliente envia pela linha, webhook lê `metadata.phone_number_id` (id desconhecido cai em comunicados com aviso), `whatsapp_conversations.line` + única por (linha, telefone) (`migrate-whatsapp-linhas.ts`), caixa com seletor de linha para o admin e fixa para a Expansão, contador do menu por linha, rotas da conversa fechadas por linha (`linhas-acesso.ts`), resposta automática só em comunicados, ficha do contato mostra a conversa das linhas do perfil. Testado localmente com id falso no webhook; o número real entra como configuração | 1; número registrado para testar de verdade | 2–3 |
 | **6. Relatórios e painel das 3 frentes** ✅ 22/10/2026 | `/pesquisas/[id]/relatorio` (funil, NPS em arco, barras, distribuição, textos com busca; filtro por lista e período; CSV em `?formato=csv`), `lib/pesquisas/relatorio.ts` puro + testes, `relatorio-db.ts`; `/pesquisas/parceiros` (parceiro × 3 frentes, convite mais recente, nota do NPS) e `/pesquisas/parceiros/[contactId]` (respostas das 3 frentes); bloco "Pesquisas da Expansão" e convites/lembretes no histórico da ficha do contato; Sucesso do cliente lê o painel (decisão 4) | 3 | 3–4 |
 | **7. Login com Google** | OIDC, `google_sub`, senha opcional, botão no login, docs | — (independente) | 1–2 |
 | **8. Endurecimento e deploy** | Testes de ponta a ponta com Graph falsa, README, memória, deploy em etapas | tudo | 1–2 |
@@ -456,8 +456,11 @@ Respondidas pelo Fernando em 22/10/2026. O raciocínio de cada uma fica logo aba
 
 ## 11. Operacional
 
-**Envs novas:** `WHATSAPP_EXPANSAO_PHONE_NUMBER_ID`, `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `GOOGLE_ALLOWED_DOMAIN`. Nada muda nas existentes.
+**Envs novas:** `WHATSAPP_EXPANSAO_PHONE_NUMBER_ID` (o número novo; o token e a WABA
+são os mesmos — atribuir o número ao System User na Meta), `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_ALLOWED_DOMAIN`. Nada muda nas existentes. Para
+registrar o número novo pela API, rodar os scripts de operação com o id dele:
+`WHATSAPP_PHONE_NUMBER_ID=<id novo> node scripts/wa-register.mjs request|verify|register`.
 
 **Middleware:** prefixos públicos novos `/pesquisa/`, `/api/pesquisa/`,
 `/api/auth/google`.
