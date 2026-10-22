@@ -49,9 +49,7 @@ type UserDto = {
   name: string;
   email: string;
   role: Perfil;
-  /** Já entrou com a conta Google da Avante. */
-  viaGoogle?: boolean;
-  /** Entra só pelo Google (ou ainda não tem senha). */
+  /** Cadastrada sem senha: cria a sua por "Esqueci minha senha". */
   semSenha?: boolean;
   createdAt: string;
 };
@@ -272,12 +270,8 @@ export default function UsersPage() {
                       {me?.id === user.id ? (
                         <Badge variant="info">Você</Badge>
                       ) : null}
-                      {user.viaGoogle ? (
-                        <Badge variant="secondary" title="Já entrou com a conta Google da Avante">
-                          Google
-                        </Badge>
-                      ) : user.semSenha ? (
-                        <Badge variant="outline" title="Sem senha: entra pelo Google (ou cria uma pelo 'esqueci minha senha')">
+                      {user.semSenha ? (
+                        <Badge variant="outline" title="Ainda sem senha: a pessoa cria a sua por 'Esqueci minha senha'">
                           Sem senha
                         </Badge>
                       ) : null}
@@ -381,7 +375,7 @@ export default function UsersPage() {
               <Label htmlFor="user-password">
                 Senha{" "}
                 <span className="font-normal text-muted-foreground">
-                  (mínimo 8; em branco, a pessoa entra com a conta Google da Avante)
+                  (mínimo 8; em branco, a pessoa cria a sua por &quot;Esqueci minha senha&quot;)
                 </span>
               </Label>
               <Input

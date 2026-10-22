@@ -159,20 +159,15 @@ export const LEAD_SCORE_BANDS = [
 ] as const;
 export type LeadScoreBand = (typeof LEAD_SCORE_BANDS)[number];
 
-// Usuários do sistema: login próprio (senha) ou pelo Google Workspace
-// (docs/plano-expansao.md, parte 7). Só entra quem foi cadastrado aqui, com
-// perfil — o Google diz quem é, o sistema diz o que pode.
+// Usuários do sistema (login próprio).
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  /** Nulo para quem entra só pelo Google (pode ganhar senha pelo "esqueci"). */
+  /** Nulo para quem foi cadastrado sem senha: define a sua por "Esqueci minha senha". */
   passwordHash: text("password_hash"),
   // Perfil de acesso (lib/perfis.ts). Quem já existia é admin.
   role: text("role").$type<Perfil>().notNull().default("admin"),
-  /** Id estável da conta Google, gravado no primeiro login — o e-mail pode mudar. */
-  googleSub: text("google_sub").unique(),
-  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -18,7 +18,6 @@ export async function GET() {
         email: users.email,
         role: users.role,
         createdAt: users.createdAt,
-        viaGoogle: sql<boolean>`${users.googleSub} is not null`,
         semSenha: sql<boolean>`${users.passwordHash} is null`,
       })
       .from(users)
@@ -53,8 +52,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    // Senha opcional: sem ela, a pessoa entra pelo Google Workspace (ou
-    // cria uma pelo "esqueci minha senha").
+    // Senha opcional: sem ela, a pessoa cria a sua pelo "esqueci minha senha".
     if (password && password.length < 8) {
       return NextResponse.json(
         { error: "A senha precisa ter pelo menos 8 caracteres." },

@@ -44,11 +44,11 @@ export async function POST(request: NextRequest) {
     const db = getDb();
     const [user] = await db.select().from(users).where(eq(users.email, email));
 
-    // Conta que entra só pelo Google (sem senha): diz isso, em vez de
-    // "senha incorreta" — a pessoa não tem senha para acertar.
+    // Conta cadastrada sem senha: diz isso, em vez de "senha incorreta" — a
+    // pessoa não tem senha para acertar; ela cria a sua pelo "esqueci".
     if (user && !user.passwordHash) {
       return NextResponse.json(
-        { error: "Esta conta entra com o Google. Use o botão \"Entrar com a conta Google da Avante\"." },
+        { error: "Esta conta ainda não tem senha. Clique em \"Esqueci minha senha\" para criar a sua." },
         { status: 401 }
       );
     }
