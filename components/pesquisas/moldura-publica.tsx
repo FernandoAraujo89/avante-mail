@@ -25,7 +25,7 @@ export function MolduraPublica({
         <aside className="flex flex-col justify-between bg-primary px-6 py-6 text-primary-foreground md:px-10 md:py-10">
           <div>
             <AvanteLogo type="horizontal" variant="white" height={22} />
-            <h1 className="mt-6 text-2xl font-bold leading-tight tracking-tight md:mt-20 md:text-4xl">
+            <h1 className="mt-6 text-2xl font-light leading-tight tracking-tight md:mt-20 md:text-[2.6rem]">
               {titulo}
             </h1>
             {subtitulo ? (
@@ -59,7 +59,7 @@ export function CartaoDoPainel({
 }) {
   return (
     <div className="rounded-xl bg-white/10 p-5 backdrop-blur-sm">
-      <p className="text-base font-semibold">{titulo}</p>
+      <p className="text-base font-medium">{titulo}</p>
       <ul className="mt-2 grid gap-1 text-sm text-primary-foreground/80">
         {linhas.map((l) => (
           <li key={l}>{l}</li>

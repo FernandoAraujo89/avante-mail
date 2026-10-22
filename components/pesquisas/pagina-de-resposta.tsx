@@ -187,7 +187,7 @@ export function PaginaDeResposta({
   if (fechada) {
     return (
       <div className="my-auto">
-        <h2 className="text-2xl font-bold tracking-tight">Pesquisa encerrada</h2>
+        <h2 className="text-2xl font-normal tracking-tight">Pesquisa encerrada</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           Esta pesquisa não recebe mais respostas. Se precisar, fale com a equipe da Avante.
         </p>
@@ -220,7 +220,7 @@ export function PaginaDeResposta({
         <Conclusao convite={convite} respostas={respostas} agradecimento={agradecimento} />
       ) : (
         <div className="flex flex-1 flex-col">
-          <h2 className="text-2xl font-bold tracking-tight">{etapas[etapa - 1].titulo}</h2>
+          <h2 className="text-2xl font-normal tracking-tight">{etapas[etapa - 1].titulo}</h2>
           {etapas[etapa - 1].descricao ? (
             <p className="mt-1 text-sm text-muted-foreground">{etapas[etapa - 1].descricao}</p>
           ) : null}
@@ -239,13 +239,13 @@ export function PaginaDeResposta({
 
           <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center justify-between gap-3 sm:justify-start">
-              <Button type="button" variant="ghost" onClick={() => irPara(etapa - 1)} disabled={ocupado}>
+              <Button type="button" variant="ghost" className="font-medium" onClick={() => irPara(etapa - 1)} disabled={ocupado}>
                 <ArrowLeft />
                 Voltar
               </Button>
               <EstadoDaGravacao gravacao={gravacao} erro={erroGeral} />
             </div>
-            <Button type="button" onClick={continuar} disabled={ocupado} className="sm:min-w-44">
+            <Button type="button" onClick={continuar} disabled={ocupado} className="font-medium sm:min-w-44">
               {ocupado ? "Aguarde..." : etapa < etapas.length ? "Continuar" : "Concluir"}
               {!ocupado ? <ArrowRight /> : null}
             </Button>
@@ -294,11 +294,11 @@ function BoasVindas({
   const retomando = respondidas > 0 && respondidas < total;
   return (
     <div className="flex flex-1 flex-col">
-      <h2 className="text-2xl font-bold tracking-tight">
+      <h2 className="text-2xl font-normal tracking-tight">
         {retomando ? "Bem-vindo de volta" : "Vamos começar"}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Olá, <strong className="text-foreground">{convite.contact.name}</strong>
+        Olá, <strong className="font-medium text-foreground">{convite.contact.name}</strong>
         {convite.contact.company ? ` · ${convite.contact.company}` : ""}
       </p>
 
@@ -309,15 +309,15 @@ function BoasVindas({
       <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-3">
         <div className="rounded-lg border border-border p-3">
           <dt className="text-xs text-muted-foreground">Perguntas</dt>
-          <dd className="mt-0.5 text-lg font-semibold tabular-nums">{total}</dd>
+          <dd className="mt-0.5 text-lg font-normal tabular-nums">{total}</dd>
         </div>
         <div className="rounded-lg border border-border p-3">
           <dt className="text-xs text-muted-foreground">Tempo estimado</dt>
-          <dd className="mt-0.5 text-lg font-semibold tabular-nums">~{minutosEstimados(total)} min</dd>
+          <dd className="mt-0.5 text-lg font-normal tabular-nums">~{minutosEstimados(total)} min</dd>
         </div>
         <div className="rounded-lg border border-border p-3">
           <dt className="text-xs text-muted-foreground">Pode parar e voltar</dt>
-          <dd className="mt-0.5 text-sm font-medium">Suas respostas ficam salvas</dd>
+          <dd className="mt-0.5 text-sm font-normal">Suas respostas ficam salvas</dd>
         </div>
       </dl>
 
@@ -328,7 +328,7 @@ function BoasVindas({
       ) : null}
 
       <div className="mt-8 border-t border-border pt-5">
-        <Button type="button" onClick={onComecar} disabled={semPerguntas} className="w-full sm:w-auto sm:min-w-44">
+        <Button type="button" onClick={onComecar} disabled={semPerguntas} className="w-full font-medium sm:w-auto sm:min-w-44">
           {retomando ? "Continuar de onde parei" : "Começar"}
           <ArrowRight />
         </Button>
@@ -354,13 +354,13 @@ function Conclusao({
       <div className="flex size-12 items-center justify-center rounded-full bg-success/15">
         <CheckCircle2 className="size-7 text-success-dark" aria-hidden />
       </div>
-      <h2 className="mt-4 text-2xl font-bold tracking-tight">Respostas enviadas</h2>
+      <h2 className="mt-4 text-2xl font-normal tracking-tight">Respostas enviadas</h2>
       <p className="mt-2 max-w-prose text-sm leading-relaxed whitespace-pre-line text-muted-foreground">
         {agradecimento ?? "Obrigado por responder!"}
       </p>
 
       <details className="group mt-8 border-t border-border pt-5">
-        <summary className="cursor-pointer text-sm font-medium text-primary">
+        <summary className="cursor-pointer text-sm font-normal text-primary underline-offset-4 hover:underline">
           Ver minhas respostas
         </summary>
         <div className="mt-4">

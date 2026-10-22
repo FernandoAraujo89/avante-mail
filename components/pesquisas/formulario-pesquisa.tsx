@@ -59,7 +59,7 @@ export function FormularioPesquisa({
         if (p.type === "section") {
           return (
             <div key={p.id} className="border-b border-border pb-2 pt-2 first:pt-0">
-              <h2 className="text-base font-semibold">{p.label}</h2>
+              <h2 className="text-lg font-normal">{p.label}</h2>
               {p.help ? (
                 <p className="mt-1 text-sm text-muted-foreground">{p.help}</p>
               ) : null}
@@ -76,7 +76,7 @@ export function FormularioPesquisa({
         return (
           <div key={p.id} className="flex flex-col gap-2">
             <div>
-              <p id={rotuloId} className="text-sm font-medium">
+              <p id={rotuloId} className="text-[15px] leading-snug font-normal">
                 <span className="text-muted-foreground">{numero}.</span>{" "}
                 {p.label}
                 {p.required ? (
@@ -149,7 +149,7 @@ export function FormularioPesquisa({
                     aria-pressed={valor === v}
                     onClick={() => responder(p.id, valor === v ? null : v)}
                     className={cn(
-                      "min-h-11 min-w-24 rounded-lg border border-border px-4 text-sm font-medium",
+                      "min-h-11 min-w-24 rounded-lg border border-border px-4 text-sm font-normal",
                       valor === v
                         ? "border-primary bg-primary text-primary-foreground"
                         : "bg-background hover:bg-muted"
@@ -179,7 +179,7 @@ export function FormularioPesquisa({
                       aria-pressed={valor === n}
                       onClick={() => responder(p.id, valor === n ? null : n)}
                       className={cn(
-                        "h-11 w-11 rounded-lg border border-border text-sm font-medium",
+                        "h-11 w-11 rounded-lg border border-border text-sm font-normal",
                         valor === n
                           ? "border-primary bg-primary text-primary-foreground"
                           : "bg-background hover:bg-muted"

@@ -36,7 +36,7 @@ export default async function PesquisaPublicaPage({
         subtitulo="Ouvimos os nossos parceiros para apoiar cada um do jeito certo."
       >
         <div className="my-auto">
-          <h2 className="text-2xl font-bold tracking-tight">Link inválido</h2>
+          <h2 className="text-2xl font-normal tracking-tight">Link inválido</h2>
           <p className="mt-2 max-w-prose text-sm text-muted-foreground">
             Este link de pesquisa não existe ou foi encerrado. Se você o recebeu da Avante,
             peça um novo à equipe que falou com você.
