@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
+  BarChart3,
   BellRing,
   CheckCircle2,
   Copy,
@@ -288,6 +289,12 @@ export default function AcompanhamentoPage() {
               <Link href={`/pesquisas/${id}/editar`}>
                 <Pencil />
                 Perguntas
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href={`/pesquisas/${id}/relatorio`}>
+                <BarChart3 />
+                Relatório
               </Link>
             </Button>
             <Button

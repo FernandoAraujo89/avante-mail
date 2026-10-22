@@ -71,7 +71,9 @@ const PREFIXOS_POR_PERFIL: Record<PerfilRestrito, readonly string[]> = {
 
 /** Prefixos que o perfil só LÊ (GET). */
 const LEITURAS_POR_PERFIL: Record<PerfilRestrito, readonly string[]> = {
-  sucesso_cliente: [],
+  // O painel das 3 frentes e a ficha de cada parceiro (decisão 4 do plano
+  // da Expansão): quem atende o parceiro vê como ele respondeu, sem editar.
+  sucesso_cliente: ["/pesquisas/parceiros", "/api/pesquisas/parceiros"],
   expansao: [],
 };
 

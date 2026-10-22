@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
+  ClipboardCheck,
   MailCheck,
   MailOpen,
   MessagesSquare,
@@ -37,12 +38,18 @@ import {
   contacts,
   getDb,
   lists as listsTable,
+  SURVEY_OBJECTIVES,
+  surveyInvites,
+  surveys,
 } from "@/lib/db";
 import { listarEnderecos } from "@/lib/contatos/enderecos";
 import { usuarioDaSessao, veSoParceiros } from "@/lib/escopo-parceiros";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { naoEhLead } from "@/lib/leads";
+import { rotaPermitida } from "@/lib/perfis";
+import { frentesResumidasDoParceiro } from "@/lib/pesquisas/relatorio-db";
+import { CONVITE_STATUS_LABEL, OBJETIVO_LABEL } from "@/lib/pesquisas/rotulos";
 import { recortar } from "@/lib/paginacao";
 import { paginacaoDaUrl, type ParametrosDaUrl } from "@/lib/paginacao-servidor";
 import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
@@ -60,7 +67,8 @@ export default async function ContactHistoryPage({
   const db = getDb();
 
   // Lead não existe para quem vê só parceiros — nem chega a ser lido.
-  const soParceiros = veSoParceiros(await usuarioDaSessao());
+  const usuario = await usuarioDaSessao();
+  const soParceiros = veSoParceiros(usuario);
   const [contact] = await db
     .select()
     .from(contacts)
@@ -110,6 +118,9 @@ export default async function ContactHistoryPage({
       openedAt: campaignSends.openedAt,
       clickedAt: campaignSends.clickedAt,
       repliedAt: campaignSends.repliedAt,
+      surveyId: surveys.id,
+      surveyName: surveys.name,
+      surveyMessageKind: campaignSends.surveyMessageKind,
     })
     .from(campaignSends)
     // Joins à ESQUERDA: desde a fase 2 das automações, um envio pode vir de um
@@ -121,12 +132,23 @@ export default async function ContactHistoryPage({
       eq(automationRuns.id, campaignSends.automationRunId)
     )
     .leftJoin(automations, eq(automations.id, automationRuns.automationId))
+    // Terceira origem: convite ou lembrete de pesquisa (docs/plano-expansao.md).
+    .leftJoin(surveyInvites, eq(surveyInvites.id, campaignSends.surveyInviteId))
+    .leftJoin(surveys, eq(surveys.id, surveyInvites.surveyId))
     .where(eq(campaignSends.contactId, id))
     // O id desempata: a página seguinte é outra consulta, e empate sem
     // critério pode trocar a ordem entre uma e outra.
     .orderBy(desc(campaignSends.sentAt), desc(campaignSends.id));
 
   const conversationId = (await conversationIdsByContact([id])).get(id);
+
+  // As 3 frentes da Expansão, para quem alcança o painel (admin, Expansão e,
+  // em leitura, o Sucesso do cliente). Lead não tem pesquisa.
+  const vePesquisas =
+    usuario !== null &&
+    rotaPermitida(usuario.role, "/pesquisas/parceiros", "GET") &&
+    contact.stage === null;
+  const frentes = vePesquisas ? await frentesResumidasDoParceiro(id) : null;
 
   const received = history.filter((h) =>
     ["sent", "opened", "clicked"].includes(h.status)
@@ -206,6 +228,50 @@ export default async function ContactHistoryPage({
         <MetricCard label="Respondidos" value={String(replied)} icon={Reply} />
       </div>
 
+      {frentes ? (
+        <>
+          <h2 className="mt-8 mb-3 text-sm font-semibold text-muted-foreground">
+            Pesquisas da Expansão
+          </h2>
+          <Card className="p-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {SURVEY_OBJECTIVES.map((o) => {
+                const f = frentes[o];
+                return (
+                  <div key={o} className="rounded-lg border border-border p-3">
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      {OBJETIVO_LABEL[o]}
+                    </p>
+                    {f ? (
+                      <p className="mt-1 text-sm">
+                        <Badge variant={f.status === "completed" ? "success" : "secondary"}>
+                          {CONVITE_STATUS_LABEL[f.status]}
+                        </Badge>
+                        {f.nps !== null ? (
+                          <span className="ml-2 font-semibold tabular-nums">NPS {f.nps}</span>
+                        ) : f.status !== "completed" ? (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {f.respondidas}/{f.total}
+                          </span>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">não convidado</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <Button variant="link" size="sm" className="mt-2 h-auto p-0" asChild>
+              <Link href={`/pesquisas/parceiros/${contact.id}`}>
+                <ClipboardCheck />
+                Ver as respostas nas 3 frentes
+              </Link>
+            </Button>
+          </Card>
+        </>
+      ) : null}
+
       <h2 className="mt-8 mb-3 text-sm font-semibold text-muted-foreground">
         Histórico de campanhas
       </h2>
@@ -244,6 +310,21 @@ export default async function ContactHistoryPage({
                         </Link>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {h.subject}
+                        </p>
+                      </>
+                    ) : h.surveyId ? (
+                      <>
+                        <Link
+                          href={`/pesquisas/${h.surveyId}`}
+                          className="font-medium hover:underline"
+                        >
+                          {h.surveyName}
+                        </Link>
+                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <ClipboardCheck className="size-3" />
+                          {h.surveyMessageKind === "reminder"
+                            ? "Lembrete de pesquisa"
+                            : "Convite de pesquisa"}
                         </p>
                       </>
                     ) : (

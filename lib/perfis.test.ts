@@ -80,6 +80,14 @@ describe("rotaPermitida", () => {
     }
   });
 
+  it("sucesso do cliente lê o painel das 3 frentes, e só lê", () => {
+    for (const rota of ["/pesquisas/parceiros", "/pesquisas/parceiros/abc", "/api/pesquisas/parceiros/abc"]) {
+      expect(rotaPermitida("sucesso_cliente", rota, "GET")).toBe(true);
+      expect(rotaPermitida("sucesso_cliente", rota, "POST")).toBe(false);
+    }
+    expect(rotaPermitida("sucesso_cliente", "/pesquisas/abc/relatorio", "GET")).toBe(false);
+  });
+
   it("nada da área de leads para os perfis restritos", () => {
     for (const perfil of ["sucesso_cliente", "expansao"] as const) {
       expect(rotaPermitida(perfil, "/api/leads/etapas", "GET")).toBe(false);
