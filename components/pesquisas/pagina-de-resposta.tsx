@@ -1,19 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, CloudOff, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, CloudOff, Loader2 } from "lucide-react";
 
 import { FormularioPesquisa, type Respostas } from "@/components/pesquisas/formulario-pesquisa";
+import { IndicadorDeEtapas } from "@/components/pesquisas/indicador-de-etapas";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import type { SurveyAnswerValue } from "@/lib/db/schema";
 import { aceitaResposta } from "@/lib/pesquisas/convites";
+import {
+  faltamNaEtapa,
+  minutosEstimados,
+  montarEtapas,
+  primeiraEtapaPendente,
+} from "@/lib/pesquisas/etapas";
 import type { ConviteCarregado } from "@/lib/pesquisas/resposta-publica";
 import { progresso } from "@/lib/pesquisas/respostas";
+import { OBJETIVO_CONVITE } from "@/lib/pesquisas/rotulos";
 
-// A página do parceiro. Cada resposta é gravada sozinha, pouco depois de
-// mudar: ele pode fechar o link e voltar outro dia que encontra tudo. O
-// "Concluir" só trava a edição — não é o que salva.
+// A coluna branca da página do parceiro, em etapas: boas-vindas, as perguntas
+// (por seção) e a conclusão. Cada resposta é gravada sozinha pouco depois de
+// mudar — ele pode fechar o link e voltar outro dia que encontra tudo. O
+// "Concluir" só trava a edição; não é o que salva.
 
 const ATRASO_MS = 600;
 
@@ -26,15 +34,20 @@ export function PaginaDeResposta({
   token: string;
   convite: ConviteCarregado;
 }) {
+  const etapas = useMemo(() => montarEtapas(convite.questions), [convite.questions]);
+  // 0 = boas-vindas; 1..n = perguntas; n+1 = concluído.
+  const ultimaEtapa = etapas.length + 1;
+
   const [respostas, setRespostas] = useState<Respostas>(convite.answers);
-  const [concluido, setConcluido] = useState(convite.invite.status === "completed");
+  const [etapa, setEtapa] = useState(convite.invite.status === "completed" ? ultimaEtapa : 0);
   const [agradecimento, setAgradecimento] = useState(convite.survey.thanks);
   const [gravacao, setGravacao] = useState<Gravacao>("parado");
   const [erroGeral, setErroGeral] = useState("");
   const [erros, setErros] = useState<Record<string, string>>({});
-  const [concluindo, setConcluindo] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const topo = useRef<HTMLDivElement>(null);
 
-  // Gravações agendadas por pergunta: a última mudança vence, e "Concluir"
+  // Gravações agendadas por pergunta: a última mudança vence, e "Continuar"
   // espera todas antes de seguir.
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const emVoo = useRef(new Map<string, Promise<void>>());
@@ -108,134 +121,252 @@ export function PaginaDeResposta({
     await Promise.all([...emVoo.current.values()]);
   }
 
-  async function concluir() {
-    setConcluindo(true);
+  function irPara(n: number) {
+    setEtapa(n);
+    setErros({});
     setErroGeral("");
+    topo.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function marcarFaltantes(ids: string[]) {
+    setErros(Object.fromEntries(ids.map((id) => [id, "Responda esta pergunta para continuar."])));
+    setErroGeral(
+      ids.length === 1
+        ? "Falta responder uma pergunta obrigatória nesta etapa."
+        : `Faltam ${ids.length} perguntas obrigatórias nesta etapa.`
+    );
+    document.getElementById(`pergunta-${ids[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function continuar() {
+    const atual = etapas[etapa - 1];
+    if (!atual) return;
+    setOcupado(true);
     try {
       await esvaziar();
-      const res = await fetch(`/api/pesquisa/${token}/concluir`, { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const faltam: string[] = Array.isArray(json.faltam) ? json.faltam : [];
-        if (faltam.length > 0) {
-          setErros(Object.fromEntries(faltam.map((id) => [id, "Responda esta pergunta para concluir."])));
-          document
-            .getElementById(`pergunta-${faltam[0]}`)
-            ?.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-        throw new Error(json.error ?? "Não foi possível concluir.");
+      const faltam = faltamNaEtapa(atual, respostas);
+      if (faltam.length > 0) {
+        marcarFaltantes(faltam);
+        return;
       }
-      setAgradecimento(json.thanks ?? convite.survey.thanks);
-      setConcluido(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch (err) {
-      setErroGeral(err instanceof Error ? err.message : String(err));
+      if (etapa < etapas.length) {
+        irPara(etapa + 1);
+        return;
+      }
+      await concluir();
     } finally {
-      setConcluindo(false);
+      setOcupado(false);
     }
   }
 
-  const p = useMemo(() => progresso(convite.questions, respostas), [convite.questions, respostas]);
-  const pct = p.total === 0 ? 0 : Math.round((p.respondidas / p.total) * 100);
-  const fechada = !concluido && (!convite.survey.ativa || !aceitaResposta(convite.invite.status));
-
-  if (concluido) {
-    return (
-      <div className="flex flex-col gap-6">
-        <Card className="p-6 text-center">
-          <CheckCircle2 className="mx-auto h-10 w-10 text-success-dark" aria-hidden />
-          <h1 className="mt-3 text-xl font-bold">Respostas enviadas</h1>
-          <p className="mt-2 text-sm whitespace-pre-line text-muted-foreground">
-            {agradecimento ?? "Obrigado por responder!"}
-          </p>
-        </Card>
-        <Card className="p-5 sm:p-6">
-          <h2 className="mb-4 text-sm font-semibold text-muted-foreground">Suas respostas</h2>
-          <FormularioPesquisa perguntas={convite.questions} respostas={respostas} somenteLeitura />
-        </Card>
-      </div>
-    );
+  async function concluir() {
+    setErroGeral("");
+    const res = await fetch(`/api/pesquisa/${token}/concluir`, { method: "POST" });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const faltam: string[] = Array.isArray(json.faltam) ? json.faltam : [];
+      if (faltam.length > 0) {
+        // Obrigatória de outra etapa: leva a pessoa até ela.
+        const i = etapas.findIndex((e) => e.perguntas.some((p) => faltam.includes(p.id)));
+        if (i >= 0 && i + 1 !== etapa) irPara(i + 1);
+        setTimeout(() => marcarFaltantes(faltam), 50);
+        return;
+      }
+      setErroGeral(json.error ?? "Não foi possível concluir.");
+      return;
+    }
+    setAgradecimento(json.thanks ?? convite.survey.thanks);
+    irPara(ultimaEtapa);
   }
+
+  const p = useMemo(() => progresso(convite.questions, respostas), [convite.questions, respostas]);
+  const concluido = etapa === ultimaEtapa;
+  const fechada = !concluido && (!convite.survey.ativa || !aceitaResposta(convite.invite.status));
+  const rotulos = ["Início", ...etapas.map((e) => e.titulo), "Conclusão"];
 
   if (fechada) {
     return (
-      <Card className="p-6 text-center">
-        <h1 className="text-xl font-bold">Pesquisa encerrada</h1>
+      <div className="my-auto">
+        <h2 className="text-2xl font-bold tracking-tight">Pesquisa encerrada</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           Esta pesquisa não recebe mais respostas. Se precisar, fale com a equipe da Avante.
         </p>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-6 pb-28">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{convite.survey.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pesquisa para <strong className="text-foreground">{convite.contact.name}</strong>
-          {convite.contact.company ? ` · ${convite.contact.company}` : ""}
+    <div ref={topo} className="flex min-h-full flex-col">
+      <div className="mb-8">
+        <IndicadorDeEtapas total={rotulos.length} atual={etapa} rotulos={rotulos} />
+        <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
+          {concluido
+            ? "Concluída"
+            : `${rotulos[etapa]} · ${p.respondidas} de ${p.total} respondidas`}
         </p>
-        {convite.survey.intro ? (
-          <p className="mt-4 text-sm whitespace-pre-line">{convite.survey.intro}</p>
-        ) : null}
       </div>
 
-      <div>
-        <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-          <span>
-            {p.respondidas} de {p.total} respondidas
-          </span>
-          <span>{pct}%</span>
-        </div>
-        <div
-          className="h-2 overflow-hidden rounded-full bg-secondary"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={pct}
-          aria-label="Progresso da pesquisa"
-        >
-          <div className="h-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-
-      <Card className="p-5 sm:p-6">
-        <FormularioPesquisa
-          perguntas={convite.questions}
-          respostas={respostas}
-          onResposta={responder}
-          erros={erros}
+      {etapa === 0 ? (
+        <BoasVindas
+          convite={convite}
+          respondidas={p.respondidas}
+          total={p.total}
+          onComecar={() =>
+            irPara(p.respondidas > 0 ? primeiraEtapaPendente(etapas, respostas) + 1 : 1)
+          }
+          semPerguntas={etapas.length === 0}
         />
-      </Card>
+      ) : concluido ? (
+        <Conclusao convite={convite} respostas={respostas} agradecimento={agradecimento} />
+      ) : (
+        <div className="flex flex-1 flex-col">
+          <h2 className="text-2xl font-bold tracking-tight">{etapas[etapa - 1].titulo}</h2>
+          {etapas[etapa - 1].descricao ? (
+            <p className="mt-1 text-sm text-muted-foreground">{etapas[etapa - 1].descricao}</p>
+          ) : null}
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-3 px-4 py-3">
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
-            {gravacao === "salvando" ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Salvando...
-              </>
-            ) : gravacao === "salvo" ? (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5 text-success-dark" aria-hidden /> Salvo — pode voltar depois
-              </>
-            ) : gravacao === "erro" ? (
-              <>
-                <CloudOff className="h-3.5 w-3.5 text-destructive" aria-hidden /> {erroGeral || "Não salvou"}
-              </>
-            ) : (
-              "Suas respostas são salvas automaticamente"
-            )}
-          </p>
-          <Button onClick={concluir} disabled={concluindo}>
-            {concluindo ? "Concluindo..." : "Concluir"}
-          </Button>
+          <div className="mt-6">
+            <FormularioPesquisa
+              perguntas={etapas[etapa - 1].perguntas}
+              respostas={respostas}
+              onResposta={responder}
+              erros={erros}
+              numeroInicial={etapas[etapa - 1].numeroInicial}
+            />
+          </div>
+
+          {erroGeral ? <p className="mt-4 text-sm text-destructive">{erroGeral}</p> : null}
+
+          <div className="mt-8 flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between gap-3 sm:justify-start">
+              <Button type="button" variant="ghost" onClick={() => irPara(etapa - 1)} disabled={ocupado}>
+                <ArrowLeft />
+                Voltar
+              </Button>
+              <EstadoDaGravacao gravacao={gravacao} erro={erroGeral} />
+            </div>
+            <Button type="button" onClick={continuar} disabled={ocupado} className="sm:min-w-44">
+              {ocupado ? "Aguarde..." : etapa < etapas.length ? "Continuar" : "Concluir"}
+              {!ocupado ? <ArrowRight /> : null}
+            </Button>
+          </div>
         </div>
-        {erroGeral && gravacao !== "erro" ? (
-          <p className="mx-auto w-full max-w-xl px-4 pb-3 text-xs text-destructive">{erroGeral}</p>
+      )}
+    </div>
+  );
+}
+
+function EstadoDaGravacao({ gravacao, erro }: { gravacao: Gravacao; erro: string }) {
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+      {gravacao === "salvando" ? (
+        <>
+          <Loader2 className="size-3.5 animate-spin" aria-hidden /> Salvando...
+        </>
+      ) : gravacao === "salvo" ? (
+        <>
+          <CheckCircle2 className="size-3.5 text-success-dark" aria-hidden /> Salvo
+        </>
+      ) : gravacao === "erro" ? (
+        <>
+          <CloudOff className="size-3.5 text-destructive" aria-hidden /> {erro || "Não salvou"}
+        </>
+      ) : (
+        "Salvamento automático"
+      )}
+    </p>
+  );
+}
+
+function BoasVindas({
+  convite,
+  respondidas,
+  total,
+  onComecar,
+  semPerguntas,
+}: {
+  convite: ConviteCarregado;
+  respondidas: number;
+  total: number;
+  onComecar: () => void;
+  semPerguntas: boolean;
+}) {
+  const retomando = respondidas > 0 && respondidas < total;
+  return (
+    <div className="flex flex-1 flex-col">
+      <h2 className="text-2xl font-bold tracking-tight">
+        {retomando ? "Bem-vindo de volta" : "Vamos começar"}
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Olá, <strong className="text-foreground">{convite.contact.name}</strong>
+        {convite.contact.company ? ` · ${convite.contact.company}` : ""}
+      </p>
+
+      <p className="mt-6 max-w-prose text-sm leading-relaxed whitespace-pre-line">
+        {convite.survey.intro ?? OBJETIVO_CONVITE[convite.survey.objective]}
+      </p>
+
+      <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-3">
+        <div className="rounded-lg border border-border p-3">
+          <dt className="text-xs text-muted-foreground">Perguntas</dt>
+          <dd className="mt-0.5 text-lg font-semibold tabular-nums">{total}</dd>
+        </div>
+        <div className="rounded-lg border border-border p-3">
+          <dt className="text-xs text-muted-foreground">Tempo estimado</dt>
+          <dd className="mt-0.5 text-lg font-semibold tabular-nums">~{minutosEstimados(total)} min</dd>
+        </div>
+        <div className="rounded-lg border border-border p-3">
+          <dt className="text-xs text-muted-foreground">Pode parar e voltar</dt>
+          <dd className="mt-0.5 text-sm font-medium">Suas respostas ficam salvas</dd>
+        </div>
+      </dl>
+
+      {retomando ? (
+        <p className="mt-4 text-sm text-muted-foreground">
+          Você já respondeu {respondidas} de {total}. Continue de onde parou.
+        </p>
+      ) : null}
+
+      <div className="mt-8 border-t border-border pt-5">
+        <Button type="button" onClick={onComecar} disabled={semPerguntas} className="w-full sm:w-auto sm:min-w-44">
+          {retomando ? "Continuar de onde parei" : "Começar"}
+          <ArrowRight />
+        </Button>
+        {semPerguntas ? (
+          <p className="mt-2 text-xs text-muted-foreground">Esta pesquisa ainda não tem perguntas.</p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function Conclusao({
+  convite,
+  respostas,
+  agradecimento,
+}: {
+  convite: ConviteCarregado;
+  respostas: Respostas;
+  agradecimento: string | null;
+}) {
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="flex size-12 items-center justify-center rounded-full bg-success/15">
+        <CheckCircle2 className="size-7 text-success-dark" aria-hidden />
+      </div>
+      <h2 className="mt-4 text-2xl font-bold tracking-tight">Respostas enviadas</h2>
+      <p className="mt-2 max-w-prose text-sm leading-relaxed whitespace-pre-line text-muted-foreground">
+        {agradecimento ?? "Obrigado por responder!"}
+      </p>
+
+      <details className="group mt-8 border-t border-border pt-5">
+        <summary className="cursor-pointer text-sm font-medium text-primary">
+          Ver minhas respostas
+        </summary>
+        <div className="mt-4">
+          <FormularioPesquisa perguntas={convite.questions} respostas={respostas} somenteLeitura />
+        </div>
+      </details>
     </div>
   );
 }

@@ -22,6 +22,22 @@ export const OBJETIVO_DESCRICAO: Record<SurveyObjective, string> = {
     "Descobrir melhorias e ações que ajudem a empresa do parceiro a crescer.",
 };
 
+/** A chamada do painel azul da página de resposta, por frente. */
+export const OBJETIVO_CHAMADA: Record<SurveyObjective, string> = {
+  dados_empresa: "Vamos conhecer melhor a sua empresa",
+  nps: "Sua opinião orienta o que a Avante faz em seguida",
+  crescimento: "Vamos fazer a sua empresa crescer",
+};
+
+/** O que a página diz quando a pesquisa não tem texto de abertura. */
+export const OBJETIVO_CONVITE: Record<SurveyObjective, string> = {
+  dados_empresa:
+    "Com a realidade da sua empresa em mãos, a Avante consegue apoiar você do jeito certo.",
+  nps: "Poucas perguntas, respostas sinceras: é assim que a Avante melhora.",
+  crescimento:
+    "Conte onde quer chegar e onde a Avante pode ajudar — a Expansão volta a falar com você.",
+};
+
 export const STATUS_LABEL: Record<SurveyStatus, string> = {
   draft: "Rascunho",
   active: "Ativa",

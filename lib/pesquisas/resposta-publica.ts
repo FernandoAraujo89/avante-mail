@@ -13,6 +13,7 @@ import {
   surveys,
   type SurveyAnswerValue,
   type SurveyInviteStatus,
+  type SurveyObjective,
 } from "@/lib/db";
 
 import {
@@ -36,6 +37,7 @@ export interface ConviteCarregado {
   survey: {
     id: string;
     name: string;
+    objective: SurveyObjective;
     intro: string | null;
     thanks: string | null;
     /** Pesquisa encerrada pela Expansão: o link abre, mas não recebe resposta. */
@@ -82,6 +84,7 @@ export async function carregarConvitePorToken(
       completedAt: surveyInvites.completedAt,
       surveyId: surveys.id,
       surveyName: surveys.name,
+      objective: surveys.objective,
       intro: surveys.intro,
       thanks: surveys.thanks,
       surveyStatus: surveys.status,
@@ -120,6 +123,7 @@ export async function carregarConvitePorToken(
     survey: {
       id: linha.surveyId,
       name: linha.surveyName,
+      objective: linha.objective,
       intro: linha.intro,
       thanks: linha.thanks,
       ativa: linha.surveyStatus === "active",

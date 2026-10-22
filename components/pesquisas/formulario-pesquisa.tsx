@@ -36,6 +36,7 @@ export function FormularioPesquisa({
   onResposta,
   somenteLeitura = false,
   erros,
+  numeroInicial = 1,
 }: {
   perguntas: PerguntaDoFormulario[];
   respostas: Respostas;
@@ -43,15 +44,17 @@ export function FormularioPesquisa({
   somenteLeitura?: boolean;
   /** Mensagens por pergunta (ex.: obrigatória sem resposta ao concluir). */
   erros?: Record<string, string>;
+  /** A numeração continua de uma etapa para a outra. */
+  numeroInicial?: number;
 }) {
   const responder = (id: string, valor: SurveyAnswerValue | null) => {
     if (!somenteLeitura) onResposta?.(id, valor);
   };
 
-  let numero = 0;
+  let numero = numeroInicial - 1;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-7">
       {perguntas.map((p) => {
         if (p.type === "section") {
           return (

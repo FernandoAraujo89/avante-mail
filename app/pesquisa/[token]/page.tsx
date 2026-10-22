@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 
-import { AvanteLogo } from "@/components/avante-logo";
+import { CartaoDoPainel, MolduraPublica } from "@/components/pesquisas/moldura-publica";
 import { PaginaDeResposta } from "@/components/pesquisas/pagina-de-resposta";
-import { Card } from "@/components/ui/card";
 import { tokenBemFormado } from "@/lib/pesquisas/convites";
+import { minutosEstimados } from "@/lib/pesquisas/etapas";
 import {
   carregarConvitePorToken,
   marcarAberto,
 } from "@/lib/pesquisas/resposta-publica";
+import { OBJETIVO_CHAMADA, OBJETIVO_CONVITE } from "@/lib/pesquisas/rotulos";
 
 export const dynamic = "force-dynamic";
 
@@ -28,29 +29,43 @@ export default async function PesquisaPublicaPage({
   // Abriu o link: "convidado" vira "abriu" (só na primeira vez).
   if (convite) await marcarAberto(convite.invite.id, convite.invite.status);
 
-  return (
-    <div className="min-h-screen bg-muted/40">
-      <div className="mx-auto w-full max-w-xl px-4 py-6 sm:py-10">
-        <div className="mb-6 flex items-center justify-center">
-          <AvanteLogo type="horizontal" variant="blue" height={26} />
+  if (!convite) {
+    return (
+      <MolduraPublica
+        titulo="Pesquisa Avante"
+        subtitulo="Ouvimos os nossos parceiros para apoiar cada um do jeito certo."
+      >
+        <div className="my-auto">
+          <h2 className="text-2xl font-bold tracking-tight">Link inválido</h2>
+          <p className="mt-2 max-w-prose text-sm text-muted-foreground">
+            Este link de pesquisa não existe ou foi encerrado. Se você o recebeu da Avante,
+            peça um novo à equipe que falou com você.
+          </p>
         </div>
+      </MolduraPublica>
+    );
+  }
 
-        {convite ? (
-          <PaginaDeResposta token={token} convite={convite} />
-        ) : (
-          <Card className="p-6 text-center">
-            <h1 className="text-xl font-bold">Link inválido</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Este link de pesquisa não existe ou foi encerrado. Se você o recebeu da
-              Avante, peça um novo à equipe que falou com você.
-            </p>
-          </Card>
-        )}
+  const total = convite.questions.filter((q) => q.type !== "section").length;
 
-        <p className="mt-8 text-center text-xs text-muted-foreground">
-          Avante Soluções Digitais · Formiga, MG
-        </p>
-      </div>
-    </div>
+  return (
+    // O painel fala da frente (texto fixo por objetivo); o texto de abertura
+    // da pesquisa fica na coluna de resposta — sem repetir os dois lados.
+    <MolduraPublica
+      titulo={OBJETIVO_CHAMADA[convite.survey.objective]}
+      subtitulo={OBJETIVO_CONVITE[convite.survey.objective]}
+      rodape={
+        <CartaoDoPainel
+          titulo={convite.survey.name}
+          linhas={[
+            `Pesquisa para ${convite.contact.name}${convite.contact.company ? ` · ${convite.contact.company}` : ""}`,
+            `${total} pergunta${total === 1 ? "" : "s"} · cerca de ${minutosEstimados(total)} min`,
+            "Suas respostas ficam salvas — pode parar e voltar pelo mesmo link.",
+          ]}
+        />
+      }
+    >
+      <PaginaDeResposta token={token} convite={convite} />
+    </MolduraPublica>
   );
 }
