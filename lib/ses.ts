@@ -58,6 +58,8 @@ export interface SendEmailArgs {
   headers?: Record<string, string>;
   /** Sobrescreve o remetente padrão (SES_FROM_EMAIL). */
   from?: string;
+  /** Para onde vai a resposta do destinatário (ex.: a caixa de quem convidou). */
+  replyTo?: string;
 }
 
 export async function sendEmail(
@@ -74,6 +76,7 @@ export async function sendEmail(
     subject: args.subject,
     html: args.html,
     headers: args.headers,
+    replyTo: args.replyTo,
   });
 
   return { messageId: extractSesMessageId(info) };

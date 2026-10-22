@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, Pencil, Plus, Trash2 } from "lucide-react";
+import { ClipboardCheck, Pencil, Plus, Trash2, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -188,7 +188,7 @@ export default function PesquisasPage() {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <Link
-                              href={`/pesquisas/${p.id}/editar`}
+                              href={`/pesquisas/${p.id}`}
                               className="text-base font-semibold break-words hover:underline"
                             >
                               {p.name}
@@ -207,9 +207,15 @@ export default function PesquisasPage() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button variant="outline" size="sm" asChild>
+                            <Link href={`/pesquisas/${p.id}`}>
+                              <Users />
+                              Acompanhar
+                            </Link>
+                          </Button>
+                          <Button variant="outline" size="sm" asChild>
                             <Link href={`/pesquisas/${p.id}/editar`}>
                               <Pencil />
-                              Editar
+                              Perguntas
                             </Link>
                           </Button>
                           {p.status === "draft" ? (

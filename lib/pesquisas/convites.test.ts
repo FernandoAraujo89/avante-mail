@@ -5,18 +5,15 @@ import {
   estadoAoAbrir,
   estadoAoResponder,
   gerarToken,
-  hashDoToken,
   linkDoConvite,
   tokenBemFormado,
 } from "./convites";
 
 describe("token do convite", () => {
-  it("gera 43 caracteres base64url e o hash bate", () => {
-    const { token, hash } = gerarToken();
+  it("gera 43 caracteres base64url, sempre diferente", () => {
+    const token = gerarToken();
     expect(tokenBemFormado(token)).toBe(true);
-    expect(hash).toBe(hashDoToken(token));
-    expect(hash).toHaveLength(64);
-    expect(gerarToken().token).not.toBe(token);
+    expect(gerarToken()).not.toBe(token);
   });
 
   it("rejeita o que não é token", () => {

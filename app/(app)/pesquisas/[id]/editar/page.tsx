@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { SurveyAnswerValue, SurveyStatus } from "@/lib/db/schema";
+import { assuntoPadrao, corpoPadrao } from "@/lib/pesquisas/mensagens";
 import { opcoesPadrao } from "@/lib/pesquisas/perguntas";
 import { progresso } from "@/lib/pesquisas/respostas";
 import {
@@ -71,6 +72,8 @@ export default function EditarPesquisaPage() {
   const [nome, setNome] = useState("");
   const [intro, setIntro] = useState("");
   const [agradecimento, setAgradecimento] = useState("");
+  const [assuntoEmail, setAssuntoEmail] = useState("");
+  const [corpoEmail, setCorpoEmail] = useState("");
   const [perguntas, setPerguntas] = useState<PerguntaLocal[]>([]);
   const [salvando, setSalvando] = useState(false);
 
@@ -82,6 +85,8 @@ export default function EditarPesquisaPage() {
     setNome(p.name);
     setIntro(p.intro ?? "");
     setAgradecimento(p.thanks ?? "");
+    setAssuntoEmail(p.emailSubject ?? "");
+    setCorpoEmail(p.emailBody ?? "");
     setPerguntas(
       p.questions.map((q) => ({
         chave: q.id,
@@ -120,6 +125,8 @@ export default function EditarPesquisaPage() {
       nome: pesquisa.name,
       intro: pesquisa.intro ?? "",
       thanks: pesquisa.thanks ?? "",
+      emailSubject: pesquisa.emailSubject ?? "",
+      emailBody: pesquisa.emailBody ?? "",
       perguntas: paraEnvio(
         pesquisa.questions.map((q) => ({
           chave: q.id,
@@ -138,10 +145,12 @@ export default function EditarPesquisaPage() {
       nome,
       intro,
       thanks: agradecimento,
+      emailSubject: assuntoEmail,
+      emailBody: corpoEmail,
       perguntas: paraEnvio(perguntas),
     });
     return original !== atual;
-  }, [pesquisa, nome, intro, agradecimento, perguntas]);
+  }, [pesquisa, nome, intro, agradecimento, assuntoEmail, corpoEmail, perguntas]);
 
   useEffect(() => {
     if (!sujo) return;
@@ -194,7 +203,13 @@ export default function EditarPesquisaPage() {
       const resCampos = await fetch(`/api/pesquisas/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nome, intro, thanks: agradecimento }),
+        body: JSON.stringify({
+          name: nome,
+          intro,
+          thanks: agradecimento,
+          emailSubject: assuntoEmail,
+          emailBody: corpoEmail,
+        }),
       });
       const jsonCampos = await resCampos.json();
       if (!resCampos.ok) throw new Error(jsonCampos.error ?? "Erro ao salvar.");
@@ -353,6 +368,59 @@ export default function EditarPesquisaPage() {
                   value={agradecimento}
                   maxLength={1000}
                   onChange={(e) => setAgradecimento(e.target.value)}
+                />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 sm:p-5">
+            <h2 className="mb-1 text-sm font-semibold text-muted-foreground">Convite por e-mail</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              O botão &quot;Responder pesquisa&quot; com o link de cada parceiro entra sozinho no fim.
+              Pode usar {"{{nome}}"}, {"{{empresa}}"} e {"{{pesquisa}}"}. Em branco, vale o texto padrão.
+            </p>
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="pesquisa-email-assunto">Assunto</Label>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setAssuntoEmail(assuntoPadrao(nome || "Pesquisa"))}
+                  >
+                    Usar o padrão
+                  </Button>
+                </div>
+                <Input
+                  id="pesquisa-email-assunto"
+                  value={assuntoEmail}
+                  maxLength={150}
+                  placeholder={assuntoPadrao(nome || "Pesquisa")}
+                  onChange={(e) => setAssuntoEmail(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="pesquisa-email-corpo">Texto</Label>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setCorpoEmail(corpoPadrao())}
+                  >
+                    Usar o padrão
+                  </Button>
+                </div>
+                <Textarea
+                  id="pesquisa-email-corpo"
+                  rows={6}
+                  value={corpoEmail}
+                  maxLength={3000}
+                  placeholder={corpoPadrao()}
+                  onChange={(e) => setCorpoEmail(e.target.value)}
                 />
               </div>
             </div>

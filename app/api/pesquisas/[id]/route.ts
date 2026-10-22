@@ -7,6 +7,7 @@ import {
 } from "@/lib/pesquisas";
 import {
   ehStatus,
+  parseMensagens,
   parsePesquisa,
   transicaoDeStatus,
 } from "@/lib/pesquisas/perguntas";
@@ -46,6 +47,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         name: body.name ?? atual.name,
         intro: body.intro ?? atual.intro,
         thanks: body.thanks ?? atual.thanks,
+      });
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      Object.assign(patch, parsed.dados);
+    }
+
+    if (body.emailSubject !== undefined || body.emailBody !== undefined) {
+      const parsed = parseMensagens({
+        emailSubject: body.emailSubject ?? atual.emailSubject,
+        emailBody: body.emailBody ?? atual.emailBody,
       });
       if (!parsed.ok) {
         return NextResponse.json({ error: parsed.error }, { status: 400 });

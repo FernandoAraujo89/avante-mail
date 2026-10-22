@@ -985,6 +985,13 @@ export const campaignSends = pgTable("campaign_sends", {
   // Sem FK, como automation_run_steps.step_id: o passo pertence a uma versão e
   // some se a automação for apagada; o envio precisa sobreviver a isso.
   automationStepId: uuid("automation_step_id"),
+  // Terceira origem: convite ou lembrete de pesquisa (docs/plano-expansao.md).
+  // Vai pela mesma tabela para ganhar entrega, leitura e devolução dos
+  // webhooks sem duplicar nada. Cascata: o convite leva o histórico dele.
+  surveyInviteId: uuid("survey_invite_id").references(() => surveyInvites.id, {
+    onDelete: "cascade",
+  }),
+  surveyMessageKind: text("survey_message_kind").$type<SurveyMessageKind>(),
   // Canal do envio, copiado na criação. Poderia ser deduzido por join (canal da
   // campanha, tipo do passo), mas o custo do mês não pode depender de uma linha
   // que talvez não exista mais — e é a base de cobrança: e-mail conta sentAt,
@@ -1314,6 +1321,10 @@ export interface SurveyQuestionOptions {
 /** O que uma resposta guarda: texto, número, sim/não ou escolhas. */
 export type SurveyAnswerValue = string | number | boolean | string[];
 
+/** Mensagem de pesquisa em campaign_sends: o convite ou um lembrete. */
+export const SURVEY_MESSAGE_KINDS = ["invite", "reminder"] as const;
+export type SurveyMessageKind = (typeof SURVEY_MESSAGE_KINDS)[number];
+
 // pending → opened (abriu o link) → in_progress (respondeu algo) → completed.
 // "closed" é a profissional encerrando o convite (o link deixa de valer).
 export const SURVEY_INVITE_STATUSES = [
@@ -1383,9 +1394,10 @@ export const surveyQuestions = pgTable(
 );
 
 /**
- * O formulário DAQUELE parceiro. O token (32 bytes aleatórios) só existe no
- * link; aqui fica o SHA-256, como em password_reset_tokens — vazamento do
- * banco não entrega os links.
+ * O formulário DAQUELE parceiro. O token (32 bytes aleatórios) é o link. Fica
+ * em claro — diferente do reset de senha — porque a Expansão precisa do link
+ * a qualquer hora (copiar, lembrar), e o que ele abre é a pesquisa daquele
+ * parceiro, não uma conta.
  */
 export const surveyInvites = pgTable(
   "survey_invites",
@@ -1397,7 +1409,7 @@ export const surveyInvites = pgTable(
     contactId: uuid("contact_id")
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
-    tokenHash: text("token_hash").notNull().unique(),
+    token: text("token").notNull().unique(),
     status: text("status")
       .$type<SurveyInviteStatus>()
       .notNull()

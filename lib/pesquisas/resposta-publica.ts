@@ -20,7 +20,6 @@ import {
   estadoAoAbrir,
   estadoAoResponder,
   gerarToken,
-  hashDoToken,
 } from "./convites";
 import {
   progresso,
@@ -48,22 +47,22 @@ export interface ConviteCarregado {
 }
 
 /**
- * Cria o convite de um parceiro para a pesquisa. Devolve o token cru — a única
- * vez em que ele existe fora do link. Um convite aberto por parceiro por
- * pesquisa (índice único parcial): reconvidar exige concluir ou encerrar.
+ * Cria o convite de um parceiro para a pesquisa. Um convite aberto por
+ * parceiro por pesquisa (índice único parcial): reconvidar exige concluir ou
+ * encerrar — quem chama trata a violação (ehViolacaoDeUnico).
  */
 export async function criarConvite(args: {
   surveyId: string;
   contactId: string;
   autor: { id: string; name: string } | null;
 }): Promise<{ id: string; token: string }> {
-  const { token, hash } = gerarToken();
+  const token = gerarToken();
   const [criado] = await getDb()
     .insert(surveyInvites)
     .values({
       surveyId: args.surveyId,
       contactId: args.contactId,
-      tokenHash: hash,
+      token,
       createdByUserId: args.autor?.id ?? null,
       createdByName: args.autor?.name ?? null,
     })
@@ -92,7 +91,7 @@ export async function carregarConvitePorToken(
     .from(surveyInvites)
     .innerJoin(surveys, eq(surveys.id, surveyInvites.surveyId))
     .innerJoin(contacts, eq(contacts.id, surveyInvites.contactId))
-    .where(eq(surveyInvites.tokenHash, hashDoToken(token)));
+    .where(eq(surveyInvites.token, token));
   if (!linha) return null;
 
   const [perguntas, respostas] = await Promise.all([

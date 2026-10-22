@@ -67,7 +67,7 @@ async function main() {
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       survey_id uuid NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
       contact_id uuid NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-      token_hash text NOT NULL UNIQUE,
+      token text NOT NULL UNIQUE,
       status text NOT NULL DEFAULT 'pending',
       opened_at timestamptz,
       started_at timestamptz,
@@ -79,6 +79,17 @@ async function main() {
       created_by_name text,
       created_at timestamptz NOT NULL DEFAULT now()
     )
+  `);
+  // Primeira versão guardava o hash; o link precisa ser recuperável.
+  await client.query(`
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'survey_invites' AND column_name = 'token_hash'
+      ) THEN
+        ALTER TABLE survey_invites RENAME COLUMN token_hash TO token;
+      END IF;
+    END $$
   `);
   await client.query(
     `CREATE INDEX IF NOT EXISTS survey_invites_pesquisa_idx ON survey_invites (survey_id)`

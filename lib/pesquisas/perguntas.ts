@@ -8,6 +8,8 @@ import {
   type SurveyStatus,
 } from "@/lib/db/schema";
 
+import { LIMITES_DA_MENSAGEM } from "./mensagens";
+
 // Regras do construtor de pesquisa — puras, sem banco. A API valida por aqui
 // e devolve a mensagem como está: ela já diz qual pergunta tem o problema.
 
@@ -314,4 +316,24 @@ export function transicaoDeStatus(
     return { ok: false, error: "Uma pesquisa ativada não volta a rascunho — encerre-a." };
   }
   return { ok: false, error: "Mudança de situação inválida." };
+}
+
+export type ParseMensagens =
+  | { ok: true; dados: { emailSubject: string | null; emailBody: string | null } }
+  | { ok: false; error: string };
+
+/** Assunto e corpo do convite por e-mail (vazios = usar o texto padrão). */
+export function parseMensagens(body: unknown): ParseMensagens {
+  const b = (body ?? {}) as Record<string, unknown>;
+  try {
+    return {
+      ok: true,
+      dados: {
+        emailSubject: textoOuNulo(b.emailSubject, LIMITES_DA_MENSAGEM.assunto, "O assunto do e-mail"),
+        emailBody: textoOuNulo(b.emailBody, LIMITES_DA_MENSAGEM.corpo, "O texto do e-mail"),
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }

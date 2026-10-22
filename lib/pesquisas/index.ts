@@ -151,6 +151,8 @@ export async function atualizarPesquisa(
     intro: string | null;
     thanks: string | null;
     status: SurveyStatus;
+    emailSubject: string | null;
+    emailBody: string | null;
   }>
 ): Promise<void> {
   await getDb()

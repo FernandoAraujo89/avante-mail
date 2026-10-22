@@ -27,6 +27,7 @@ import {
   type EmailJobData,
   type EmailQueueData,
 } from "../lib/queue";
+import { montarEmailDoConvite } from "../lib/pesquisas/envios";
 import type { TemplateVariables } from "../lib/render";
 import { sendEmail } from "../lib/ses";
 import { errorMessage } from "../lib/utils";
@@ -209,6 +210,13 @@ async function processarEnvio(data: EmailJobData): Promise<void> {
     return;
   }
 
+  // Convite/lembrete de pesquisa: e-mail transacional montado na hora, sem
+  // MJML, rastreio nem descadastro — é pedido a um parceiro, não campanha.
+  if (send.surveyInviteId) {
+    await enviarMensagemDePesquisa(sendId, destino);
+    return;
+  }
+
   // De onde vem o conteúdo: da campanha ou do passo da automação. O resto do
   // envio (compilação, rastreio, descadastro, gravação) é idêntico nos dois.
   const conteudo = send.campaignId
@@ -258,6 +266,36 @@ async function processarEnvio(data: EmailJobData): Promise<void> {
     console.log(
       `[WORKER] Enviando para ${contact.email}... ✗ (${errorMessage(error)})`
     );
+    throw error;
+  }
+}
+
+async function enviarMensagemDePesquisa(sendId: string, destino: string): Promise<void> {
+  const db = getDb();
+  const montado = await montarEmailDoConvite(sendId);
+  if (!montado.ok) {
+    // Concluiu ou foi encerrado enquanto a mensagem esperava na fila.
+    console.log(`[WORKER] Pesquisa para ${destino}: ${montado.motivo} Ignorado.`);
+    await db
+      .update(campaignSends)
+      .set({ status: "failed", errorMessage: montado.motivo })
+      .where(eq(campaignSends.id, sendId));
+    return;
+  }
+  try {
+    const { messageId } = await sendEmail({
+      to: destino,
+      subject: montado.email.subject,
+      html: montado.email.html,
+      replyTo: montado.email.replyTo ?? undefined,
+    });
+    await db
+      .update(campaignSends)
+      .set({ status: "sent", providerMessageId: messageId || null, sentAt: new Date() })
+      .where(eq(campaignSends.id, sendId));
+    console.log(`[WORKER] Pesquisa para ${destino}... ✓`);
+  } catch (error) {
+    console.log(`[WORKER] Pesquisa para ${destino}... ✗ (${errorMessage(error)})`);
     throw error;
   }
 }
