@@ -17,12 +17,16 @@ import {
   surveyAnswers,
   surveyQuestions,
   surveys,
+  whatsappTemplates,
   type SurveyObjective,
   type SurveyStatus,
 } from "@/lib/db";
+import { isLinhaConfigurada } from "@/lib/whatsapp/client";
+import type { WhatsAppVariableMap } from "@/lib/whatsapp/types";
 
 import type { DiffPerguntas, PerguntaExistente } from "./perguntas";
 import type { PerguntaDto, PesquisaDto, PesquisaResumoDto } from "./rotulos";
+import { prontidaoDoWhatsApp } from "./whatsapp";
 
 export * from "./rotulos";
 
@@ -100,6 +104,20 @@ export async function carregarPesquisa(id: string): Promise<PesquisaDto | null> 
     : [];
   const porPergunta = new Map(respostas.map((r) => [r.questionId, r.count]));
 
+  // O convite por WhatsApp está pronto? (modelo aprovado com link dinâmico +
+  // linha da Expansão configurada) — lib/pesquisas/whatsapp.ts
+  const [modelo] = linha.whatsappTemplateId
+    ? await db
+        .select({
+          name: whatsappTemplates.name,
+          status: whatsappTemplates.status,
+          buttons: whatsappTemplates.buttons,
+        })
+        .from(whatsappTemplates)
+        .where(eq(whatsappTemplates.id, linha.whatsappTemplateId))
+    : [];
+  const whatsapp = prontidaoDoWhatsApp(modelo ?? null, isLinhaConfigurada("expansao"));
+
   const questions: PerguntaDto[] = perguntas.map((p) => ({
     id: p.id,
     position: p.position,
@@ -119,6 +137,8 @@ export async function carregarPesquisa(id: string): Promise<PesquisaDto | null> 
     emailSubject: linha.emailSubject,
     emailBody: linha.emailBody,
     whatsappTemplateId: linha.whatsappTemplateId,
+    whatsappVariables: linha.whatsappVariables,
+    whatsapp,
     questions,
   };
 }
@@ -153,6 +173,8 @@ export async function atualizarPesquisa(
     status: SurveyStatus;
     emailSubject: string | null;
     emailBody: string | null;
+    whatsappTemplateId: string | null;
+    whatsappVariables: WhatsAppVariableMap | null;
   }>
 ): Promise<void> {
   await getDb()

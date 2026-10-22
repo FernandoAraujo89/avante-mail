@@ -46,6 +46,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (canais.canais.length === 0) {
       return NextResponse.json({ error: "Escolha por onde lembrar." }, { status: 400 });
     }
+    if (canais.canais.includes("whatsapp") && !pesquisa.whatsapp.pronto) {
+      return NextResponse.json({ error: pesquisa.whatsapp.motivo }, { status: 400 });
+    }
     const resultado = await lembrarParceiros({ surveyId: id, inviteIds, canais: canais.canais });
     return NextResponse.json(resultado);
   } catch (error) {

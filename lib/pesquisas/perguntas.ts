@@ -337,3 +337,4 @@ export function parseMensagens(body: unknown): ParseMensagens {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
+

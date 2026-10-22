@@ -57,7 +57,13 @@ const HEADER_ICONS: Partial<Record<WhatsAppHeaderType, typeof FileText>> = {
   document: FileText,
 };
 
-type ButtonRow = { type: "QUICK_REPLY" | "URL"; text: string; url: string };
+type ButtonRow = {
+  type: "QUICK_REPLY" | "URL";
+  text: string;
+  url: string;
+  /** Exemplo do fim do link, quando a URL termina em {{1}} (link dinâmico). */
+  example: string;
+};
 
 interface TemplateDto {
   id: string;
@@ -163,6 +169,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
             type: b.type,
             text: b.text,
             url: b.type === "URL" ? b.url : "",
+            example: b.type === "URL" ? (b.example ?? "") : "",
           }))
         );
         setExamples(json.variableExamples ?? {});
@@ -311,7 +318,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
         footerText,
         buttons: buttons.map((b) =>
           b.type === "URL"
-            ? { type: "URL", text: b.text, url: b.url }
+            ? { type: "URL", text: b.text, url: b.url, example: b.example }
             : { type: "QUICK_REPLY", text: b.text }
         ),
         variableExamples: examples,
@@ -657,7 +664,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       onClick={() =>
                         setButtons((cur) => [
                           ...cur,
-                          { type: "QUICK_REPLY", text: "", url: "" },
+                          { type: "QUICK_REPLY", text: "", url: "", example: "" },
                         ])
                       }
                       disabled={readOnly || buttons.length >= WHATSAPP_LIMITS.buttons}
@@ -712,9 +719,21 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                             onChange={(e) =>
                               updateButton(index, { url: e.target.value })
                             }
-                            placeholder="https://…"
+                            placeholder="https://… (termine com {{1}} para o link mudar por envio)"
                             className="min-w-48 flex-1"
                             disabled={readOnly}
+                          />
+                        ) : null}
+                        {button.type === "URL" && /\{\{1\}\}\s*$/.test(button.url) ? (
+                          <Input
+                            value={button.example}
+                            onChange={(e) =>
+                              updateButton(index, { example: e.target.value })
+                            }
+                            placeholder="Exemplo do fim do link (a Meta exige)"
+                            className="min-w-40"
+                            disabled={readOnly}
+                            aria-label="Exemplo do fim do link"
                           />
                         ) : null}
                         <Button

@@ -12,6 +12,7 @@ import {
   Megaphone,
   MousePointerClick,
   Workflow,
+  ClipboardCheck,
 } from "lucide-react";
 
 import { WhatsAppText } from "@/components/whatsapp/whatsapp-text";
@@ -236,9 +237,16 @@ function MessageBubble({ item }: { item: ThreadMessage }) {
 }
 
 function TemplateBubble({ item }: { item: ThreadTemplate }) {
-  const OriginIcon = item.origin?.type === "automation" ? Workflow : Megaphone;
+  const OriginIcon =
+    item.origin?.type === "automation"
+      ? Workflow
+      : item.origin?.type === "survey"
+        ? ClipboardCheck
+        : Megaphone;
   const originHref = item.origin
-    ? `/${item.origin.type === "automation" ? "automations" : "campaigns"}/${item.origin.id}/report`
+    ? item.origin.type === "survey"
+      ? `/pesquisas/${item.origin.id}`
+      : `/${item.origin.type === "automation" ? "automations" : "campaigns"}/${item.origin.id}/report`
     : null;
 
   return (
@@ -248,7 +256,11 @@ function TemplateBubble({ item }: { item: ThreadTemplate }) {
           <p className="mb-1 flex min-w-0 items-center gap-1 text-[11px] font-semibold text-[#54656f]">
             <OriginIcon className="size-3 shrink-0" aria-hidden="true" />
             <span className="shrink-0">
-              {item.origin?.type === "automation" ? "Automação:" : "Campanha:"}
+              {item.origin?.type === "automation"
+                ? "Automação:"
+                : item.origin?.type === "survey"
+                  ? "Pesquisa:"
+                  : "Campanha:"}
             </span>
             {originHref ? (
               <Link

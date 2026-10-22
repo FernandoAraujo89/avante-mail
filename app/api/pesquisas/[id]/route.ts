@@ -5,6 +5,7 @@ import {
   carregarPesquisa,
   excluirPesquisa,
 } from "@/lib/pesquisas";
+import { parseWhatsApp } from "@/lib/pesquisas/parse-whatsapp";
 import {
   ehStatus,
   parseMensagens,
@@ -58,6 +59,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       const parsed = parseMensagens({
         emailSubject: body.emailSubject ?? atual.emailSubject,
         emailBody: body.emailBody ?? atual.emailBody,
+      });
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      Object.assign(patch, parsed.dados);
+    }
+
+    if (body.whatsappTemplateId !== undefined || body.whatsappVariables !== undefined) {
+      const parsed = parseWhatsApp({
+        whatsappTemplateId: body.whatsappTemplateId ?? atual.whatsappTemplateId,
+        whatsappVariables: body.whatsappVariables ?? atual.whatsappVariables,
       });
       if (!parsed.ok) {
         return NextResponse.json({ error: parsed.error }, { status: 400 });

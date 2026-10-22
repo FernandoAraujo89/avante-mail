@@ -4,6 +4,7 @@ import { Worker, type Job } from "bullmq";
 import { and, count, eq } from "drizzle-orm";
 
 import { modeloDoPassoDeWhatsApp } from "../lib/automations/envios";
+import { montarWhatsAppDoConvite } from "../lib/pesquisas/envios";
 import { enderecoAceita } from "../lib/contatos/destinatarios";
 import {
   campaigns,
@@ -30,6 +31,7 @@ import {
   missingHeaderMedia,
   type WhatsAppVariableMap,
 } from "../lib/whatsapp/types";
+import { LINHA_PADRAO, type Linha } from "../lib/whatsapp/linhas";
 import { buildSendComponents } from "../lib/whatsapp/variables";
 import { errorMessage } from "../lib/utils";
 
@@ -120,12 +122,26 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
     return;
   }
 
-  // Modelo e variáveis: da campanha ou do passo da automação. O envio em si é
-  // idêntico nos dois casos.
+  // Modelo e variáveis: da campanha, do passo da automação ou do convite de
+  // pesquisa. O envio em si é idêntico; o convite sai pela linha da Expansão
+  // e leva o token do parceiro no botão de link.
   let template: WhatsAppTemplate | undefined;
   let variables: WhatsAppVariableMap | null = null;
+  let linha: Linha = LINHA_PADRAO;
+  let buttonUrlSuffix: string | undefined;
 
-  if (send.campaignId) {
+  if (send.surveyInviteId) {
+    const montado = await montarWhatsAppDoConvite(sendId);
+    if (!montado.ok) {
+      // Concluiu, foi encerrado ou o modelo deixou de servir: retry não resolve.
+      await failPermanently(null, montado.motivo);
+      return;
+    }
+    template = montado.whatsapp.template;
+    variables = montado.whatsapp.variables;
+    linha = "expansao";
+    buttonUrlSuffix = montado.whatsapp.token;
+  } else if (send.campaignId) {
     const [campaign] = await db
       .select()
       .from(campaigns)
@@ -199,6 +215,7 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
       template,
       variables,
       contact,
+      buttonUrlSuffix,
     });
 
     const { wamid } = await sendTemplateMessage({
@@ -206,6 +223,7 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
       templateName: template.name,
       language: template.language,
       components,
+      linha,
     });
 
     await db

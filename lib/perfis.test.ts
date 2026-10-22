@@ -87,6 +87,12 @@ describe("rotaPermitida", () => {
     }
   });
 
+  it("expansão lê os modelos de WhatsApp para o convite, sem editar", () => {
+    expect(rotaPermitida("expansao", "/api/whatsapp-templates", "GET")).toBe(true);
+    expect(rotaPermitida("expansao", "/api/whatsapp-templates", "POST")).toBe(false);
+    expect(rotaPermitida("expansao", "/whatsapp-templates", "GET")).toBe(false);
+  });
+
   it("sucesso do cliente lê o painel das 3 frentes, e só lê", () => {
     for (const rota of ["/pesquisas/parceiros", "/pesquisas/parceiros/abc", "/api/pesquisas/parceiros/abc"]) {
       expect(rotaPermitida("sucesso_cliente", rota, "GET")).toBe(true);

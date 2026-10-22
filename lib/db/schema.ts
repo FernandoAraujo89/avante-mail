@@ -1358,6 +1358,8 @@ export const surveys = pgTable("surveys", {
     () => whatsappTemplates.id,
     { onDelete: "set null" }
   ),
+  /** {{n}} do corpo do modelo → nome, empresa ou texto fixo (como na campanha). */
+  whatsappVariables: jsonb("whatsapp_variables").$type<WhatsAppVariableMap>(),
   // Quem criou: vínculo para o nome atual, cópia para sobreviver à remoção
   // da conta (mesma regra de campaigns.sentByName).
   createdByUserId: uuid("created_by_user_id").references(() => users.id, {

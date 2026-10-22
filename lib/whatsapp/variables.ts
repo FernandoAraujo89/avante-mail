@@ -1,8 +1,10 @@
 import { getBaseUrl } from "../base-url";
 import type { TemplateMessageComponent, TemplateParameter } from "./client";
 import {
+  dynamicUrlButtonIndex,
   extractVariables,
   isMediaHeader,
+  type WhatsAppButton,
   type WhatsAppHeaderType,
   type WhatsAppMediaHeaderType,
   type WhatsAppVariableExamples,
@@ -49,6 +51,8 @@ export interface SendTemplate {
   headerType: WhatsAppHeaderType;
   headerMediaUrl: string | null;
   headerMediaFilename: string | null;
+  /** Para o botão de link dinâmico (convite de pesquisa). */
+  buttons?: WhatsAppButton[] | null;
 }
 
 /** O arquivo do cabeçalho no formato que a Cloud API espera para cada tipo. */
@@ -80,6 +84,8 @@ export function buildSendComponents(args: {
   template: SendTemplate;
   variables: WhatsAppVariableMap | null;
   contact: VariableContact;
+  /** O fim do link do botão dinâmico deste envio (o token do convite). */
+  buttonUrlSuffix?: string;
 }): TemplateMessageComponent[] {
   const { template } = args;
   const components: TemplateMessageComponent[] = [];
@@ -115,6 +121,18 @@ export function buildSendComponents(args: {
         text: values[String(n)],
       })),
     });
+  }
+
+  if (args.buttonUrlSuffix) {
+    const index = dynamicUrlButtonIndex(template.buttons ?? null);
+    if (index !== null) {
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: String(index),
+        parameters: [{ type: "text", text: args.buttonUrlSuffix }],
+      });
+    }
   }
 
   return components;

@@ -8,6 +8,7 @@ import {
 } from "./linhas";
 import {
   extractVariables,
+  isDynamicUrl,
   isMediaHeader,
   WHATSAPP_MEDIA_HEADERS,
   type WhatsAppButton,
@@ -149,10 +150,20 @@ export type TemplateParameter =
   | { type: "video"; video: { link: string } }
   | { type: "document"; document: { link: string; filename?: string } };
 
-export interface TemplateMessageComponent {
-  type: "header" | "body";
-  parameters: TemplateParameter[];
+/**
+ * Componente de BOTÃO no envio: o sufixo do link dinâmico (`…/{{1}}`), um
+ * parâmetro de texto no botão de índice `index` (string, como a Meta pede).
+ */
+export interface TemplateButtonComponent {
+  type: "button";
+  sub_type: "url";
+  index: string;
+  parameters: { type: "text"; text: string }[];
 }
+
+export type TemplateMessageComponent =
+  | { type: "header" | "body"; parameters: TemplateParameter[] }
+  | TemplateButtonComponent;
 
 /**
  * Envia uma mensagem de template (única forma de iniciar conversa).
@@ -407,7 +418,7 @@ export interface MetaTemplateComponent {
   format?: string;
   text?: string;
   example?: { body_text?: string[][]; header_handle?: string[] };
-  buttons?: { type: string; text?: string; url?: string }[];
+  buttons?: { type: string; text?: string; url?: string; example?: string[] }[];
 }
 
 /** Monta os components da Meta a partir do modelo local. */
@@ -460,7 +471,13 @@ export function buildTemplateComponents(template: {
       type: "BUTTONS",
       buttons: template.buttons.map((b) =>
         b.type === "URL"
-          ? { type: "URL", text: b.text, url: b.url }
+          ? {
+              type: "URL",
+              text: b.text,
+              url: b.url,
+              // Link dinâmico: a Meta exige um exemplo do sufixo para aprovar.
+              ...(isDynamicUrl(b.url) ? { example: [b.example || "exemplo"] } : {}),
+            }
           : { type: "QUICK_REPLY", text: b.text }
       ),
     });

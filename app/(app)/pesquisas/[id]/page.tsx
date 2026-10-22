@@ -102,6 +102,7 @@ export default function AcompanhamentoPage() {
   const [convidarAberto, setConvidarAberto] = useState(false);
   const [listasEscolhidas, setListasEscolhidas] = useState<string[]>([]);
   const [porEmail, setPorEmail] = useState(true);
+  const [porWhatsApp, setPorWhatsApp] = useState(false);
   const [lembrarAberto, setLembrarAberto] = useState(false);
   const [escopoLembrete, setEscopoLembrete] = useState<"selecionados" | "pendentes">("pendentes");
   const [enviando, setEnviando] = useState(false);
@@ -158,6 +159,10 @@ export default function AcompanhamentoPage() {
   }, [convites]);
 
   const ativa = pesquisa?.status === "active";
+  const whatsappPronto = pesquisa?.whatsapp.pronto ?? false;
+  const canais = [porEmail ? "email" : null, porWhatsApp && whatsappPronto ? "whatsapp" : null].filter(
+    Boolean
+  ) as ("email" | "whatsapp")[];
 
   function alternarSelecao(conviteId: string) {
     setSelecionados((s) => {
@@ -198,6 +203,7 @@ export default function AcompanhamentoPage() {
   function abrirConvidar() {
     setListasEscolhidas([]);
     setPorEmail(true);
+    setPorWhatsApp(whatsappPronto);
     setFormError("");
     setConvidarAberto(true);
   }
@@ -209,14 +215,15 @@ export default function AcompanhamentoPage() {
       const res = await fetch(`/api/pesquisas/${id}/convites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listIds: listasEscolhidas, channels: porEmail ? ["email"] : [] }),
+        body: JSON.stringify({ listIds: listasEscolhidas, channels: canais }),
       });
       const json = (await res.json()) as ResultadoConvite & { error?: string };
       if (!res.ok) throw new Error(json.error ?? "Não foi possível convidar.");
       const partes = [
         `${json.convidados} convidado${json.convidados === 1 ? "" : "s"}`,
-        json.enfileirados ? `${json.enfileirados} e-mail${json.enfileirados === 1 ? "" : "s"} na fila` : null,
-        json.semEndereco ? `${json.semEndereco} sem e-mail (só o link)` : null,
+        json.enfileirados.email ? `${json.enfileirados.email} e-mail${json.enfileirados.email === 1 ? "" : "s"} na fila` : null,
+        json.enfileirados.whatsapp ? `${json.enfileirados.whatsapp} WhatsApp na fila` : null,
+        json.semEndereco ? `${json.semEndereco} sem endereço nos canais escolhidos (só o link)` : null,
         json.jaConvidados ? `${json.jaConvidados} já tinha${json.jaConvidados === 1 ? "" : "m"} convite aberto` : null,
       ].filter(Boolean);
       setAviso(partes.join(" · ") + ".");
@@ -231,6 +238,8 @@ export default function AcompanhamentoPage() {
 
   function abrirLembrar() {
     setEscopoLembrete(selecionados.size > 0 ? "selecionados" : "pendentes");
+    setPorEmail(true);
+    setPorWhatsApp(whatsappPronto);
     setFormError("");
     setLembrarAberto(true);
   }
@@ -244,8 +253,8 @@ export default function AcompanhamentoPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           escopoLembrete === "pendentes"
-            ? { todosPendentes: true, channels: ["email"] }
-            : { inviteIds: [...selecionados], channels: ["email"] }
+            ? { todosPendentes: true, channels: canais }
+            : { inviteIds: [...selecionados], channels: canais }
         ),
       });
       const json = (await res.json()) as ResultadoLembrete & { error?: string };
@@ -255,7 +264,7 @@ export default function AcompanhamentoPage() {
         json.pulados.concluido ? `${json.pulados.concluido} já concluíram` : null,
         json.pulados.limite ? `${json.pulados.limite} no teto de lembretes` : null,
         json.pulados.intervalo ? `${json.pulados.intervalo} lembrado${json.pulados.intervalo === 1 ? "" : "s"} há pouco` : null,
-        json.pulados.semEndereco ? `${json.pulados.semEndereco} sem e-mail` : null,
+        json.pulados.semEndereco ? `${json.pulados.semEndereco} sem endereço nos canais escolhidos` : null,
       ].filter(Boolean);
       setAviso(partes.join(" · ") + ".");
       setLembrarAberto(false);
@@ -546,9 +555,18 @@ export default function AcompanhamentoPage() {
                 />
                 E-mail <span className="text-xs text-muted-foreground">(endereço principal do parceiro)</span>
               </label>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input type="checkbox" className="h-4 w-4" disabled />
-                WhatsApp <span className="text-xs">— chega com a linha da Expansão</span>
+              <label className={`flex items-center gap-2 text-sm ${whatsappPronto ? "" : "text-muted-foreground"}`}>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={porWhatsApp && whatsappPronto}
+                  disabled={!whatsappPronto}
+                  onChange={(e) => setPorWhatsApp(e.target.checked)}
+                />
+                WhatsApp{" "}
+                <span className="text-xs text-muted-foreground">
+                  {whatsappPronto ? "(número Avante Expansão, telefone principal)" : `— ${pesquisa?.whatsapp.motivo ?? ""}`}
+                </span>
               </label>
               <p className="text-xs text-muted-foreground">
                 Sem canal marcado, o convite só cria o link, para você copiar na tabela.
@@ -572,7 +590,7 @@ export default function AcompanhamentoPage() {
           <DialogHeader>
             <DialogTitle>Lembrar parceiros</DialogTitle>
             <DialogDescription>
-              Vai um e-mail de lembrete com o link de cada um. Quem concluiu não recebe.
+              Vai um lembrete com o link de cada um. Quem concluiu não recebe.
               {limites
                 ? ` No máximo ${limites.maximo} lembrete${limites.maximo === 1 ? "" : "s"} por parceiro, com ${limites.intervaloHoras}h entre eles.`
                 : ""}
@@ -600,14 +618,36 @@ export default function AcompanhamentoPage() {
               />
               Só os selecionados na tabela ({selecionados.size})
             </label>
+            <fieldset className="mt-2 grid gap-2">
+              <legend className="mb-1 text-sm font-medium">Lembrar por</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={porEmail}
+                  onChange={(e) => setPorEmail(e.target.checked)}
+                />
+                E-mail
+              </label>
+              <label className={`flex items-center gap-2 text-sm ${whatsappPronto ? "" : "text-muted-foreground"}`}>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={porWhatsApp && whatsappPronto}
+                  disabled={!whatsappPronto}
+                  onChange={(e) => setPorWhatsApp(e.target.checked)}
+                />
+                WhatsApp{whatsappPronto ? "" : ` — ${pesquisa?.whatsapp.motivo ?? ""}`}
+              </label>
+            </fieldset>
             {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLembrarAberto(false)} disabled={enviando}>
               Cancelar
             </Button>
-            <Button onClick={lembrar} disabled={enviando}>
-              {enviando ? "Enviando..." : "Lembrar por e-mail"}
+            <Button onClick={lembrar} disabled={enviando || canais.length === 0}>
+              {enviando ? "Enviando..." : "Lembrar"}
             </Button>
           </DialogFooter>
         </DialogContent>

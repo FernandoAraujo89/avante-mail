@@ -6,6 +6,7 @@ import type {
   SurveyQuestionType,
   SurveyStatus,
 } from "@/lib/db/schema";
+import type { WhatsAppVariableMap } from "@/lib/whatsapp/types";
 
 export const OBJETIVO_LABEL: Record<SurveyObjective, string> = {
   dados_empresa: "Dados da empresa",
@@ -79,5 +80,8 @@ export type PesquisaDto = PesquisaResumoDto & {
   emailSubject: string | null;
   emailBody: string | null;
   whatsappTemplateId: string | null;
+  whatsappVariables: WhatsAppVariableMap | null;
+  /** O convite por WhatsApp pode sair? (modelo pronto + linha configurada) */
+  whatsapp: { pronto: boolean; motivo: string | null };
   questions: PerguntaDto[];
 };

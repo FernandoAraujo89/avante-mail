@@ -12,6 +12,7 @@ import {
   type WhatsAppTemplateCategory,
   type WhatsAppVariableExamples,
   type WhatsAppVariableMap,
+  isDynamicUrl,
 } from "./types";
 
 // Validação do payload de criação/edição de modelo (rotas da API). Os limites
@@ -198,11 +199,23 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
         if (!/^https?:\/\//.test(buttonUrl)) {
           return fail("Informe uma URL válida (https://…) no botão de link.");
         }
+        // {{1}} só no fim: é assim que a Meta aceita o link dinâmico.
+        if (/\{\{/.test(buttonUrl) && !isDynamicUrl(buttonUrl)) {
+          return fail(
+            "No botão de link, a variável só pode ser {{1}} e só no fim da URL (ex.: https://site/pesquisa/{{1}})."
+          );
+        }
         urlCount++;
         if (urlCount > 2) {
           return fail("Use no máximo 2 botões de link (limite da Meta).");
         }
-        parsed.push({ type: "URL", text, url: buttonUrl });
+        const example = typeof b.example === "string" ? b.example.trim() : "";
+        parsed.push({
+          type: "URL",
+          text,
+          url: buttonUrl,
+          ...(isDynamicUrl(buttonUrl) ? { example: example || "exemplo" } : {}),
+        });
       } else if (b.type === "QUICK_REPLY") {
         parsed.push({ type: "QUICK_REPLY", text });
       } else {

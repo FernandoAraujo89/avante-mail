@@ -41,6 +41,10 @@ async function main() {
     )
   `);
 
+  await client.query(
+    `ALTER TABLE surveys ADD COLUMN IF NOT EXISTS whatsapp_variables jsonb`
+  );
+
   console.log("[MIGRATE] Tabela survey_questions...");
   await client.query(`
     CREATE TABLE IF NOT EXISTS survey_questions (

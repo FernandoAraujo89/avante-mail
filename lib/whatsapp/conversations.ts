@@ -25,6 +25,8 @@ import {
   campaignSends,
   contacts,
   getDb,
+  surveyInvites,
+  surveys,
   whatsappConversations,
   whatsappMessages,
   whatsappTemplates,
@@ -845,11 +847,18 @@ export async function loadConversationThread(
         campaignVariables: campaigns.whatsappVariables,
         automationId: automations.id,
         automationName: automations.name,
+        surveyId: surveys.id,
+        surveyName: surveys.name,
+        surveyTemplateId: surveys.whatsappTemplateId,
+        surveyVariables: surveys.whatsappVariables,
       })
       .from(campaignSends)
       .leftJoin(campaigns, eq(campaigns.id, campaignSends.campaignId))
       .leftJoin(automationRuns, eq(automationRuns.id, campaignSends.automationRunId))
       .leftJoin(automations, eq(automations.id, automationRuns.automationId))
+      // Convite/lembrete de pesquisa (docs/plano-expansao.md).
+      .leftJoin(surveyInvites, eq(surveyInvites.id, campaignSends.surveyInviteId))
+      .leftJoin(surveys, eq(surveys.id, surveyInvites.surveyId))
       .where(
         and(
           eq(campaignSends.contactId, row.contactId),
@@ -879,7 +888,11 @@ export async function loadConversationThread(
       }
     }
     const campaignTemplateIds = [
-      ...new Set(sends.map((s) => s.campaignTemplateId).filter((id): id is string => Boolean(id))),
+      ...new Set(
+        sends
+          .map((s) => s.campaignTemplateId ?? s.surveyTemplateId)
+          .filter((id): id is string => Boolean(id))
+      ),
     ];
     const campaignTemplates = new Map(
       campaignTemplateIds.length > 0
@@ -902,10 +915,14 @@ export async function loadConversationThread(
         : null;
       const template = send.campaignTemplateId
         ? campaignTemplates.get(send.campaignTemplateId)
-        : fromStep?.template;
+        : send.surveyTemplateId
+          ? campaignTemplates.get(send.surveyTemplateId)
+          : fromStep?.template;
       const variables = send.campaignId
         ? send.campaignVariables
-        : (fromStep?.variables ?? null);
+        : send.surveyId
+          ? send.surveyVariables
+          : (fromStep?.variables ?? null);
 
       if (send.wamid) templateWamids.set(send.id, send.wamid);
       templateItems.push({
@@ -913,9 +930,11 @@ export async function loadConversationThread(
         id: send.id,
         origin: send.campaignId
           ? { type: "campaign", id: send.campaignId, name: send.campaignName ?? "" }
-          : send.automationId
-            ? { type: "automation", id: send.automationId, name: send.automationName ?? "" }
-            : null,
+          : send.surveyId
+            ? { type: "survey", id: send.surveyId, name: send.surveyName ?? "" }
+            : send.automationId
+              ? { type: "automation", id: send.automationId, name: send.automationName ?? "" }
+              : null,
         ...(template
           ? templateBubble(template, variables, contactForVariables)
           : {

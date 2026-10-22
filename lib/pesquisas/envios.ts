@@ -15,15 +15,19 @@ import {
   surveyInvites,
   surveys,
   users,
+  whatsappTemplates,
   type CampaignChannel,
   type SendStatus,
   type SurveyInviteStatus,
   type SurveyMessageKind,
+  type WhatsAppTemplate,
 } from "@/lib/db";
 import { naoEhLead } from "@/lib/leads";
-import { getEmailQueue } from "@/lib/queue";
+import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
 import { getSetting } from "@/lib/settings";
 import { ehViolacaoDeUnico } from "@/lib/utils";
+import { isLinhaConfigurada } from "@/lib/whatsapp/client";
+import type { WhatsAppVariableMap } from "@/lib/whatsapp/types";
 
 import { estaPendente, linkDoConvite } from "./convites";
 import {
@@ -42,24 +46,19 @@ import {
   preencherVariaveis,
 } from "./mensagens";
 import { criarConvite } from "./resposta-publica";
+import { prontidaoDoWhatsApp } from "./whatsapp";
 
 export type CanalDeConvite = "email" | "whatsapp";
 
-/** Canais pedidos pela tela. WhatsApp chega na parte 5 (linha da Expansão). */
+/** Canais pedidos pela tela: e-mail e/ou WhatsApp (pela linha da Expansão). */
 export function lerCanais(
   valor: unknown
 ): { ok: true; canais: CanalDeConvite[] } | { ok: false; error: string } {
   const lista = Array.isArray(valor) ? valor : ["email"];
   const canais: CanalDeConvite[] = [];
   for (const c of lista) {
-    if (c === "email") {
-      if (!canais.includes("email")) canais.push("email");
-    } else if (c === "whatsapp") {
-      return {
-        ok: false,
-        error:
-          "O convite por WhatsApp chega com a linha da Expansão — por enquanto, e-mail ou só o link.",
-      };
+    if (c === "email" || c === "whatsapp") {
+      if (!canais.includes(c)) canais.push(c);
     } else {
       return { ok: false, error: "Canal inválido." };
     }
@@ -224,12 +223,12 @@ async function registrarEEnfileirar(args: {
       address: args.address,
     })
     .returning({ id: campaignSends.id });
-  // WhatsApp entra na parte 5 (linha da Expansão); hoje só o e-mail é aceito.
-  await getEmailQueue().add(
-    "send-email",
-    { sendId: criado.id, campaignId: null, contactId: args.contactId },
-    { ...OPCOES_DO_JOB, jobId: `pesq__${criado.id}` }
-  );
+  const job = { sendId: criado.id, campaignId: null, contactId: args.contactId };
+  if (args.channel === "whatsapp") {
+    await getWhatsAppQueue().add("send-whatsapp", job, { ...OPCOES_DO_JOB, jobId: `pesq__${criado.id}` });
+  } else {
+    await getEmailQueue().add("send-email", job, { ...OPCOES_DO_JOB, jobId: `pesq__${criado.id}` });
+  }
 }
 
 /** Parceiros (não leads) das listas e dos ids, sem repetição. */
@@ -258,9 +257,9 @@ export interface ResultadoConvite {
   convidados: number;
   /** Já tinham convite em aberto nesta pesquisa. */
   jaConvidados: number;
-  /** Convidados sem endereço que aceite o canal: ficam só com o link. */
+  /** Convidados sem endereço que aceite nenhum canal pedido: ficam só com o link. */
   semEndereco: number;
-  enfileirados: number;
+  enfileirados: Record<CanalDeConvite, number>;
 }
 
 export async function convidarParceiros(args: {
@@ -271,7 +270,12 @@ export async function convidarParceiros(args: {
   autor: { id: string; name: string } | null;
 }): Promise<ResultadoConvite> {
   const db = getDb();
-  const resultado: ResultadoConvite = { convidados: 0, jaConvidados: 0, semEndereco: 0, enfileirados: 0 };
+  const resultado: ResultadoConvite = {
+    convidados: 0,
+    jaConvidados: 0,
+    semEndereco: 0,
+    enfileirados: { email: 0, whatsapp: 0 },
+  };
 
   for (const contactId of await parceirosDe(args.contactIds, args.listIds)) {
     let convite: { id: string };
@@ -288,11 +292,11 @@ export async function convidarParceiros(args: {
 
     let algumCanal = false;
     for (const canal of args.canais) {
-      if (canal !== "email") continue;
-      const address = await enderecoParaEnvioUnico(db, "email", contactId);
+      // O endereço principal que aceita o canal (decisão 9 do plano).
+      const address = await enderecoParaEnvioUnico(db, canal, contactId);
       if (!address) continue;
       await registrarEEnfileirar({ inviteId: convite.id, contactId, channel: canal, address, kind: "invite" });
-      resultado.enfileirados += 1;
+      resultado.enfileirados[canal] += 1;
       algumCanal = true;
     }
     if (args.canais.length > 0 && !algumCanal) resultado.semEndereco += 1;
@@ -353,8 +357,7 @@ export async function lembrarParceiros(args: {
     }
     let algumCanal = false;
     for (const canal of args.canais) {
-      if (canal !== "email") continue;
-      const address = await enderecoParaEnvioUnico(db, "email", c.contactId);
+      const address = await enderecoParaEnvioUnico(db, canal, c.contactId);
       if (!address) continue;
       await registrarEEnfileirar({ inviteId: c.id, contactId: c.contactId, channel: canal, address, kind: "reminder" });
       algumCanal = true;
@@ -492,3 +495,58 @@ export async function montarEmailDoConvite(sendId: string): Promise<MensagemMont
   };
 }
 
+
+export interface WhatsAppDoConvite {
+  template: WhatsAppTemplate;
+  variables: WhatsAppVariableMap | null;
+  contact: { name: string; company: string | null };
+  /** O fim do link do botão dinâmico: o token do convite. */
+  token: string;
+}
+
+export type WhatsAppMontado =
+  | { ok: true; whatsapp: WhatsAppDoConvite }
+  | { ok: false; motivo: string };
+
+/** O modelo e as variáveis de um envio de pesquisa por WhatsApp, para o worker. */
+export async function montarWhatsAppDoConvite(sendId: string): Promise<WhatsAppMontado> {
+  const db = getDb();
+  const [linha] = await db
+    .select({
+      inviteStatus: surveyInvites.status,
+      token: surveyInvites.token,
+      surveyStatus: surveys.status,
+      whatsappTemplateId: surveys.whatsappTemplateId,
+      whatsappVariables: surveys.whatsappVariables,
+      contactName: contacts.name,
+      company: contacts.company,
+    })
+    .from(campaignSends)
+    .innerJoin(surveyInvites, eq(surveyInvites.id, campaignSends.surveyInviteId))
+    .innerJoin(surveys, eq(surveys.id, surveyInvites.surveyId))
+    .innerJoin(contacts, eq(contacts.id, surveyInvites.contactId))
+    .where(eq(campaignSends.id, sendId));
+  if (!linha) return { ok: false, motivo: "Envio sem convite de pesquisa." };
+  if (!estaPendente(linha.inviteStatus)) {
+    return { ok: false, motivo: "O convite já foi concluído ou encerrado." };
+  }
+  if (linha.surveyStatus !== "active") {
+    return { ok: false, motivo: "A pesquisa não está mais ativa." };
+  }
+  const [template] = linha.whatsappTemplateId
+    ? await db.select().from(whatsappTemplates).where(eq(whatsappTemplates.id, linha.whatsappTemplateId))
+    : [];
+  const prontidao = prontidaoDoWhatsApp(template ?? null, isLinhaConfigurada("expansao"));
+  if (!prontidao.pronto || !template) {
+    return { ok: false, motivo: prontidao.motivo ?? "Modelo do convite indisponível." };
+  }
+  return {
+    ok: true,
+    whatsapp: {
+      template,
+      variables: linha.whatsappVariables,
+      contact: { name: linha.contactName, company: linha.company },
+      token: linha.token,
+    },
+  };
+}

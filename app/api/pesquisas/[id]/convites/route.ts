@@ -54,6 +54,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const canais = lerCanais(body.channels);
     if (!canais.ok) return NextResponse.json({ error: canais.error }, { status: 400 });
+    if (canais.canais.includes("whatsapp") && !pesquisa.whatsapp.pronto) {
+      return NextResponse.json({ error: pesquisa.whatsapp.motivo }, { status: 400 });
+    }
 
     const user = await sessionUserFromRequest(request);
     const resultado = await convidarParceiros({

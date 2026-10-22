@@ -26,8 +26,23 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { SurveyAnswerValue, SurveyStatus } from "@/lib/db/schema";
+import { modeloTemLinkDinamico } from "@/lib/pesquisas/whatsapp";
+import {
+  extractVariables,
+  type WhatsAppButton,
+  type WhatsAppTemplateStatus,
+  type WhatsAppVariableMap,
+  type WhatsAppVariableSource,
+} from "@/lib/whatsapp/types";
 import { assuntoPadrao, corpoPadrao } from "@/lib/pesquisas/mensagens";
 import { opcoesPadrao } from "@/lib/pesquisas/perguntas";
 import { progresso } from "@/lib/pesquisas/respostas";
@@ -42,6 +57,17 @@ const STATUS_VARIANT: Record<SurveyStatus, "secondary" | "success" | "warning"> 
   active: "success",
   closed: "warning",
 };
+
+/** O que a tela precisa de um modelo de WhatsApp para o convite. */
+type ModeloDto = {
+  id: string;
+  name: string;
+  status: WhatsAppTemplateStatus;
+  bodyText: string;
+  buttons: WhatsAppButton[] | null;
+};
+
+const SEM_MODELO = "__nenhum__";
 
 function chaveNova(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -74,6 +100,9 @@ export default function EditarPesquisaPage() {
   const [agradecimento, setAgradecimento] = useState("");
   const [assuntoEmail, setAssuntoEmail] = useState("");
   const [corpoEmail, setCorpoEmail] = useState("");
+  const [modelos, setModelos] = useState<ModeloDto[]>([]);
+  const [modeloId, setModeloId] = useState<string>(SEM_MODELO);
+  const [variaveis, setVariaveis] = useState<WhatsAppVariableMap>({});
   const [perguntas, setPerguntas] = useState<PerguntaLocal[]>([]);
   const [salvando, setSalvando] = useState(false);
 
@@ -87,6 +116,8 @@ export default function EditarPesquisaPage() {
     setAgradecimento(p.thanks ?? "");
     setAssuntoEmail(p.emailSubject ?? "");
     setCorpoEmail(p.emailBody ?? "");
+    setModeloId(p.whatsappTemplateId ?? SEM_MODELO);
+    setVariaveis(p.whatsappVariables ?? {});
     setPerguntas(
       p.questions.map((q) => ({
         chave: q.id,
@@ -118,6 +149,21 @@ export default function EditarPesquisaPage() {
     carregar();
   }, [carregar]);
 
+  // Os modelos da WABA, para o convite por WhatsApp.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/whatsapp-templates");
+        if (res.ok) {
+          const lista = (await res.json()) as ModeloDto[];
+          setModelos(Array.isArray(lista) ? lista : []);
+        }
+      } catch {
+        // sem a lista, o seletor fica vazio e a tela avisa
+      }
+    })();
+  }, []);
+
   // "Sujo" = difere do que foi carregado. Guia o botão Salvar e o aviso ao sair.
   const sujo = useMemo(() => {
     if (!pesquisa) return false;
@@ -127,6 +173,8 @@ export default function EditarPesquisaPage() {
       thanks: pesquisa.thanks ?? "",
       emailSubject: pesquisa.emailSubject ?? "",
       emailBody: pesquisa.emailBody ?? "",
+      whatsappTemplateId: pesquisa.whatsappTemplateId ?? SEM_MODELO,
+      whatsappVariables: pesquisa.whatsappVariables ?? {},
       perguntas: paraEnvio(
         pesquisa.questions.map((q) => ({
           chave: q.id,
@@ -147,10 +195,12 @@ export default function EditarPesquisaPage() {
       thanks: agradecimento,
       emailSubject: assuntoEmail,
       emailBody: corpoEmail,
+      whatsappTemplateId: modeloId,
+      whatsappVariables: modeloId === SEM_MODELO ? {} : variaveis,
       perguntas: paraEnvio(perguntas),
     });
     return original !== atual;
-  }, [pesquisa, nome, intro, agradecimento, assuntoEmail, corpoEmail, perguntas]);
+  }, [pesquisa, nome, intro, agradecimento, assuntoEmail, corpoEmail, modeloId, variaveis, perguntas]);
 
   useEffect(() => {
     if (!sujo) return;
@@ -209,6 +259,8 @@ export default function EditarPesquisaPage() {
           thanks: agradecimento,
           emailSubject: assuntoEmail,
           emailBody: corpoEmail,
+          whatsappTemplateId: modeloId === SEM_MODELO ? null : modeloId,
+          whatsappVariables: modeloId === SEM_MODELO ? null : variaveis,
         }),
       });
       const jsonCampos = await resCampos.json();
@@ -246,6 +298,21 @@ export default function EditarPesquisaPage() {
     } catch (err) {
       setErro(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  const modelo = modelos.find((m) => m.id === modeloId) ?? null;
+  const indicesDoModelo = modelo ? extractVariables(modelo.bodyText) : [];
+
+  function definirFonte(n: number, tipo: "name" | "company" | "static") {
+    setVariaveis((atual) => {
+      const chave = String(n);
+      const anterior = atual[chave];
+      const fonte: WhatsAppVariableSource =
+        tipo === "static"
+          ? { source: "static", value: anterior?.source === "static" ? (anterior.value ?? "") : "" }
+          : { source: tipo };
+      return { ...atual, [chave]: fonte };
+    });
   }
 
   // A pré-visualização usa a lista local: o que ainda não foi salvo também
@@ -423,6 +490,82 @@ export default function EditarPesquisaPage() {
                   onChange={(e) => setCorpoEmail(e.target.value)}
                 />
               </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 sm:p-5">
+            <h2 className="mb-1 text-sm font-semibold text-muted-foreground">Convite por WhatsApp</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Sai pelo número Avante Expansão com um modelo aprovado pela Meta que tenha um botão de
+              link terminando em {"{{1}}"} — é por ele que vai o link de cada parceiro.
+            </p>
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="pesquisa-modelo">Modelo</Label>
+                <Select value={modeloId} onValueChange={setModeloId}>
+                  <SelectTrigger id="pesquisa-modelo">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_MODELO}>Sem convite por WhatsApp</SelectItem>
+                    {modelos.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name}
+                        {m.status !== "approved"
+                          ? " (não aprovado)"
+                          : modeloTemLinkDinamico(m.buttons)
+                            ? ""
+                            : " (sem botão de link dinâmico)"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {pesquisa.whatsapp && !pesquisa.whatsapp.pronto && modeloId !== SEM_MODELO && !sujo ? (
+                  <p className="text-xs text-warning-dark">{pesquisa.whatsapp.motivo}</p>
+                ) : null}
+              </div>
+              {modelo ? (
+                <div className="grid gap-3">
+                  <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm whitespace-pre-line">{modelo.bodyText}</p>
+                  {indicesDoModelo.length > 0 ? (
+                    <div className="grid gap-2">
+                      {indicesDoModelo.map((n) => {
+                        const fonte = variaveis[String(n)];
+                        return (
+                          <div key={n} className="grid gap-2 sm:grid-cols-[6rem_12rem_minmax(0,1fr)] sm:items-center">
+                            <Label htmlFor={`var-${n}`}>{`{{${n}}}`}</Label>
+                            <Select
+                              value={fonte?.source ?? ""}
+                              onValueChange={(v) => definirFonte(n, v as "name" | "company" | "static")}
+                            >
+                              <SelectTrigger id={`var-${n}`}>
+                                <SelectValue placeholder="Escolha a fonte" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="name">Nome do parceiro</SelectItem>
+                                <SelectItem value="company">Empresa do parceiro</SelectItem>
+                                <SelectItem value="static">Texto fixo</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {fonte?.source === "static" ? (
+                              <Input
+                                aria-label={`Texto fixo de {{${n}}}`}
+                                value={fonte.value ?? ""}
+                                onChange={(e) =>
+                                  setVariaveis((atual) => ({
+                                    ...atual,
+                                    [String(n)]: { source: "static", value: e.target.value },
+                                  }))
+                                }
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </Card>
 

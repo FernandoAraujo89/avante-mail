@@ -79,7 +79,9 @@ const LEITURAS_POR_PERFIL: Record<PerfilRestrito, readonly string[]> = {
   // O painel das 3 frentes e a ficha de cada parceiro (decisão 4 do plano
   // da Expansão): quem atende o parceiro vê como ele respondeu, sem editar.
   sucesso_cliente: ["/pesquisas/parceiros", "/api/pesquisas/parceiros"],
-  expansao: [],
+  // A lista dos modelos de WhatsApp, para escolher o do convite da pesquisa;
+  // criar e editar modelo continua sendo do marketing.
+  expansao: ["/api/whatsapp-templates"],
 };
 
 function casa(pathname: string, prefixo: string): boolean {

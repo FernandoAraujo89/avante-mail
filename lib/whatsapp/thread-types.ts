@@ -54,7 +54,7 @@ export interface ThreadMessage {
 export interface ThreadTemplate {
   kind: "template";
   id: string;
-  origin: { type: "campaign" | "automation"; id: string; name: string } | null;
+  origin: { type: "campaign" | "automation" | "survey"; id: string; name: string } | null;
   templateName: string | null;
   headerText: string | null;
   headerMedia: {

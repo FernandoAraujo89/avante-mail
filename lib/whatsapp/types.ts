@@ -158,7 +158,28 @@ export function missingHeaderMedia(template: {
 
 export type WhatsAppButton =
   | { type: "QUICK_REPLY"; text: string }
-  | { type: "URL"; text: string; url: string };
+  | {
+      type: "URL";
+      text: string;
+      /**
+       * Fixa, ou DINÂMICA quando termina em {{1}}: o fim do link muda a cada
+       * envio (o convite de pesquisa manda o token do parceiro). A Meta exige
+       * um exemplo do sufixo na aprovação.
+       */
+      url: string;
+      example?: string;
+    };
+
+/** O fim do link muda por envio? (`https://…/pesquisa/{{1}}`) */
+export function isDynamicUrl(url: string): boolean {
+  return /\{\{1\}\}$/.test(url.trim());
+}
+
+/** Índice (na lista de botões) do botão de link dinâmico, se o modelo tem um. */
+export function dynamicUrlButtonIndex(buttons: WhatsAppButton[] | null): number | null {
+  const i = (buttons ?? []).findIndex((b) => b.type === "URL" && isDynamicUrl(b.url));
+  return i === -1 ? null : i;
+}
 
 /** Fonte do valor de uma variável {{n}} no envio: campo do contato ou fixo. */
 export type WhatsAppVariableSource =

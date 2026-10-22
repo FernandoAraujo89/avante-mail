@@ -166,3 +166,38 @@ describe("buildSendComponents", () => {
     expect(components.map((c) => c.type)).toEqual(["body"]);
   });
 });
+
+describe("botão de link dinâmico no envio", () => {
+  it("manda o sufixo no botão certo, e nada sem sufixo", async () => {
+    const { buildSendComponents } = await import("./variables");
+    const template = {
+      bodyText: "Oi {{1}}",
+      variableExamples: { "1": "Ana" },
+      headerType: "none" as const,
+      headerMediaUrl: null,
+      headerMediaFilename: null,
+      buttons: [
+        { type: "QUICK_REPLY" as const, text: "Depois" },
+        { type: "URL" as const, text: "Responder", url: "https://x.com/pesquisa/{{1}}" },
+      ],
+    };
+    const comSufixo = buildSendComponents({
+      template,
+      variables: { "1": { source: "name" } },
+      contact: { name: "Ana", company: null },
+      buttonUrlSuffix: "tok123",
+    });
+    expect(comSufixo).toContainEqual({
+      type: "button",
+      sub_type: "url",
+      index: "1",
+      parameters: [{ type: "text", text: "tok123" }],
+    });
+    const semSufixo = buildSendComponents({
+      template,
+      variables: { "1": { source: "name" } },
+      contact: { name: "Ana", company: null },
+    });
+    expect(semSufixo.some((c) => c.type === "button")).toBe(false);
+  });
+});
