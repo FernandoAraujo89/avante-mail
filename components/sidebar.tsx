@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  ClipboardCheck,
   ClipboardList,
   FileCode2,
   Gauge,
@@ -71,6 +72,7 @@ const NAV_GROUPS: {
         icon: MessagesSquare,
         unreadBadge: true,
       },
+      { href: "/pesquisas", label: "Pesquisas", icon: ClipboardCheck },
       { href: "/automations", label: "Automações", icon: Workflow },
       { href: "/news", label: "Avante News", icon: Newspaper },
       { href: "/reports", label: "Relatórios", icon: BarChart3 },

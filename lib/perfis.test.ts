@@ -35,6 +35,9 @@ describe("rotaPermitida", () => {
       "/users",
       "/api/users",
       "/api/whatsapp/unread",
+      // as pesquisas são da Expansão (o painel das 3 frentes vem na parte 6)
+      "/pesquisas",
+      "/api/pesquisas",
       // prefixo parecido não vale
       "/contactsx",
       "/api/listsecretas",
@@ -45,10 +48,13 @@ describe("rotaPermitida", () => {
 
   it("expansão mexe na base de parceiros, como o sucesso do cliente", () => {
     for (const rota of [
+      "/pesquisas",
+      "/pesquisas/abc/editar",
       "/contacts",
       "/contacts/abc/edit",
       "/contacts/import",
       "/lists/abc",
+      "/api/pesquisas/abc/perguntas",
       "/api/contacts/import",
       "/api/lists/abc/contacts",
       "/api/auth/me",

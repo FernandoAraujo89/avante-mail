@@ -1274,6 +1274,184 @@ export const siteEventRules = pgTable("site_event_rules", {
     .defaultNow(),
 });
 
+// ─── Pesquisas com parceiros ───────────────────────────────────────────────
+// A Expansão acompanha cada parceiro em 3 frentes (docs/plano-expansao.md), e
+// cada frente é uma pesquisa com objetivo próprio. O formulário é montado no
+// sistema; cada parceiro recebe o SEU convite (um link), e as respostas ficam
+// ligadas ao contato — é o que deixa acompanhar as 3 frentes por parceiro.
+
+export const SURVEY_OBJECTIVES = ["dados_empresa", "nps", "crescimento"] as const;
+export type SurveyObjective = (typeof SURVEY_OBJECTIVES)[number];
+
+export const SURVEY_STATUSES = ["draft", "active", "closed"] as const;
+export type SurveyStatus = (typeof SURVEY_STATUSES)[number];
+
+// "section" não é pergunta: é um título que agrupa as seguintes.
+export const SURVEY_QUESTION_TYPES = [
+  "section",
+  "short_text",
+  "long_text",
+  "number",
+  "single_choice",
+  "multiple_choice",
+  "scale",
+  "yes_no",
+] as const;
+export type SurveyQuestionType = (typeof SURVEY_QUESTION_TYPES)[number];
+
+/** Configuração por tipo: escolhas, limites da escala, unidade do número. */
+export interface SurveyQuestionOptions {
+  choices?: string[];
+  /** Escolha com campo "Outro" livre. */
+  other?: boolean;
+  min?: number;
+  max?: number;
+  minLabel?: string;
+  maxLabel?: string;
+  unit?: string;
+}
+
+/** O que uma resposta guarda: texto, número, sim/não ou escolhas. */
+export type SurveyAnswerValue = string | number | boolean | string[];
+
+// pending → opened (abriu o link) → in_progress (respondeu algo) → completed.
+// "closed" é a profissional encerrando o convite (o link deixa de valer).
+export const SURVEY_INVITE_STATUSES = [
+  "pending",
+  "opened",
+  "in_progress",
+  "completed",
+  "closed",
+] as const;
+export type SurveyInviteStatus = (typeof SURVEY_INVITE_STATUSES)[number];
+
+export const surveys = pgTable("surveys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  objective: text("objective").$type<SurveyObjective>().notNull(),
+  name: text("name").notNull(),
+  /** Texto de abertura da página de resposta. */
+  intro: text("intro"),
+  /** Texto mostrado depois de concluir. */
+  thanks: text("thanks"),
+  status: text("status").$type<SurveyStatus>().notNull().default("draft"),
+  // Mensagens do convite (parte 4 do plano).
+  emailSubject: text("email_subject"),
+  emailBody: text("email_body"),
+  whatsappTemplateId: uuid("whatsapp_template_id").references(
+    () => whatsappTemplates.id,
+    { onDelete: "set null" }
+  ),
+  // Quem criou: vínculo para o nome atual, cópia para sobreviver à remoção
+  // da conta (mesma regra de campaigns.sentByName).
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdByName: text("created_by_name"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const surveyQuestions = pgTable(
+  "survey_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    surveyId: uuid("survey_id")
+      .notNull()
+      .references(() => surveys.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+    type: text("type").$type<SurveyQuestionType>().notNull(),
+    label: text("label").notNull(),
+    help: text("help"),
+    required: boolean("required").notNull().default(false),
+    options: jsonb("options").$type<SurveyQuestionOptions>(),
+    /** A pergunta-chave do NPS (escala 0–10). Uma por pesquisa. */
+    isNps: boolean("is_nps").notNull().default(false),
+    /**
+     * Pergunta com respostas não é apagada — é arquivada: some do formulário
+     * e continua no relatório. Sem versionar a pesquisa inteira.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("survey_questions_pesquisa_idx").on(t.surveyId, t.position)]
+);
+
+/**
+ * O formulário DAQUELE parceiro. O token (32 bytes aleatórios) só existe no
+ * link; aqui fica o SHA-256, como em password_reset_tokens — vazamento do
+ * banco não entrega os links.
+ */
+export const surveyInvites = pgTable(
+  "survey_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    surveyId: uuid("survey_id")
+      .notNull()
+      .references(() => surveys.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    status: text("status")
+      .$type<SurveyInviteStatus>()
+      .notNull()
+      .default("pending"),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("survey_invites_pesquisa_idx").on(t.surveyId),
+    index("survey_invites_contato_idx").on(t.contactId),
+    // Um convite ABERTO por parceiro por pesquisa. Concluído ou encerrado
+    // libera outro: é a rodada seguinte (NPS trimestral).
+    uniqueIndex("survey_invites_aberto_idx")
+      .on(t.surveyId, t.contactId)
+      .where(sql`${t.status} not in ('completed', 'closed')`),
+  ]
+);
+
+/** Uma linha por pergunta respondida: gravar aos poucos é um upsert. */
+export const surveyAnswers = pgTable(
+  "survey_answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inviteId: uuid("invite_id")
+      .notNull()
+      .references(() => surveyInvites.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id")
+      .notNull()
+      .references(() => surveyQuestions.id, { onDelete: "cascade" }),
+    value: jsonb("value").$type<SurveyAnswerValue>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("survey_answers_convite_pergunta_idx").on(
+      t.inviteId,
+      t.questionId
+    ),
+    index("survey_answers_pergunta_idx").on(t.questionId),
+  ]
+);
+
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value"),
@@ -1315,3 +1493,11 @@ export type LeadScoreRule = typeof leadScoreRules.$inferSelect;
 export type NewLeadScoreRule = typeof leadScoreRules.$inferInsert;
 export type SiteEventRule = typeof siteEventRules.$inferSelect;
 export type NewSiteEventRule = typeof siteEventRules.$inferInsert;
+export type Survey = typeof surveys.$inferSelect;
+export type NewSurvey = typeof surveys.$inferInsert;
+export type SurveyQuestion = typeof surveyQuestions.$inferSelect;
+export type NewSurveyQuestion = typeof surveyQuestions.$inferInsert;
+export type SurveyInvite = typeof surveyInvites.$inferSelect;
+export type NewSurveyInvite = typeof surveyInvites.$inferInsert;
+export type SurveyAnswer = typeof surveyAnswers.$inferSelect;
+export type NewSurveyAnswer = typeof surveyAnswers.$inferInsert;

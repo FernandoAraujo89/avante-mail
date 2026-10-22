@@ -6,9 +6,9 @@
 // PEDIR campanha para as listas (Solicitações), mas quem cria e dispara é
 // sempre o marketing. Não mexe em leads, automações nem configurações.
 // "expansao" acompanha os parceiros de perto (docs/plano-expansao.md): mexe na
-// mesma base de parceiros que o Sucesso do cliente e, nas partes seguintes do
-// plano, ganha as pesquisas e a caixa de conversas da própria linha de
-// WhatsApp. Também não dispara campanha.
+// mesma base de parceiros que o Sucesso do cliente, monta e acompanha as
+// pesquisas com eles e, nas partes seguintes do plano, ganha a caixa de
+// conversas da própria linha de WhatsApp. Também não dispara campanha.
 //
 // Dentro das telas, todo perfil que não é admin enxerga só parceiros
 // (lib/escopo-parceiros.ts): nem os leads nem a lista de leads.
@@ -26,7 +26,8 @@ export const PERFIL_DESCRICAO: Record<Perfil, string> = {
   admin: "Acesso a tudo.",
   sucesso_cliente:
     "Contatos e listas, e pede campanhas ao marketing — não dispara.",
-  expansao: "Contatos e listas de parceiros — não dispara campanha.",
+  expansao:
+    "Pesquisas com os parceiros, contatos e listas — não dispara campanha.",
 };
 
 export function ehPerfil(valor: unknown): valor is Perfil {
@@ -38,8 +39,7 @@ export function ehPerfil(valor: unknown): valor is Perfil {
 /** Para onde o perfil vai ao entrar (e quando cai numa tela que não é dele). */
 export function paginaInicial(perfil: Perfil): string {
   if (perfil === "sucesso_cliente") return "/lists";
-  // Até as pesquisas existirem (parte 2 do plano), a Expansão começa nos contatos.
-  if (perfil === "expansao") return "/contacts";
+  if (perfil === "expansao") return "/pesquisas";
   return "/dashboard";
 }
 
@@ -58,7 +58,15 @@ const PREFIXOS_POR_PERFIL: Record<PerfilRestrito, readonly string[]> = {
     "/api/solicitacoes",
     "/api/auth/",
   ],
-  expansao: ["/contacts", "/lists", "/api/contacts", "/api/lists", "/api/auth/"],
+  expansao: [
+    "/pesquisas",
+    "/contacts",
+    "/lists",
+    "/api/pesquisas",
+    "/api/contacts",
+    "/api/lists",
+    "/api/auth/",
+  ],
 };
 
 /** Prefixos que o perfil só LÊ (GET). */
