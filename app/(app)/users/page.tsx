@@ -49,6 +49,10 @@ type UserDto = {
   name: string;
   email: string;
   role: Perfil;
+  /** Já entrou com a conta Google da Avante. */
+  viaGoogle?: boolean;
+  /** Entra só pelo Google (ou ainda não tem senha). */
+  semSenha?: boolean;
   createdAt: string;
 };
 
@@ -268,6 +272,15 @@ export default function UsersPage() {
                       {me?.id === user.id ? (
                         <Badge variant="info">Você</Badge>
                       ) : null}
+                      {user.viaGoogle ? (
+                        <Badge variant="secondary" title="Já entrou com a conta Google da Avante">
+                          Google
+                        </Badge>
+                      ) : user.semSenha ? (
+                        <Badge variant="outline" title="Sem senha: entra pelo Google (ou cria uma pelo 'esqueci minha senha')">
+                          Sem senha
+                        </Badge>
+                      ) : null}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -365,14 +378,18 @@ export default function UsersPage() {
               </p>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="user-password">Senha (mínimo 8 caracteres)</Label>
+              <Label htmlFor="user-password">
+                Senha{" "}
+                <span className="font-normal text-muted-foreground">
+                  (mínimo 8; em branco, a pessoa entra com a conta Google da Avante)
+                </span>
+              </Label>
               <Input
                 id="user-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 minLength={8}
-                required
               />
             </div>
             <DialogFooter>

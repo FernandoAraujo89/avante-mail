@@ -44,8 +44,16 @@ export async function POST(request: NextRequest) {
     const db = getDb();
     const [user] = await db.select().from(users).where(eq(users.email, email));
 
+    // Conta que entra só pelo Google (sem senha): diz isso, em vez de
+    // "senha incorreta" — a pessoa não tem senha para acertar.
+    if (user && !user.passwordHash) {
+      return NextResponse.json(
+        { error: "Esta conta entra com o Google. Use o botão \"Entrar com a conta Google da Avante\"." },
+        { status: 401 }
+      );
+    }
     // Mensagem única para e-mail inexistente e senha errada.
-    if (!user || !verifyPassword(password, user.passwordHash)) {
+    if (!user || !user.passwordHash || !verifyPassword(password, user.passwordHash)) {
       return NextResponse.json(
         { error: "E-mail ou senha incorretos." },
         { status: 401 }

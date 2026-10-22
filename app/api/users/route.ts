@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 import { getDb, users } from "@/lib/db";
 import { hashPassword } from "@/lib/passwords";
@@ -18,6 +18,8 @@ export async function GET() {
         email: users.email,
         role: users.role,
         createdAt: users.createdAt,
+        viaGoogle: sql<boolean>`${users.googleSub} is not null`,
+        semSenha: sql<boolean>`${users.passwordHash} is null`,
       })
       .from(users)
       .orderBy(desc(users.createdAt));
@@ -51,7 +53,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (password.length < 8) {
+    // Senha opcional: sem ela, a pessoa entra pelo Google Workspace (ou
+    // cria uma pelo "esqueci minha senha").
+    if (password && password.length < 8) {
       return NextResponse.json(
         { error: "A senha precisa ter pelo menos 8 caracteres." },
         { status: 400 }
@@ -72,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     const [created] = await db
       .insert(users)
-      .values({ name, email, role, passwordHash: hashPassword(password) })
+      .values({ name, email, role, passwordHash: password ? hashPassword(password) : null })
       .returning({
         id: users.id,
         name: users.name,

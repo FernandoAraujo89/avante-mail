@@ -10,6 +10,8 @@ const PUBLIC_PREFIXES = [
   "/forgot-password",
   "/reset-password",
   "/api/auth/login",
+  // Login pelo Google: a ida e a volta (callback) acontecem sem sessão.
+  "/api/auth/google",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
   "/api/health",
