@@ -135,6 +135,15 @@ describe("decidirPelosNegocios", () => {
   });
 
   it("sem negócio vivo, não mexe em nada", () => {
-    expect(decidir([])).toEqual({ etapa: null, qualificacao: null, recusas: 0 });
+    expect(decidir([])).toEqual({ etapa: null, qualificacao: null, recusas: 0, funil: null });
+  });
+
+  it("devolve o funil do negócio que decidiu a etapa", () => {
+    const d = decidir([
+      { status: "lost", stageName: "Pesquisa", qualificacao: null, updateTime: "2026-10-02", funil: "Leads" },
+      { status: "open", stageName: "Qualificar lead", qualificacao: null, updateTime: "2026-10-01", funil: "White Label - Inbound" },
+    ]);
+    expect(d.etapa?.slug).toBe("qualificar-lead");
+    expect(d.funil).toBe("White Label - Inbound");
   });
 });

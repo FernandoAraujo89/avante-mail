@@ -323,6 +323,11 @@ export default async function LeadPage({
           ) : (
             <Badge variant="secondary">{etapaAtual?.label ?? lead.stage}</Badge>
           )}
+          {lead.crmFunil ? (
+            <Badge variant="outline" title="Funil do CRM em que o lead está">
+              {lead.crmFunil}
+            </Badge>
+          ) : null}
           {lead.subscribed ? (
             <Badge variant="success">Aceita e-mail</Badge>
           ) : (

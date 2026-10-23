@@ -46,6 +46,8 @@ export const CAMPOS_MAPEAVEIS = [
     exemplo: "qualificacao",
   },
   { campo: "stage", rotulo: "Etapa no funil", exemplo: "etapa" },
+  // Em qual funil do CRM o lead está (o NRG Hub manda em `negocio.funil`).
+  { campo: "pipeline", rotulo: "Funil no CRM", exemplo: "funil" },
 ] as const;
 
 export type CampoMapeavel = (typeof CAMPOS_MAPEAVEIS)[number]["campo"];

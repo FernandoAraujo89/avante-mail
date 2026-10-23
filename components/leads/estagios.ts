@@ -100,4 +100,6 @@ export interface LeadDto {
   createdAt: string;
   leadScore: number | null;
   leadScoreBand: string | null;
+  /** Funil do CRM em que o lead está (nome), se conhecido. */
+  crmFunil: string | null;
 }

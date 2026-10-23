@@ -73,6 +73,8 @@ interface Resposta {
   qualificacoes: Record<string, number>;
   faixas: Record<string, number>;
   canais: { canal: string; total: number }[];
+  /** Funis do CRM presentes nos leads (nulo = sem funil conhecido). */
+  funisDoCrm: { funil: string | null; total: number }[];
   config: {
     faixaQuente: number;
     faixaAquecido: number;
@@ -82,7 +84,7 @@ interface Resposta {
 }
 
 type ChaveDeOrdenacao =
-  "lead" | "pontuacao" | "qualificacao" | "etapa" | "origem" | "entrada";
+  "lead" | "pontuacao" | "qualificacao" | "etapa" | "funil" | "origem" | "entrada";
 
 /**
  * As colunas ordenáveis, na ordem da tabela. O primeiro clique usa a direção
@@ -99,6 +101,7 @@ const COLUNAS: {
   { chave: "pontuacao", rotulo: "Pontuação", inicial: "desc" },
   { chave: "qualificacao", rotulo: "Qualificação", inicial: "asc" },
   { chave: "etapa", rotulo: "Etapa", inicial: "asc" },
+  { chave: "funil", rotulo: "Funil", inicial: "asc" },
   { chave: "origem", rotulo: "Origem", inicial: "asc" },
   { chave: "entrada", rotulo: "Entrou em", inicial: "desc" },
 ];
@@ -111,6 +114,7 @@ export default function LeadsPage() {
   const [canal, setCanal] = useState("todos");
   const [faixa, setFaixa] = useState("todas");
   const [qualificacao, setQualificacao] = useState("todas");
+  const [funil, setFunil] = useState("todos");
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [excluirAberto, setExcluirAberto] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
@@ -135,6 +139,7 @@ export default function LeadsPage() {
         if (canal !== "todos") params.set("canal", canal);
         if (faixa !== "todas") params.set("faixa", faixa);
         if (qualificacao !== "todas") params.set("qualificacao", qualificacao);
+        if (funil !== "todos") params.set("funil", funil);
 
         const res = await fetch(`/api/leads?${params.toString()}`);
         const json = await res.json();
@@ -168,6 +173,7 @@ export default function LeadsPage() {
           qualificacoes: {},
           faixas: {},
           canais: [],
+          funisDoCrm: [],
           config: {
             faixaQuente: 100,
             faixaAquecido: 50,
@@ -178,7 +184,7 @@ export default function LeadsPage() {
         setErro(err instanceof Error ? err.message : String(err));
       }
     },
-    [busca, estagio, canal, faixa, qualificacao]
+    [busca, estagio, canal, faixa, qualificacao, funil]
   );
 
   useEffect(() => {
@@ -205,7 +211,7 @@ export default function LeadsPage() {
   // fica pendurado descrevendo uma ação que já saiu de vista.
   useEffect(() => {
     setAviso("");
-  }, [busca, estagio, canal, faixa, qualificacao]);
+  }, [busca, estagio, canal, faixa, qualificacao, funil]);
 
   function alternarUm(id: string) {
     setSelecionados((antes) => {
@@ -287,6 +293,8 @@ export default function LeadsPage() {
           return l.stage === null
             ? Number.MAX_SAFE_INTEGER
             : (posicaoDaEtapa.get(l.stage) ?? Number.MAX_SAFE_INTEGER);
+        case "funil":
+          return l.crmFunil;
         case "origem":
           return l.sourceChannel;
         case "entrada":
@@ -491,7 +499,7 @@ export default function LeadsPage() {
             </Button>
           </span>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {/* O mesmo filtro dos cartões do funil, em forma de seletor: os
               cartões não se enxergam como controle, e o filtro por etapa
               precisa estar onde os outros filtros estão. Etapa que converte
@@ -556,6 +564,26 @@ export default function LeadsPage() {
                   {c.canal} ({c.total})
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={funil} onValueChange={setFunil}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Funil no CRM" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos os funis do CRM</SelectItem>
+              {(dados?.funisDoCrm ?? [])
+                .filter((f) => f.funil)
+                .map((f) => (
+                  <SelectItem key={f.funil as string} value={f.funil as string}>
+                    {f.funil} ({f.total})
+                  </SelectItem>
+                ))}
+              {(dados?.funisDoCrm ?? []).some((f) => !f.funil) ? (
+                <SelectItem value="__sem__">
+                  Sem funil conhecido ({dados?.funisDoCrm?.find((f) => !f.funil)?.total ?? 0})
+                </SelectItem>
+              ) : null}
             </SelectContent>
           </Select>
         </div>
@@ -766,6 +794,13 @@ export default function LeadsPage() {
                           </p>
                         ) : null}
                       </>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {lead.crmFunil ? (
+                      <span className="text-sm">{lead.crmFunil}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </TableCell>
                   <TableCell>

@@ -251,6 +251,11 @@ export const contacts = pgTable("contacts", {
   qualification: text("qualification"),
   qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
 
+  // Em qual FUNIL do CRM o lead está (nome, ex.: "White Label - Inbound").
+  // Vem do negócio que decidiu a etapa (sincronização) ou do webhook do CRM.
+  // Só informativo: a etapa continua sendo a régua única do Campanhas.
+  crmFunil: text("crm_funil"),
+
   // Origem do PRIMEIRO contato. Gravada uma vez e NÃO sobrescrita: quem chegou
   // pelo Instagram e voltou meses depois pelo Google continua sendo do
   // Instagram — é isso que responde "qual canal traz lead". As visitas

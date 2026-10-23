@@ -228,6 +228,13 @@ vem como rótulo ("Sim: Experiente"), não como id de opção — `rotuloDaOpcao
 aceita os dois. Teste de ponta a ponta: `scripts/testar-sync-funis.ts`
 (API de mentira, ids em texto).
 
+**Funil do lead (23/10, à tarde):** `contacts.crm_funil` guarda o NOME do
+funil do CRM — a sincronização grava o funil do negócio que decidiu a etapa
+(`DecisaoDoLead.funil`), e o webhook o campo mapeado `pipeline`
+(`negocio.funil` no Hub). Aparece na ficha do lead e como coluna e filtro em
+`/leads` (inclui "sem funil conhecido"). Só informativo: a etapa continua
+sendo a régua única.
+
 **Virada:** token do Hub no servidor (`NRG_HUB_API_TOKEN`), `PIPEDRIVE_API_TOKEN`
 removido — a sincronização antiga para sozinha, e a primeira passada do Hub lê
 os funis inteiros. Etapas do funil "White Label - Inbound" no Hub têm os mesmos

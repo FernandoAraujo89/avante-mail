@@ -10,6 +10,7 @@ import {
   isNotNull,
   or,
   sql,
+  isNull,
   type SQL,
 } from "drizzle-orm";
 
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
     const canal = params.get("canal")?.trim();
     const faixa = params.get("faixa")?.trim();
     const qualificacao = params.get("qualificacao")?.trim();
+    const funil = params.get("funil")?.trim();
 
     // Etapas e qualificações válidas vêm de tabela, não de constante: elas
     // espelham o Pipedrive (funil e campo "Lead qualificado") e mudam sem
@@ -102,6 +104,8 @@ export async function GET(request: NextRequest) {
       condicoes.push(eq(contacts.qualification, qualificacao));
     }
     if (canal) condicoes.push(eq(contacts.sourceChannel, canal));
+    // "__sem__" = lead sem funil conhecido (ainda não casou com negócio no CRM).
+    if (funil) condicoes.push(funil === "__sem__" ? isNull(contacts.crmFunil) : eq(contacts.crmFunil, funil));
     if (faixa && LEAD_SCORE_BANDS.includes(faixa as LeadScoreBand)) {
       condicoes.push(eq(contacts.leadScoreBand, faixa as LeadScoreBand));
     }
@@ -129,6 +133,7 @@ export async function GET(request: NextRequest) {
         leadScoreBand: contacts.leadScoreBand,
         stageChangedAt: contacts.stageChangedAt,
         qualification: contacts.qualification,
+        crmFunil: contacts.crmFunil,
       })
       .from(contacts)
       .where(and(...condicoes))
@@ -163,6 +168,14 @@ export async function GET(request: NextRequest) {
       .from(contacts)
       .where(ehLead())
       .groupBy(contacts.sourceChannel)
+      .orderBy(desc(count()));
+
+    // Funis do CRM presentes, para o filtro só oferecer o que existe.
+    const porFunil = await db
+      .select({ funil: contacts.crmFunil, total: count() })
+      .from(contacts)
+      .where(ehLead())
+      .groupBy(contacts.crmFunil)
       .orderBy(desc(count()));
 
     // Distribuição por faixa — o "quantos estão quentes" do painel.
@@ -205,6 +218,7 @@ export async function GET(request: NextRequest) {
       qualificacoesLista,
       acumulado,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
+      funisDoCrm: porFunil.map((r) => ({ funil: r.funil, total: r.total })),
       qualificacoes: Object.fromEntries(
         porQualificacao
           .filter((r) => r.qualificacao)

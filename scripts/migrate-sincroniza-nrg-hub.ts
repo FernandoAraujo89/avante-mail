@@ -43,6 +43,9 @@ async function main() {
       `ALTER TABLE pipedrive_deals ALTER COLUMN ${coluna} TYPE text USING ${coluna}::text`
     );
   }
+  console.log("[MIGRATE] contacts.crm_funil (funil do lead no CRM)...");
+  await client.query(`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS crm_funil text`);
+
   console.log("[MIGRATE] sincronização com o NRG Hub: concluído.");
 }
 

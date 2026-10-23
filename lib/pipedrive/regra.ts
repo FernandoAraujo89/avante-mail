@@ -25,6 +25,8 @@ export interface NegocioDoLead {
   /** Rótulo da opção do campo de qualificação no Pipedrive. */
   qualificacao: string | null;
   updateTime: string;
+  /** Nome do funil do CRM em que o negócio está (para a ficha do lead). */
+  funil?: string | null;
 }
 
 export interface DecisaoDoLead {
@@ -34,6 +36,8 @@ export interface DecisaoDoLead {
   qualificacao: LeadQualificationRow | null;
   /** Nomes que não casaram com nada cadastrado aqui. */
   recusas: number;
+  /** Funil do negócio que decidiu a etapa; nulo sem negócio vivo. */
+  funil: string | null;
 }
 
 const ETAPA_DE_COMPRA = "comprou";
@@ -54,7 +58,7 @@ export function decidirPelosNegocios(
     .filter((n) => ["open", "won", "lost"].includes(n.status))
     .sort(porAtualizacao);
   if (vivos.length === 0) {
-    return { etapa: null, qualificacao: null, recusas: 0 };
+    return { etapa: null, qualificacao: null, recusas: 0, funil: null };
   }
 
   let recusas = 0;
@@ -108,5 +112,5 @@ export function decidirPelosNegocios(
     if (!qualificacao) recusas++;
   }
 
-  return { etapa, qualificacao, recusas };
+  return { etapa, qualificacao, recusas, funil: base.funil ?? null };
 }

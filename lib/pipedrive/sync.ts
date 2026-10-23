@@ -378,6 +378,7 @@ export async function sincronizarPipedrive(args?: {
   // 3. Decide cada lead afetado por todos os negócios dele.
   await recalcularLeads([...afetados], {
     funis: funis.map((f) => f.id),
+    nomesDosFunis: new Map(funis.map((f) => [f.id, f.name])),
     etapas,
     qualificacoes,
     contagem,
@@ -515,12 +516,14 @@ async function recalcularLeads(
   ids: string[],
   ctx: {
     funis: string[];
+    /** id → nome, para gravar no lead o funil do negócio que decidiu a etapa. */
+    nomesDosFunis: Map<string, string>;
     etapas: LeadStageRow[];
     qualificacoes: LeadQualificationRow[];
     contagem: Contagem;
   }
 ): Promise<void> {
-  const { funis, etapas, qualificacoes, contagem } = ctx;
+  const { funis, nomesDosFunis, etapas, qualificacoes, contagem } = ctx;
   const db = getDb();
 
   for (let i = 0; i < ids.length; i += TAMANHO_DO_LOTE) {
@@ -531,6 +534,7 @@ async function recalcularLeads(
           id: contacts.id,
           stage: contacts.stage,
           qualification: contacts.qualification,
+          crmFunil: contacts.crmFunil,
         })
         .from(contacts)
         .where(inArray(contacts.id, lote)),
@@ -541,6 +545,7 @@ async function recalcularLeads(
           stageName: pipedriveDeals.stageName,
           qualificacao: pipedriveDeals.qualificacao,
           updateTime: pipedriveDeals.updateTime,
+          pipelineId: pipedriveDeals.pipelineId,
         })
         .from(pipedriveDeals)
         .where(
@@ -555,7 +560,7 @@ async function recalcularLeads(
     for (const n of negocios) {
       if (!n.contactId) continue;
       const lista = porContato.get(n.contactId) ?? [];
-      lista.push(n);
+      lista.push({ ...n, funil: nomesDosFunis.get(n.pipelineId) ?? null });
       porContato.set(n.contactId, lista);
     }
 
@@ -570,6 +575,11 @@ async function recalcularLeads(
         qualificacoes
       );
       contagem.recusas += decisao.recusas;
+
+      // O funil é só informação na ficha: muda sem evento e sem régua.
+      if (decisao.funil && decisao.funil !== lead.crmFunil) {
+        await db.update(contacts).set({ crmFunil: decisao.funil }).where(eq(contacts.id, lead.id));
+      }
 
       const aplicado = await aplicarMudancaDoLead(lead, {
         qualificacao: decisao.qualificacao?.slug ?? null,

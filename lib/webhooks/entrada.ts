@@ -122,6 +122,8 @@ export interface CamposExtraidos {
   qualification: string | null;
   /** Etapa do funil do Pipedrive — slug ou rótulo por extenso. */
   stage: string | null;
+  /** Nome do funil do CRM em que o lead está (só informativo). */
+  pipeline: string | null;
   /**
    * Identidade anônima do navegador (campo oculto `av_visitante` do
    * formulário, preenchido pelo script do site). É o que permite COSTURAR as
@@ -147,6 +149,7 @@ const CAMPOS_DE_TEXTO = [
   "referrer",
   "qualification",
   "stage",
+  "pipeline",
   "visitorId",
 ] as const;
 
@@ -355,6 +358,8 @@ export async function processarEntrada(args: {
         name: existente.name || campos.name || existente.name,
         company: existente.company ?? campos.company,
         tags: tagsDepois,
+        // O funil do CRM acompanha o lead (parceiro não ganha funil).
+        ...(ehLead && campos.pipeline ? { crmFunil: campos.pipeline } : {}),
       })
       .where(eq(contacts.id, existente.id));
 
@@ -400,6 +405,7 @@ export async function processarEntrada(args: {
       stageChangedAt: new Date(),
       qualification: qualificacao,
       qualifiedAt: qualificacao ? new Date() : null,
+      crmFunil: campos.pipeline,
       sourceChannel: campos.sourceChannel ?? campos.utmSource,
       utmSource: campos.utmSource,
       utmMedium: campos.utmMedium,
