@@ -22,6 +22,7 @@ import {
   type LeadScoreBand,
 } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
+import { lerFunisDaUltimaPassada } from "@/lib/pipedrive/funis";
 import { listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { lerConfiguracao } from "@/lib/leads/score";
@@ -170,13 +171,21 @@ export async function GET(request: NextRequest) {
       .groupBy(contacts.sourceChannel)
       .orderBy(desc(count()));
 
-    // Funis do CRM presentes, para o filtro só oferecer o que existe.
-    const porFunil = await db
-      .select({ funil: contacts.crmFunil, total: count() })
-      .from(contacts)
-      .where(ehLead())
-      .groupBy(contacts.crmFunil)
-      .orderBy(desc(count()));
+    // Funis do CRM: os que a sincronização acompanha (mesmo sem lead ainda)
+    // e os que aparecem nos leads — o Campanhas espelha os funis do Hub.
+    const [porFunil, ultimaPassada] = await Promise.all([
+      db
+        .select({ funil: contacts.crmFunil, total: count() })
+        .from(contacts)
+        .where(ehLead())
+        .groupBy(contacts.crmFunil)
+        .orderBy(desc(count())),
+      lerFunisDaUltimaPassada(),
+    ]);
+    const funisDoCrm = porFunil.map((r) => ({ funil: r.funil, total: r.total }));
+    for (const f of ultimaPassada?.funis ?? []) {
+      if (!funisDoCrm.some((x) => x.funil === f.nome)) funisDoCrm.push({ funil: f.nome, total: 0 });
+    }
 
     // Distribuição por faixa — o "quantos estão quentes" do painel.
     const porFaixa = await db
@@ -218,7 +227,7 @@ export async function GET(request: NextRequest) {
       qualificacoesLista,
       acumulado,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
-      funisDoCrm: porFunil.map((r) => ({ funil: r.funil, total: r.total })),
+      funisDoCrm,
       qualificacoes: Object.fromEntries(
         porQualificacao
           .filter((r) => r.qualificacao)

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   BarChart3,
+  ChevronDown,
   ClipboardCheck,
   ClipboardList,
   LayoutGrid,
@@ -34,6 +35,9 @@ import { rotaPermitida, type Perfil } from "@/lib/perfis";
 import { cn } from "@/lib/utils";
 import { UNREAD_CHANGED_EVENT } from "@/lib/whatsapp/inbox-events";
 
+/** Onde o navegador guarda quais grupos do menu estão recolhidos. */
+const CHAVE_GRUPOS_RECOLHIDOS = "menu-grupos-recolhidos";
+
 /** De quanto em quanto tempo o menu confere se chegou resposta no WhatsApp. */
 const UNREAD_POLL_MS = 30_000;
 
@@ -44,6 +48,13 @@ const UNREAD_POLL_MS = 30_000;
 // é o que impede alguém tratar lead como se fosse parceiro.
 const NAV_GROUPS: {
   label: string | null;
+  /**
+   * Grupo que recolhe num menu só: o que é SÓ da visão de um setor (a
+   * Expansão) não precisa ocupar a barra de quem é de outro. Começa recolhido,
+   * menos para quem é do setor ou está numa tela dele; o estado fica no
+   * navegador.
+   */
+  collapsible?: boolean;
   items: {
     href: string;
     label: string;
@@ -74,14 +85,20 @@ const NAV_GROUPS: {
         icon: MessagesSquare,
         unreadBadge: true,
       },
-      { href: "/pesquisas", label: "Pesquisas", icon: ClipboardCheck },
-      { href: "/pesquisas/parceiros", label: "Painel de parceiros", icon: LayoutGrid },
-      { href: "/pesquisas/alertas", label: "Alertas de risco", icon: AlertTriangle },
       { href: "/automations", label: "Automações", icon: Workflow },
       { href: "/news", label: "Avante News", icon: Newspaper },
       { href: "/reports", label: "Relatórios", icon: BarChart3 },
       { href: "/contacts", label: "Contatos", icon: Users },
       { href: "/lists", label: "Listas", icon: ListChecks },
+    ],
+  },
+  {
+    label: "Expansão",
+    collapsible: true,
+    items: [
+      { href: "/pesquisas", label: "Pesquisas", icon: ClipboardCheck },
+      { href: "/pesquisas/parceiros", label: "Painel de parceiros", icon: LayoutGrid },
+      { href: "/pesquisas/alertas", label: "Alertas de risco", icon: AlertTriangle },
     ],
   },
   {
@@ -116,6 +133,9 @@ function Brand() {
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  // Grupos recolhíveis: null = ainda não lido do navegador (decide pelo
+  // perfil e pela tela atual na primeira renderização útil).
+  const [recolhidos, setRecolhidos] = useState<Record<string, boolean> | null>(null);
   const [me, setMe] = useState<{
     name: string;
     email: string;
@@ -166,6 +186,28 @@ export function Sidebar() {
 
   // Menu do perfil: só os itens que ele alcança (a trava de verdade é o
   // middleware; aqui é só não mostrar porta fechada). Grupo vazio some.
+  useEffect(() => {
+    try {
+      const guardado = window.localStorage.getItem(CHAVE_GRUPOS_RECOLHIDOS);
+      setRecolhidos(guardado ? (JSON.parse(guardado) as Record<string, boolean>) : {});
+    } catch {
+      setRecolhidos({});
+    }
+  }, []);
+
+  function alternarGrupo(label: string, aberto: boolean) {
+    setRecolhidos((r) => {
+      // Guardado como "recolhido": clicar num grupo aberto recolhe (true).
+      const proximo = { ...(r ?? {}), [label]: aberto };
+      try {
+        window.localStorage.setItem(CHAVE_GRUPOS_RECOLHIDOS, JSON.stringify(proximo));
+      } catch {
+        // sem armazenamento, o estado vale só nesta sessão
+      }
+      return proximo;
+    });
+  }
+
   const grupos = NAV_GROUPS.map((group) => ({
     ...group,
     items: me
@@ -294,9 +336,39 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-          {grupos.map((group, indice) => (
+          {grupos.map((group, indice) => {
+            const estaNoGrupo = group.items.some(
+              (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+            );
+            // Recolhido por padrão para quem não é do setor; quem é da Expansão,
+            // ou está numa tela do grupo, vê aberto. O clique do usuário vence.
+            const padraoAberto = me?.role === "expansao" || estaNoGrupo;
+            // Numa tela do grupo ele fica aberto de qualquer jeito: o item
+            // ativo precisa aparecer.
+            const aberto = !group.collapsible
+              ? true
+              : estaNoGrupo
+                ? true
+                : recolhidos && group.label && group.label in recolhidos
+                  ? !recolhidos[group.label]
+                  : padraoAberto;
+            return (
             <div key={group.label ?? "inicio"} className="grid gap-1">
-              {group.label ? (
+              {group.label && group.collapsible ? (
+                <button
+                  type="button"
+                  aria-expanded={aberto}
+                  aria-controls={`grupo-${group.label}`}
+                  onClick={() => alternarGrupo(group.label as string, aberto)}
+                  className={cn(
+                    "flex items-center justify-between rounded-md px-3 pb-1 pt-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none",
+                    indice > 0 ? "mt-3" : ""
+                  )}
+                >
+                  {group.label}
+                  <ChevronDown className={cn("size-3.5 transition-transform", !aberto && "-rotate-90")} aria-hidden />
+                </button>
+              ) : group.label ? (
                 <p
                   className={cn(
                     "px-3 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground",
@@ -306,6 +378,7 @@ export function Sidebar() {
                   {group.label}
                 </p>
               ) : null}
+              {aberto ? <div id={group.label ? `grupo-${group.label}` : undefined} className="grid gap-1">
               {group.items.map((item) => {
                 // Igualdade exata para /leads: sem isso "Gestão de leads"
                 // ficaria aceso junto com "Origens", que é filha na URL.
@@ -350,8 +423,10 @@ export function Sidebar() {
                   </Link>
                 );
               })}
+              </div> : null}
             </div>
-          ))}
+            );
+          })}
         </nav>
 
         <div className="border-t border-border p-4">
