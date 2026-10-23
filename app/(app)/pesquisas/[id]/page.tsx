@@ -20,6 +20,7 @@ import {
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { SeletorDeParceiros } from "@/components/pesquisas/seletor-de-parceiros";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -100,7 +101,10 @@ export default function AcompanhamentoPage() {
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
 
   const [convidarAberto, setConvidarAberto] = useState(false);
+  // Lista inteira ou parceiros escolhidos um a um.
+  const [modoDoConvite, setModoDoConvite] = useState<"listas" | "parceiros">("listas");
   const [listasEscolhidas, setListasEscolhidas] = useState<string[]>([]);
+  const [parceirosEscolhidos, setParceirosEscolhidos] = useState<Map<string, string>>(new Map());
   const [porEmail, setPorEmail] = useState(true);
   const [porWhatsApp, setPorWhatsApp] = useState(false);
   const [lembrarAberto, setLembrarAberto] = useState(false);
@@ -201,7 +205,9 @@ export default function AcompanhamentoPage() {
   }
 
   function abrirConvidar() {
+    setModoDoConvite("listas");
     setListasEscolhidas([]);
+    setParceirosEscolhidos(new Map());
     setPorEmail(true);
     setPorWhatsApp(whatsappPronto);
     setFormError("");
@@ -215,7 +221,11 @@ export default function AcompanhamentoPage() {
       const res = await fetch(`/api/pesquisas/${id}/convites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listIds: listasEscolhidas, channels: canais }),
+        body: JSON.stringify(
+          modoDoConvite === "listas"
+            ? { listIds: listasEscolhidas, channels: canais }
+            : { contactIds: [...parceirosEscolhidos.keys()], channels: canais }
+        ),
       });
       const json = (await res.json()) as ResultadoConvite & { error?: string };
       if (!res.ok) throw new Error(json.error ?? "Não foi possível convidar.");
@@ -505,16 +515,46 @@ export default function AcompanhamentoPage() {
       </Card>
 
       <Dialog open={convidarAberto} onOpenChange={setConvidarAberto}>
-        <DialogContent>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Convidar parceiros</DialogTitle>
             <DialogDescription>
-              Cada parceiro das listas escolhidas ganha o próprio link. Quem já tem convite aberto
-              nesta pesquisa não é convidado de novo.
+              Cada parceiro ganha o próprio link. Quem já tem convite aberto nesta pesquisa não é
+              convidado de novo.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
-            <fieldset className="grid gap-2">
+            <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="Como escolher">
+              {(
+                [
+                  ["listas", "Listas inteiras"],
+                  ["parceiros", "Parceiros específicos"],
+                ] as const
+              ).map(([valor, rotulo]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  aria-pressed={modoDoConvite === valor}
+                  onClick={() => setModoDoConvite(valor)}
+                  className={`flex-1 rounded px-3 py-1.5 text-sm font-medium ${
+                    modoDoConvite === valor ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {rotulo}
+                </button>
+              ))}
+            </div>
+
+            {modoDoConvite === "parceiros" ? (
+              <SeletorDeParceiros
+                surveyId={id}
+                listas={listas}
+                selecionados={parceirosEscolhidos}
+                onChange={setParceirosEscolhidos}
+              />
+            ) : null}
+
+            <fieldset className={`grid gap-2 ${modoDoConvite === "parceiros" ? "hidden" : ""}`}>
               <legend className="mb-1 text-sm font-medium">Listas</legend>
               {listas.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhuma lista de parceiros.</p>
@@ -578,8 +618,18 @@ export default function AcompanhamentoPage() {
             <Button variant="outline" onClick={() => setConvidarAberto(false)} disabled={enviando}>
               Cancelar
             </Button>
-            <Button onClick={convidar} disabled={enviando || listasEscolhidas.length === 0}>
-              {enviando ? "Convidando..." : "Convidar"}
+            <Button
+              onClick={convidar}
+              disabled={
+                enviando ||
+                (modoDoConvite === "listas" ? listasEscolhidas.length === 0 : parceirosEscolhidos.size === 0)
+              }
+            >
+              {enviando
+                ? "Convidando..."
+                : modoDoConvite === "parceiros" && parceirosEscolhidos.size > 0
+                  ? `Convidar ${parceirosEscolhidos.size} parceiro${parceirosEscolhidos.size === 1 ? "" : "s"}`
+                  : "Convidar"}
             </Button>
           </DialogFooter>
         </DialogContent>

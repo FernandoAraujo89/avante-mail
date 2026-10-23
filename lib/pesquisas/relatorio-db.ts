@@ -16,8 +16,10 @@ import {
   type SurveyObjective,
   type SurveyStatus,
 } from "@/lib/db";
+import { getBaseUrl } from "@/lib/base-url";
 import { naoEhLead } from "@/lib/leads";
 
+import { linkDoConvite } from "./convites";
 import {
   relatorio,
   type ConviteDoRelatorio,
@@ -167,6 +169,8 @@ export interface FrenteDoParceiro {
   total: number;
   /** A nota da pergunta-chave do NPS, quando a frente é NPS e ele respondeu. */
   nps: number | null;
+  /** O link do convite (para copiar da ficha do parceiro). */
+  link: string;
 }
 
 export type FrentesDoParceiro = Record<SurveyObjective, FrenteDoParceiro | null>;
@@ -194,6 +198,7 @@ async function frentesPorParceiro(
     .select({
       inviteId: surveyInvites.id,
       status: surveyInvites.status,
+      token: surveyInvites.token,
       createdAt: surveyInvites.createdAt,
       completedAt: surveyInvites.completedAt,
       surveyId: surveys.id,
@@ -220,6 +225,7 @@ async function frentesPorParceiro(
 
   const mapa = new Map<string, { contact: LinhaDoPainel["contact"]; frentes: FrentesDoParceiro }>();
   const npsInvites: string[] = [];
+  const base = getBaseUrl();
   for (const c of convites) {
     const linha = mapa.get(c.contactId) ?? {
       contact: { id: c.contactId, name: c.name, company: c.company },
@@ -236,6 +242,7 @@ async function frentesPorParceiro(
         respondidas: c.respondidas,
         total: c.total,
         nps: null,
+        link: linkDoConvite(base, c.token),
       };
       if (c.objective === "nps") npsInvites.push(c.inviteId);
     }

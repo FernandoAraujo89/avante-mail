@@ -2,7 +2,7 @@
 // lembrar em lote, encerrar/reabrir e montar o e-mail que o worker manda.
 // A mensagem vira uma linha de campaign_sends (origem "pesquisa"), pela mesma
 // fila do e-mail: entrega e devolução chegam pelos webhooks de sempre.
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
 
 import { getBaseUrl } from "@/lib/base-url";
 import { enderecoParaEnvioUnico } from "@/lib/contatos/destinatarios";
@@ -548,5 +548,74 @@ export async function montarWhatsAppDoConvite(sendId: string): Promise<WhatsAppM
       contact: { name: linha.contactName, company: linha.company },
       token: linha.token,
     },
+  };
+}
+
+export interface ParceiroEncontrado {
+  id: string;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  /** Já tem convite em aberto nesta pesquisa (não entra de novo). */
+  convidado: boolean;
+}
+
+export const BUSCA_DE_PARCEIROS_LIMITE = 100;
+
+/**
+ * Parceiros (não leads) para escolher um a um no convite: por nome, empresa
+ * ou e-mail, dentro de uma lista ou em todas. Diz quem já está convidado
+ * nesta pesquisa. Teto de 100 — a busca refina o resto.
+ */
+export async function buscarParceiros(args: {
+  surveyId: string;
+  q: string;
+  listId: string | null;
+}): Promise<{ parceiros: ParceiroEncontrado[]; total: number }> {
+  const db = getDb();
+  const condicoes = [naoEhLead()];
+  const termo = args.q.trim();
+  if (termo) {
+    const padrao = `%${termo}%`;
+    condicoes.push(
+      or(ilike(contacts.name, padrao), ilike(contacts.company, padrao), ilike(contacts.email, padrao))!
+    );
+  }
+  if (args.listId) {
+    condicoes.push(
+      exists(
+        db
+          .select({ um: contactLists.contactId })
+          .from(contactLists)
+          .where(and(eq(contactLists.contactId, contacts.id), eq(contactLists.listId, args.listId)))
+      )
+    );
+  }
+  const where = and(...condicoes);
+
+  const [[{ total }], linhas] = await Promise.all([
+    db.select({ total: sql<number>`count(*)`.mapWith(Number) }).from(contacts).where(where),
+    db
+      .select({
+        id: contacts.id,
+        name: contacts.name,
+        company: contacts.company,
+        email: contacts.email,
+        phone: contacts.phone,
+        convidado: sql<boolean>`exists (
+          select 1 from survey_invites i
+          where i.contact_id = contacts.id and i.survey_id = ${args.surveyId}
+            and i.status not in ('completed', 'closed')
+        )`,
+      })
+      .from(contacts)
+      .where(where)
+      .orderBy(asc(contacts.name))
+      .limit(BUSCA_DE_PARCEIROS_LIMITE),
+  ]);
+  return {
+    total,
+    parceiros: linhas.map((l) => ({ ...l, convidado: Boolean(l.convidado) })),
   };
 }
