@@ -193,6 +193,48 @@ já que quem chega vira parceiro na hora.
 O push pelo Make (Pipedrive → Watch Deals → nossa porta de entrada) continua
 possível por cima, como redução de latência; a correção não depende dele.
 
+### Sincronização com o NRG Hub (23/10/2026)
+
+A Avante deixou o Pipedrive; o CRM é o **NRG Hub** (app.nrg.ia.br), que
+implementou o contrato do documento "Integração CRM × Campanhas Avante" (15/10):
+API de leitura em `/api/v1` (funis, etapas, negócios com `updated_since` e
+cursor, pessoas por id, opções do campo de qualificação) e **webhook de saída**
+com o modelo "Campanhas Avante" (negócio + pessoa + origem, cabeçalho
+`Authorization: Bearer`).
+
+**As duas vias ligadas:**
+- **Webhook (tempo real):** origem `nrg-hub` em `/leads/origens`, mapeada para
+  o formato do Hub (`pessoa.nome`, `pessoa.emails.0`, `pessoa.telefones.0`,
+  `pessoa.id` → id externo, `negocio.etapa_efetiva_do_lead` → etapa,
+  `negocio.qualificacao`, `negocio.origem.utm_*`, `pessoa.etiquetas` → tags).
+  No Hub: Marketing › Integrações › Webhooks de saída, modelo "Campanhas
+  Avante", funil "White Label - Inbound".
+- **Leitura da API (reconciliação, a cada 5 min):** a MESMA sincronização de
+  `lib/pipedrive/sync.ts`, agora com um cliente por CRM na mesma interface
+  (`lib/nrg/client.ts` ao lado de `lib/pipedrive/client.ts`). Com
+  `NRG_HUB_API_TOKEN` no ambiente o CRM ativo é o Hub (`crmAtivo()` em
+  `lib/pipedrive/funis.ts`); sem ele, o Pipedrive — comportamento antigo.
+  Funis por nome em `CRM_FUNIS` (vários, por vírgula; padrão "White Label -
+  Inbound"); `NRG_HUB_URL` só se o endereço mudar.
+
+**O que mudou no código:** ids de funil, etapa, negócio e pessoa viraram
+TEXTO (UUIDs no Hub; os números do Pipedrive viram "123") — migração
+`migrate-sincroniza-nrg-hub.ts` converte `pipedrive_deals.id/pipeline_id/
+person_id` para text. As chaves de app_settings são POR CRM (`nrg_funis`,
+`nrg_sync_desde:<id>`, `nrg_releitura_*`…; as `pipedrive_*` ficam intactas):
+o Hub começa do zero com o backfill, e os negócios do Pipedrive no espelho não
+entram na decisão (ela filtra pelos funis acompanhados). A qualificação no Hub
+vem como rótulo ("Sim: Experiente"), não como id de opção — `rotuloDaOpcao`
+aceita os dois. Teste de ponta a ponta: `scripts/testar-sync-funis.ts`
+(API de mentira, ids em texto).
+
+**Virada:** token do Hub no servidor (`NRG_HUB_API_TOKEN`), `PIPEDRIVE_API_TOKEN`
+removido — a sincronização antiga para sozinha, e a primeira passada do Hub lê
+os funis inteiros. Etapas do funil "White Label - Inbound" no Hub têm os mesmos
+nomes das daqui (Pesquisa … Aguardar assinatura e pagamento); o funil "Leads"
+(SDR por IA) tem nomes próprios e NÃO é acompanhado — se um dia for, cadastrar
+apelidos em `/leads/etapas`.
+
 ### Funil completo, pontuado, em dois funis (14/09/2026)
 
 Migração: `scripts/migrate-sincroniza-funil-completo.ts`. Conferência de ponta

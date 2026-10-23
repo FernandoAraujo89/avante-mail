@@ -741,14 +741,14 @@ export type LeadQualificationRow = typeof leadQualifications.$inferSelect;
 export const pipedriveDeals = pgTable(
   "pipedrive_deals",
   {
-    /** O id do negócio no Pipedrive. */
-    id: integer("id").primaryKey(),
-    pipelineId: integer("pipeline_id").notNull(),
+    /** O id do negócio no CRM: número do Pipedrive como texto, ou UUID do NRG Hub. */
+    id: text("id").primaryKey(),
+    pipelineId: text("pipeline_id").notNull(),
     /** Nome cru da etapa lá — resolvido na hora da decisão, pelos apelidos. */
     stageName: text("stage_name"),
     /** open | won | lost | deleted, da API; `fora` quando sumiu do funil. */
     status: text("status").notNull(),
-    personId: integer("person_id"),
+    personId: text("person_id"),
     contactId: uuid("contact_id").references(() => contacts.id, {
       onDelete: "set null",
     }),

@@ -16,7 +16,7 @@
 // Não se chama migrate-* de propósito: o deploy roda todos os migrate-*.ts.
 
 import { config } from "dotenv";
-import { and, asc, eq, gte, inArray, like } from "drizzle-orm";
+import { and, asc, eq, inArray, like, sql } from "drizzle-orm";
 
 import {
   appSettings,
@@ -61,26 +61,26 @@ const CELULAR_H = `+55699${String(Number(FINAL) + 1).padStart(7, "0")}`;
 const BASE_DOS_IDS = 900_000_000;
 
 // Os nomes crus, como a API devolveu em 14/09/2026.
-const ETAPAS_PD: Record<number, Map<number, string>> = {
-  8: new Map([
-    [60, "Pesquisa"],
-    [61, "Realizar contato "],
-    [62, "Qualificar lead"],
-    [63, "Agendar apresentação parte técnica"],
-    [64, "Apresentar parte técnica"],
-    [65, "Apresentar proposta comercial"],
-    [66, "Analisando proposta"],
-    [67, "Aguardar assinatura  e pagamento"],
+const ETAPAS_PD: Record<string, Map<string, string>> = {
+  "8": new Map([
+    ["60", "Pesquisa"],
+    ["61", "Realizar contato "],
+    ["62", "Qualificar lead"],
+    ["63", "Agendar apresentação parte técnica"],
+    ["64", "Apresentar parte técnica"],
+    ["65", "Apresentar proposta comercial"],
+    ["66", "Analisando proposta"],
+    ["67", "Aguardar assinatura  e pagamento"],
   ]),
-  14: new Map([
-    [97, "Pesquisa"],
-    [98, "Realizar Contato"],
-    [99, "Qualificar lead"],
-    [100, "Em análise/Agendar apresentação "],
-    [101, "Apresentar parte técnica"],
-    [102, "Apresentar proposta comercial"],
-    [103, "Analisando proposta"],
-    [104, "Aguardar assinatura  e pagamento"],
+  "14": new Map([
+    ["97", "Pesquisa"],
+    ["98", "Realizar Contato"],
+    ["99", "Qualificar lead"],
+    ["100", "Em análise/Agendar apresentação "],
+    ["101", "Apresentar parte técnica"],
+    ["102", "Apresentar proposta comercial"],
+    ["103", "Analisando proposta"],
+    ["104", "Aguardar assinatura  e pagamento"],
   ]),
 };
 
@@ -93,17 +93,17 @@ function deal(
   qualificacaoCrua: unknown = null
 ): DealDoPipedrive {
   return {
-    id: BASE_DOS_IDS + id,
-    personId,
-    stageId,
+    id: String(BASE_DOS_IDS + id),
+    personId: String(personId),
+    stageId: String(stageId),
     updateTime,
     status,
     qualificacaoCrua,
   };
 }
 
-const DEALS: Record<number, DealDoPipedrive[]> = {
-  8: [
+const DEALS: Record<string, DealDoPipedrive[]> = {
+  "8": [
     deal(1, 1, 66, "2026-09-10T10:00:00Z", "open", 78),
     deal(2, 3, 65, "2026-09-10T11:00:00Z"),
     deal(3, 4, 67, "2026-09-10T12:00:00Z", "won"),
@@ -114,7 +114,7 @@ const DEALS: Record<number, DealDoPipedrive[]> = {
     // J tem um aberto aqui e um perdido no outro funil — até o aberto sumir.
     deal(12, 10, 62, "2026-09-10T14:30:00Z"),
   ],
-  14: [
+  "14": [
     deal(4, 2, 100, "2026-09-10T09:00:00Z"),
     // C tem outro aberto, mais recente e MENOS adiantado: vale a proposta.
     deal(6, 3, 98, "2026-09-10T13:00:00Z"),
@@ -131,42 +131,42 @@ const DEALS: Record<number, DealDoPipedrive[]> = {
   ],
 };
 
-const PESSOAS = new Map<number, PessoaDoPipedrive>([
-  [1, { emails: [email("a")], phones: [] }],
-  [2, { emails: [email("b")], phones: [] }],
-  [3, { emails: [email("c").toUpperCase()], phones: [] }],
-  [4, { emails: [email("d")], phones: [] }],
-  [5, { emails: [email("e")], phones: [] }],
-  [6, { emails: [email("f")], phones: [] }],
+const PESSOAS = new Map<string, PessoaDoPipedrive>([
+  ["1", { emails: [email("a")], phones: [] }],
+  ["2", { emails: [email("b")], phones: [] }],
+  ["3", { emails: [email("c").toUpperCase()], phones: [] }],
+  ["4", { emails: [email("d")], phones: [] }],
+  ["5", { emails: [email("e")], phones: [] }],
+  ["6", { emails: [email("f")], phones: [] }],
   [
-    7,
+    "7",
     {
       emails: [email("g-outro")],
       phones: ["31 3241-0000", `(69) ${CELULAR_G.slice(5, 10)}-${CELULAR_G.slice(10)}`],
     },
   ],
   [
-    8,
+    "8",
     {
       emails: [],
       phones: [`+55 69 9${CELULAR_H.slice(5, 9)}-${CELULAR_H.slice(9)}`],
     },
   ],
-  [9, { emails: [email("i")], phones: [] }],
-  [10, { emails: [email("j")], phones: [] }],
-  [99, { emails: [email("desconhecido")], phones: [] }],
+  ["9", { emails: [email("i")], phones: [] }],
+  ["10", { emails: [email("j")], phones: [] }],
+  ["99", { emails: [email("desconhecido")], phones: [] }],
 ]);
 
-const pedidosDesde: Record<number, (string | undefined)[]> = { 8: [], 14: [] };
+const pedidosDesde: Record<string, (string | undefined)[]> = { "8": [], "14": [] };
 /** Negócios que a API de mentira deixa de listar (excluídos ou movidos). */
-const ocultos = new Set<number>();
+const ocultos = new Set<string>();
 
 const apiDeMentira: PipedriveApi = {
   async pipelines() {
     return [
-      { id: 8, name: "White Label - Inbound" },
-      { id: 10, name: "Funil que ninguém acompanha" },
-      { id: 14, name: "SDR-TESTE-NRG" },
+      { id: "8", name: "White Label - Inbound" },
+      { id: "10", name: "Funil que ninguém acompanha" },
+      { id: "14", name: "SDR-TESTE-NRG" },
     ];
   },
   async stages(pipelineId) {
@@ -176,8 +176,8 @@ const apiDeMentira: PipedriveApi = {
     return {
       key: "campo-qualificacao",
       opcoes: new Map([
-        [76, "Sim: Intermediário"],
-        [78, "Sim: Experiente"],
+        ["76", "Sim: Intermediário"],
+        ["78", "Sim: Experiente"],
       ]),
     };
   },
@@ -266,7 +266,7 @@ async function main() {
       ).map((p) => (p.payload as { para: string }).para);
 
     console.log("— primeira passada (os dois funis do zero):");
-    const r1 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
+    const r1 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0, crm: "pipedrive" });
     ok("rodou", r1.rodou, true);
     ok("dois funis", r1.funis, 2);
     ok("catorze deals lidos", r1.deals, 14);
@@ -318,11 +318,11 @@ async function main() {
     const espelho = await db
       .select({ id: pipedriveDeals.id, contactId: pipedriveDeals.contactId })
       .from(pipedriveDeals)
-      .where(gte(pipedriveDeals.id, BASE_DOS_IDS));
+      .where(sql`${pipedriveDeals.id} ~ '^9000000[0-9]{2}$'`);
     ok("espelho guardou os catorze negócios", espelho.length, 14);
     ok(
       "no espelho, o negócio casado por telefone aponta para G",
-      espelho.find((n) => n.id === BASE_DOS_IDS + 10)?.contactId,
+      espelho.find((n) => n.id === String(BASE_DOS_IDS + 10))?.contactId,
       id("g")
     );
 
@@ -344,14 +344,14 @@ async function main() {
       .where(eq(appSettings.key, "pipedrive_sync_funis"));
     ok("a tela sabe o nome dos funis", JSON.parse(vistos.value ?? "{}"), {
       funis: [
-        { id: 8, nome: "White Label - Inbound" },
-        { id: 14, nome: "SDR-TESTE-NRG" },
+        { id: "8", nome: "White Label - Inbound" },
+        { id: "14", nome: "SDR-TESTE-NRG" },
       ],
       ausentes: [],
     });
 
     console.log("— segunda passada (só o que mudou desde a marca):");
-    const r2 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
+    const r2 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0, crm: "pipedrive" });
     ok("partiu da marca de cada funil", [pedidosDesde[8][1], pedidosDesde[14][1]], [
       "2026-09-10T14:30:00Z",
       "2026-09-10T14:50:00Z",
@@ -359,7 +359,7 @@ async function main() {
     ok("releitura parcial não muda ninguém", r2.etapasAplicadas, 0);
 
     console.log("— terceira passada (releitura completa; o aberto de J sumiu):");
-    ocultos.add(BASE_DOS_IDS + 12);
+    ocultos.add(String(BASE_DOS_IDS + 12));
     await db
       .delete(appSettings)
       .where(
@@ -368,7 +368,7 @@ async function main() {
           "pipedrive_sync_desde:14",
         ])
       );
-    const r3 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0 });
+    const r3 = await sincronizarPipedrive({ api: apiDeMentira, intervaloMin: 0, crm: "pipedrive" });
     ok("releu do zero", [pedidosDesde[8][2], pedidosDesde[14][2]], [
       undefined,
       undefined,
@@ -378,7 +378,7 @@ async function main() {
     const [sumiu] = await db
       .select({ status: pipedriveDeals.status })
       .from(pipedriveDeals)
-      .where(eq(pipedriveDeals.id, BASE_DOS_IDS + 12));
+      .where(eq(pipedriveDeals.id, String(BASE_DOS_IDS + 12)));
     ok("no espelho, o negócio que sumiu fica marcado como fora", sumiu?.status, "fora");
     ok(
       "C: a releitura não repetiu a mudança",
@@ -411,7 +411,7 @@ async function main() {
     ok("I: perdido não pontua", i.score, pontosDe("perdido"));
   } finally {
     await db.delete(contacts).where(like(contacts.email, `${MARCA}-%`));
-    await db.delete(pipedriveDeals).where(gte(pipedriveDeals.id, BASE_DOS_IDS));
+    await db.delete(pipedriveDeals).where(sql`${pipedriveDeals.id} ~ '^9000000[0-9]{2}$'`);
     await db.delete(appSettings).where(inArray(appSettings.key, CHAVES_DA_PASSADA));
     if (antes.length > 0) await db.insert(appSettings).values(antes);
   }

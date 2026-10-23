@@ -149,19 +149,19 @@ async function ciclo(): Promise<void> {
     console.error(`[WORKER-AUTO] Lead Score falhou: ${errorMessage(error)}`);
   }
 
-  // A reconciliação com o Pipedrive também tem try PRÓPRIO: ela lê a API de
+  // A reconciliação com o CRM (Pipedrive ou NRG Hub) também tem try PRÓPRIO: ela lê a API de
   // fora e aplica etapa/qualificação — uma indisponibilidade lá não pode
   // parar nem as automações nem a pontuação. Ela mesma decide se já passou o
-  // intervalo (e fica quieta sem PIPEDRIVE_API_TOKEN).
+  // intervalo (e fica quieta sem PIPEDRIVE_API_TOKEN nem NRG_HUB_API_TOKEN).
   try {
     const pd = await sincronizarPipedrive();
     if (pd.rodou && (pd.deals ?? 0) > 0) {
       console.log(
-        `[WORKER-AUTO] pipedrive: ${pd.deals} deal(s) de ${pd.funis} funil(is) — ${pd.etapasAplicadas} etapa(s), ${pd.qualificacoesAplicadas} qualificação(ões), ${pd.convertidos} convertido(s), ${pd.semContato} sem contato, ${pd.recusas} recusa(s)`
+        `[WORKER-AUTO] crm: ${pd.deals} negócio(s) de ${pd.funis} funil(is) — ${pd.etapasAplicadas} etapa(s), ${pd.qualificacoesAplicadas} qualificação(ões), ${pd.convertidos} convertido(s), ${pd.semContato} sem contato, ${pd.recusas} recusa(s)`
       );
     }
   } catch (error) {
-    console.error(`[WORKER-AUTO] Pipedrive falhou: ${errorMessage(error)}`);
+    console.error(`[WORKER-AUTO] sincronização do CRM falhou: ${errorMessage(error)}`);
   }
 
   // Retenção do rastreio anônimo (fase E.2): visitante que nunca virou lead

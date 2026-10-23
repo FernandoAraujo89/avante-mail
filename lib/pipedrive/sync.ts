@@ -14,16 +14,19 @@ import { contatosPorEnderecos } from "@/lib/contatos/enderecos";
 import { normalizePhone } from "@/lib/phone";
 import { phoneCandidatesFromWaId } from "@/lib/whatsapp/inbound";
 import { getSetting, setSetting } from "@/lib/settings";
+import { clienteNrgHub } from "@/lib/nrg/client";
 import {
   clientePipedrive,
   type DealDoPipedrive,
   type PipedriveApi,
 } from "./client";
 import {
-  CHAVE_FUNIS,
-  CHAVE_FUNIS_DA_ULTIMA,
-  CHAVE_ULTIMA,
+  chavesDoCrm,
+  crmAtivo,
   lerIdsDosFunis,
+  NOME_DO_CRM,
+  type ChavesDoCrm,
+  type Crm,
   type FunisDaUltimaPassada,
 } from "./funis";
 import { decidirPelosNegocios, type NegocioDoLead } from "./regra";
@@ -57,13 +60,10 @@ import { decidirPelosNegocios, type NegocioDoLead } from "./regra";
  * conjunto — no máximo uma mudança por lead, e reler não mexe em ninguém.
  */
 
-/** Marca-d'água, uma por funil: `pipedrive_sync_desde:<id>`. */
-const CHAVE_DESDE = "pipedrive_sync_desde";
+// As chaves de app_settings (funis, marcas-d'água, releitura) são POR CRM —
+// ver chavesDoCrm em ./funis. Desde 23/10/2026 a mesma sincronização lê o
+// NRG Hub (lib/nrg/client.ts) quando NRG_HUB_API_TOKEN está no ambiente.
 
-/** Começo da releitura completa de um funil: `pipedrive_releitura_inicio:<id>`. */
-const CHAVE_INICIO_DA_RELEITURA = "pipedrive_releitura_inicio";
-/** Quando a última releitura diária foi disparada. */
-const CHAVE_ULTIMA_RELEITURA = "pipedrive_releitura_ultima";
 /** De quanto em quanto tempo a passada relê os funis inteiros. */
 const HORAS_ENTRE_RELEITURAS = 20;
 /** Negócio que não apareceu na releitura: excluído ou movido de funil. */
@@ -131,45 +131,52 @@ function normalizado(texto: string): string {
 /** O rótulo da opção escolhida no campo de qualificação, das formas que a API manda. */
 function rotuloDaOpcao(
   cru: unknown,
-  opcoes: Map<number, string>
+  opcoes: Map<string, string>
 ): string | null {
   if (cru === null || cru === undefined || cru === "") return null;
-  if (typeof cru === "number") return opcoes.get(cru) ?? null;
+  if (typeof cru === "number") return opcoes.get(String(cru)) ?? null;
   if (typeof cru === "string") {
-    const numero = Number(cru);
-    if (Number.isFinite(numero) && opcoes.has(numero)) {
-      return opcoes.get(numero) ?? null;
-    }
-    return cru;
+    // Id da opção (Pipedrive) ou o próprio rótulo (NRG Hub).
+    return opcoes.get(cru.trim()) ?? cru.trim();
   }
   if (typeof cru === "object" && "id" in (cru as Record<string, unknown>)) {
-    return opcoes.get(Number((cru as { id: unknown }).id)) ?? null;
+    return opcoes.get(String((cru as { id: unknown }).id)) ?? null;
   }
   return null;
 }
 
 async function resolverFunis(
-  api: PipedriveApi
-): Promise<{ funis: { id: number; name: string }[]; ausentes: string[] }> {
+  api: PipedriveApi,
+  chaves: ChavesDoCrm
+): Promise<{ funis: { id: string; name: string }[]; ausentes: string[] }> {
   const pipelines = await api.pipelines();
-  const ids = lerIdsDosFunis(await getSetting(CHAVE_FUNIS));
+  const ids = lerIdsDosFunis(await getSetting(chaves.funis));
 
   if (ids) {
     return {
       funis: ids
         .map((id) => pipelines.find((p) => p.id === id))
-        .filter((p): p is { id: number; name: string } => Boolean(p)),
+        .filter((p): p is { id: string; name: string } => Boolean(p)),
       ausentes: ids
         .filter((id) => !pipelines.some((p) => p.id === id))
         .map((id) => `#${id}`),
     };
   }
 
-  const nome = process.env.PIPEDRIVE_PIPELINE ?? "White Label - Inbound";
-  const funil = pipelines.find(
-    (p) => normalizado(p.name) === normalizado(nome)
-  );
-  return { funis: funil ? [funil] : [], ausentes: funil ? [] : [`"${nome}"`] };
+  // Sem ids guardados, os funis vêm por NOME do ambiente: CRM_FUNIS (vários,
+  // separados por vírgula) ou o PIPEDRIVE_PIPELINE de sempre.
+  const nomes = (process.env.CRM_FUNIS ?? process.env.PIPEDRIVE_PIPELINE ?? "White Label - Inbound")
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
+  const funis: { id: string; name: string }[] = [];
+  const ausentes: string[] = [];
+  for (const nome of nomes) {
+    const funil = pipelines.find((p) => normalizado(p.name) === normalizado(nome));
+    if (funil) funis.push(funil);
+    else ausentes.push(`"${nome}"`);
+  }
+  return { funis, ausentes };
 }
 
 interface Contagem {
@@ -184,28 +191,37 @@ export async function sincronizarPipedrive(args?: {
   api?: PipedriveApi;
   intervaloMin?: number;
   agora?: Date;
+  /** Qual CRM (e quais chaves de app_settings). Padrão: o do ambiente. */
+  crm?: Crm;
 }): Promise<ResultadoDaSincronizacao> {
   const agora = args?.agora ?? new Date();
+  const crm = args?.crm ?? crmAtivo();
+  const chaves = chavesDoCrm(crm);
+  const ROTULO = crm === "nrg" ? "[NRG-HUB]" : "[PIPEDRIVE]";
 
   let api = args?.api;
   if (!api) {
-    const token = process.env.PIPEDRIVE_API_TOKEN;
-    if (!token) {
-      if (!avisouSemToken) {
-        avisouSemToken = true;
-        console.log(
-          "[PIPEDRIVE] PIPEDRIVE_API_TOKEN não definido — sincronização desligada."
-        );
+    if (crm === "nrg") {
+      api = clienteNrgHub(process.env.NRG_HUB_API_TOKEN as string, process.env.NRG_HUB_URL || undefined);
+    } else {
+      const token = process.env.PIPEDRIVE_API_TOKEN;
+      if (!token) {
+        if (!avisouSemToken) {
+          avisouSemToken = true;
+          console.log(
+            "[PIPEDRIVE] PIPEDRIVE_API_TOKEN (ou NRG_HUB_API_TOKEN) não definido — sincronização desligada."
+          );
+        }
+        return { rodou: false, motivo: "sem-token" };
       }
-      return { rodou: false, motivo: "sem-token" };
+      api = clientePipedrive(token);
     }
-    api = clientePipedrive(token);
   }
 
   // Regula a si mesma, como a passagem diária do score: o worker chama a cada
   // ciclo e ela decide se já passou o intervalo.
   const intervaloMin = args?.intervaloMin ?? 5;
-  const ultima = await getSetting(CHAVE_ULTIMA);
+  const ultima = await getSetting(chaves.ultima);
   if (ultima) {
     const minutos = (agora.getTime() - new Date(ultima).getTime()) / 60_000;
     if (Number.isFinite(minutos) && minutos < intervaloMin) {
@@ -217,14 +233,14 @@ export async function sincronizarPipedrive(args?: {
   // errado) espera o intervalo como uma passada boa, em vez de martelar a API
   // a cada ciclo de 10 segundos do worker. As marcas-d'água dos deals são
   // outra coisa — elas só avançam no fim, então nada processado se perde.
-  await setSetting(CHAVE_ULTIMA, agora.toISOString());
+  await setSetting(chaves.ultima, agora.toISOString());
 
   const nomeDoCampo =
     process.env.PIPEDRIVE_CAMPO_QUALIFICACAO ?? "Lead qualificado";
 
-  const { funis, ausentes } = await resolverFunis(api);
+  const { funis, ausentes } = await resolverFunis(api, chaves);
   await setSetting(
-    CHAVE_FUNIS_DA_ULTIMA,
+    chaves.funisDaUltima,
     JSON.stringify({
       funis: funis.map((f) => ({ id: f.id, nome: f.name })),
       ausentes,
@@ -236,7 +252,7 @@ export async function sincronizarPipedrive(args?: {
     if (avisouConfig !== aviso) {
       avisouConfig = aviso;
       console.error(
-        `[PIPEDRIVE] ${aviso} — confira ${CHAVE_FUNIS} em app_settings (ou PIPEDRIVE_PIPELINE).`
+        `${ROTULO} ${aviso} — confira ${chaves.funis} em app_settings (ou PIPEDRIVE_PIPELINE).`
       );
     }
   }
@@ -255,7 +271,7 @@ export async function sincronizarPipedrive(args?: {
   if (!campo && avisouConfig !== "sem-campo") {
     avisouConfig = "sem-campo";
     console.error(
-      `[PIPEDRIVE] campo "${nomeDoCampo}" não existe no Pipedrive — sincronizando só as etapas.`
+      `${ROTULO} campo "${nomeDoCampo}" não existe no ${NOME_DO_CRM[crm]} — sincronizando só as etapas.`
     );
   }
 
@@ -263,28 +279,28 @@ export async function sincronizarPipedrive(args?: {
   // negócio excluído ou movido para um funil que não é acompanhado (a leitura
   // incremental nunca mais o vê), e o que acha o lead que chegou DEPOIS do
   // negócio dele parar de mudar.
-  const ultimaReleitura = await getSetting(CHAVE_ULTIMA_RELEITURA);
+  const ultimaReleitura = await getSetting(chaves.ultimaReleitura);
   const horasDesdeReleitura = ultimaReleitura
     ? (agora.getTime() - new Date(ultimaReleitura).getTime()) / 3_600_000
     : Number.POSITIVE_INFINITY;
   if (!(horasDesdeReleitura < HORAS_ENTRE_RELEITURAS)) {
     for (const funil of funis) {
-      await setSetting(`${CHAVE_DESDE}:${funil.id}`, null);
+      await setSetting(`${chaves.desde}:${funil.id}`, null);
     }
-    await setSetting(CHAVE_ULTIMA_RELEITURA, agora.toISOString());
+    await setSetting(chaves.ultimaReleitura, agora.toISOString());
   }
 
   // Cada funil a partir da sua marca-d'água.
-  const lidos = new Map<number, { deal: DealDoPipedrive; funilId: number }>();
-  const marcas = new Map<number, string>();
-  const chegaramAoFim = new Set<number>();
+  const lidos = new Map<string, { deal: DealDoPipedrive; funilId: string }>();
+  const marcas = new Map<string, string>();
+  const chegaramAoFim = new Set<string>();
   for (const funil of funis) {
     const desde =
-      (await getSetting(`${CHAVE_DESDE}:${funil.id}`)) || undefined;
+      (await getSetting(`${chaves.desde}:${funil.id}`)) || undefined;
     // Sem marca-d'água é leitura completa. O começo fica guardado: quando ela
     // chegar ao fim — nesta passada ou numa seguinte, se o funil for grande —
     // o negócio lido antes disso e que não apareceu de novo saiu do funil.
-    const chaveInicio = `${CHAVE_INICIO_DA_RELEITURA}:${funil.id}`;
+    const chaveInicio = `${chaves.inicioDaReleitura}:${funil.id}`;
     if (!desde && !(await getSetting(chaveInicio))) {
       await setSetting(chaveInicio, agora.toISOString());
     }
@@ -339,7 +355,7 @@ export async function sincronizarPipedrive(args?: {
   // 2. Releitura que chegou ao fim: o que não apareceu saiu do funil.
   const db = getDb();
   for (const funilId of chegaramAoFim) {
-    const chaveInicio = `${CHAVE_INICIO_DA_RELEITURA}:${funilId}`;
+    const chaveInicio = `${chaves.inicioDaReleitura}:${funilId}`;
     const inicio = await getSetting(chaveInicio);
     if (!inicio) continue;
     const sairam = await db
@@ -368,7 +384,7 @@ export async function sincronizarPipedrive(args?: {
   });
 
   for (const [funilId, marca] of marcas) {
-    await setSetting(`${CHAVE_DESDE}:${funilId}`, marca);
+    await setSetting(`${chaves.desde}:${funilId}`, marca);
   }
 
   return {
@@ -385,11 +401,11 @@ export async function sincronizarPipedrive(args?: {
  * lead ANTIGO, quando o negócio deixou de casar com ele.
  */
 async function espelharLote(
-  lote: { deal: DealDoPipedrive; funilId: number }[],
+  lote: { deal: DealDoPipedrive; funilId: string }[],
   ctx: {
     api: PipedriveApi;
-    campo: { key: string; opcoes: Map<number, string> } | null;
-    nomesDasEtapasPd: Map<number, string>;
+    campo: { key: string; opcoes: Map<string, string> } | null;
+    nomesDasEtapasPd: Map<string, string>;
     agora: Date;
     afetados: Set<string>;
     contagem: Contagem;
@@ -403,14 +419,14 @@ async function espelharLote(
     ...new Set(
       lote
         .map(({ deal }) => deal.personId)
-        .filter((id): id is number => id !== null)
+        .filter((id): id is string => id !== null)
     ),
   ];
   const pessoas = await api.pessoas(idsDePessoas);
 
   const emails = new Set<string>();
   const telefones = new Set<string>();
-  const telefonesPorPessoa = new Map<number, string[]>();
+  const telefonesPorPessoa = new Map<string, string[]>();
   for (const [idDaPessoa, pessoa] of pessoas) {
     for (const e of pessoa.emails) emails.add(e.toLowerCase());
     const formas = telefonesDaPessoa(pessoa.phones);
@@ -446,7 +462,7 @@ async function espelharLote(
       ? (pessoa.emails
           .map((e) => porEmail.get(e.toLowerCase()))
           .find(Boolean) ??
-        (telefonesPorPessoa.get(deal.personId as number) ?? [])
+        (telefonesPorPessoa.get(deal.personId as string) ?? [])
           .map((forma) => porTelefone.get(forma))
           .find(Boolean) ??
         null)
@@ -498,7 +514,7 @@ async function espelharLote(
 async function recalcularLeads(
   ids: string[],
   ctx: {
-    funis: number[];
+    funis: string[];
     etapas: LeadStageRow[];
     qualificacoes: LeadQualificationRow[];
     contagem: Contagem;
