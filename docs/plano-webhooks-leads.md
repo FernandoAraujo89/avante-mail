@@ -244,6 +244,24 @@ funil do CRM — a sincronização grava o funil do negócio que decidiu a etapa
 `/leads` (inclui "sem funil conhecido"). Só informativo: a etapa continua
 sendo a régua única.
 
+**Caminho de volta (23/10, fim da tarde) — todo lead existe no Hub:** o
+Fernando decidiu que não pode haver lead "sem funil conhecido": os funis do
+Hub são os do Campanhas. Token e webhook do Hub passaram a cobrir os SEIS
+funis liberados ao usuário (White Label - Inbound, Funil Outbound, Indicador,
+Leads, Cliente Final, Geladeira), com apelidos para as etapas dos funis Leads
+("Todos leads" → qualificado, "Mensagem entregue" → realizar-contato,
+"Qualificando lead" → qualificar-lead, "Agendar apresentação" → agendar-…) e
+Cliente Final ("Leads novos" → qualificado, "Agendar/Realizar apresentação
+técnica", "Analisar proposta"). Geladeira ("Stand-by", "Recontatar") e "Falha
+no envio" não têm equivalente: o lead não se move, só ganha o funil. E, para
+o lead captado pelos formulários daqui existir lá, `lib/nrg/captacao.ts`
+manda cada lead NOVO (origem ≠ nrg-hub) para a fonte de captação do Hub
+(`NRG_HUB_CAPTACAO_URL`, Marketing › Fontes de lead, fonte "Campanhas
+Avante" → funil Leads); `scripts/enviar-leads-ao-hub.ts` faz a carga dos que
+já existiam sem funil (`--dry-run`, `--limite`). O Hub deduplica pelo
+telefone (sem telefone não vai: 2 dos 419). SDR e IA SDR seguem fora até um
+admin do Hub liberá-los para o Marketing.
+
 **Virada:** token do Hub no servidor (`NRG_HUB_API_TOKEN`), `PIPEDRIVE_API_TOKEN`
 removido — a sincronização antiga para sozinha, e a primeira passada do Hub lê
 os funis inteiros. Etapas do funil "White Label - Inbound" no Hub têm os mesmos
