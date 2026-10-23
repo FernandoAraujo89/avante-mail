@@ -22,6 +22,7 @@ import {
   estadoAoResponder,
   gerarToken,
 } from "./convites";
+import { criarAlertasDaConclusao } from "./mapeamento-db";
 import {
   progresso,
   validarResposta,
@@ -240,5 +241,13 @@ export async function concluirConvite(token: string): Promise<ResultadoConclusao
     .update(surveyInvites)
     .set({ status: "completed", completedAt: new Date() })
     .where(eq(surveyInvites.id, convite.invite.id));
+  // Mapeamento da Parceria: NPS de 0 a 6 ou escolha de risco vira alerta para
+  // a Expansão (48h). Falha aqui não pode atrapalhar o parceiro — a conclusão
+  // já está gravada; o alerta é da equipe.
+  try {
+    await criarAlertasDaConclusao(convite.invite.id);
+  } catch (error) {
+    console.error("[pesquisas] alerta de risco não gravado:", error);
+  }
   return { ok: true, thanks: convite.survey.thanks };
 }

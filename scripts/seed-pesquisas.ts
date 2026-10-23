@@ -1,8 +1,13 @@
-// As 3 pesquisas do mapeamento da parceria (documento "mapeamento da
-// parceria" da Expansão, 23/10/2026), uma por frente, em RASCUNHO:
-//   dados_empresa — blocos 1 a 4 (identificação, carteira, produtos, operação)
-//   nps           — bloco 6 (relacionamento e percepção; a 0–10 é o NPS)
-//   crescimento   — blocos 5 e 7 (estratégia comercial; prioridades)
+// As 3 pesquisas do projeto "Mapeamento da Parceria" (perguntas do documento
+// da Expansão, composição das fases da apresentação de 23/10/2026), uma por
+// fase, em RASCUNHO:
+//   dados_empresa — Fase 1 · Diagnóstico e organização: identificação,
+//                   carteira de clientes, produtos Avante
+//   nps           — Fase 2 · Nível de satisfação: operação, implantação e
+//                   suporte; relacionamento e percepção (a 0–10 é o NPS;
+//                   "risco de continuidade" gera alerta para a Expansão)
+//   crescimento   — Fase 3 · Melhorias: estratégia comercial e crescimento;
+//                   prioridades e plano de acompanhamento
 //
 // Sem argumento: cria só a frente que ainda não tem pesquisa (não duplica).
 // Com `--substituir`: nas frentes que já têm pesquisa SEM convites, troca o
@@ -30,9 +35,18 @@ const secao = (label: string, help: string): Pergunta => ({ type: "section", lab
 const curta = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({ type: "short_text", label, ...extra });
 const longa = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({ type: "long_text", label, ...extra });
 const numero = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({ type: "number", label, ...extra });
-const unica = (label: string, choices: string[], extra: Partial<Pergunta> & { other?: boolean } = {}): Pergunta => {
-  const { other, ...resto } = extra;
-  return { type: "single_choice", label, options: { choices, ...(other ? { other: true } : {}) }, ...resto };
+const unica = (
+  label: string,
+  choices: string[],
+  extra: Partial<Pergunta> & { other?: boolean; alertOn?: string[] } = {}
+): Pergunta => {
+  const { other, alertOn, ...resto } = extra;
+  return {
+    type: "single_choice",
+    label,
+    options: { choices, ...(other ? { other: true } : {}), ...(alertOn ? { alertOn } : {}) },
+    ...resto,
+  };
 };
 const multipla = (label: string, choices: string[], extra: Partial<Pergunta> & { other?: boolean } = {}): Pergunta => {
   const { other, ...resto } = extra;
@@ -53,9 +67,9 @@ const SUGERIDAS: Record<
   { name: string; intro: string; thanks: string; perguntas: Pergunta[] }
 > = {
   dados_empresa: {
-    name: "Mapeamento da parceria — dados do parceiro",
+    name: "Fase 1 · Diagnóstico e organização",
     intro:
-      "Queremos entender quem é o parceiro e como a empresa está organizada: estrutura, carteira de clientes, produtos Avante em uso e operação. Leva uns 15 minutos — você pode parar e voltar depois pelo mesmo link.",
+      "Queremos saber quem é a sua empresa, o tamanho da operação e quais soluções Avante você vende e domina. Leva uns 10 minutos — e dá para parar e voltar depois pelo mesmo link.",
     thanks:
       "Obrigado! Com a realidade da sua empresa em mãos, a Expansão consegue apoiar você do jeito certo.",
     perguntas: [
@@ -114,6 +128,15 @@ const SUGERIDAS: Record<
       longa("Quais funcionalidades ou integrações são essenciais para sua operação?"),
       longa("Existem limitações de produto que impedem ou dificultam vendas?"),
 
+    ],
+  },
+
+  nps: {
+    name: "Fase 2 · Nível de satisfação",
+    intro:
+      "Queremos medir como você avalia a parceria, a operação e o suporte — e onde estão os riscos. Respostas sinceras são o que faz a Avante melhorar.",
+    thanks: "Obrigado pela sinceridade. Se algo pediu atenção, a Expansão entra em contato em até 48 horas.",
+    perguntas: [
       secao("Operação, implantação e suporte", "Identificar gargalos que comprometem a entrega e a experiência do cliente final."),
       unica(
         "Como é realizada a implantação dos sistemas para os clientes finais?",
@@ -141,15 +164,7 @@ const SUGERIDAS: Record<
       longa("Quais demandas estão pendentes e precisam de acompanhamento?", {
         help: "Descreva e, se houver, informe os números dos tickets.",
       }),
-    ],
-  },
 
-  nps: {
-    name: "Mapeamento da parceria — satisfação",
-    intro:
-      "Queremos entender a qualidade da relação com a Avante e o que pode melhorar. São poucas perguntas — a primeira é a mais importante.",
-    thanks: "Obrigado pela sinceridade. Vamos usar isso para melhorar a parceria.",
-    perguntas: [
       secao("Relacionamento e percepção da parceria", "Entender a qualidade da relação e o risco de insatisfação."),
       {
         type: "scale",
@@ -164,18 +179,19 @@ const SUGERIDAS: Record<
       escala1a5("Você considera que a Avante compreende as necessidades do seu negócio?", {
         options: { min: 1, max: 5, minLabel: "Não compreende", maxLabel: "Compreende totalmente" },
       }),
-      unica("Existe alguma situação que esteja colocando a continuidade da parceria em risco?", [
-        "Não",
-        "Sim",
-        "Prefiro conversar em reunião",
-      ]),
+      // "Risco de continuidade" gera alerta para a Expansão (contato em 48h).
+      unica(
+        "Existe alguma situação que esteja colocando a continuidade da parceria em risco?",
+        ["Não", "Sim", "Prefiro conversar em reunião"],
+        { alertOn: ["Sim", "Prefiro conversar em reunião"] }
+      ),
       unica("Você considera ampliar, manter ou reduzir a operação com a Avante?", ["Ampliar", "Manter", "Reduzir", "Ainda não decidi"]),
       longa("Qual é sua principal expectativa em relação ao Sucesso do Cliente?"),
     ],
   },
 
   crescimento: {
-    name: "Mapeamento da parceria — crescimento e melhorias",
+    name: "Fase 3 · Melhorias",
     intro:
       "Queremos identificar o potencial real de expansão da sua empresa, os recursos necessários para realizá-lo e as prioridades dos próximos meses — para transformar o diagnóstico em ações concretas.",
     thanks: "Obrigado! A Expansão vai ler suas respostas e voltar a falar com você com um plano.",

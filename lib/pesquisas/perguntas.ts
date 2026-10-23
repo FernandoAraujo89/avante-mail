@@ -137,7 +137,16 @@ function opcoesDoTipo(
     if (new Set(choices.map((c) => c.toLowerCase())).size !== choices.length) {
       throw new Error(`Pergunta ${n}: há opções repetidas.`);
     }
-    return { choices, ...(o.other === true ? { other: true } : {}) };
+    // Escolhas que geram alerta de risco (Mapeamento da Parceria): só as que
+    // existem na lista; o resto é descartado em silêncio.
+    const alertOn = Array.isArray(o.alertOn)
+      ? o.alertOn.map(texto).filter((a) => choices.includes(a))
+      : [];
+    return {
+      choices,
+      ...(o.other === true ? { other: true } : {}),
+      ...(alertOn.length > 0 ? { alertOn } : {}),
+    };
   }
 
   if (type === "scale") {

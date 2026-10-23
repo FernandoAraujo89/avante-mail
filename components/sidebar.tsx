@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertTriangle,
   BarChart3,
   ClipboardCheck,
   ClipboardList,
@@ -75,6 +76,7 @@ const NAV_GROUPS: {
       },
       { href: "/pesquisas", label: "Pesquisas", icon: ClipboardCheck },
       { href: "/pesquisas/parceiros", label: "Painel de parceiros", icon: LayoutGrid },
+      { href: "/pesquisas/alertas", label: "Alertas de risco", icon: AlertTriangle },
       { href: "/automations", label: "Automações", icon: Workflow },
       { href: "/news", label: "Avante News", icon: Newspaper },
       { href: "/reports", label: "Relatórios", icon: BarChart3 },

@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Copy, ExternalLink, Send, UserRound } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CheckCircle2, ClipboardList, Copy, ExternalLink, Send, Undo2, UserRound } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { EtapasDoParceiro } from "@/components/pesquisas/etapas-do-parceiro";
 import { FormularioPesquisa } from "@/components/pesquisas/formulario-pesquisa";
+import { PerfilDoParceiro } from "@/components/pesquisas/perfil-do-parceiro";
+import { ProximoPassoDaRegua } from "@/components/pesquisas/regua";
+import { RegistroDePasso } from "@/components/pesquisas/registro-de-passo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,25 +31,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SURVEY_OBJECTIVES, type SurveyInviteStatus, type SurveyObjective } from "@/lib/db/schema";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { rotaPermitida, type Perfil } from "@/lib/perfis";
 import type { ResultadoConvite } from "@/lib/pesquisas/envios";
+import { ALERTA_MOTIVO_LABEL, PASSO_LABEL, SITUACAO_ALERTA_LABEL } from "@/lib/pesquisas/mapeamento";
+import type { AlertaDto, PassoDto } from "@/lib/pesquisas/mapeamento-db";
 import type { ParceiroDto } from "@/lib/pesquisas/relatorio-db";
 import {
-  CONVITE_STATUS_LABEL,
   OBJETIVO_DESCRICAO,
   OBJETIVO_LABEL,
   type PesquisaDto,
   type PesquisaResumoDto,
 } from "@/lib/pesquisas/rotulos";
-
-const CONVITE_VARIANT: Record<SurveyInviteStatus, "secondary" | "info" | "warning" | "success" | "outline"> = {
-  pending: "secondary",
-  opened: "info",
-  in_progress: "warning",
-  completed: "success",
-  closed: "outline",
-};
 
 const ABERTOS: SurveyInviteStatus[] = ["pending", "opened", "in_progress"];
 
@@ -56,6 +53,12 @@ export default function ParceiroPage() {
   const [aviso, setAviso] = useState("");
   const [podeConvidar, setPodeConvidar] = useState(false);
   const [pesquisas, setPesquisas] = useState<PesquisaResumoDto[]>([]);
+
+  // Mapeamento da Parceria: alertas do parceiro, histórico de passos e o registro de um passo novo.
+  const [alertas, setAlertas] = useState<AlertaDto[]>([]);
+  const [historico, setHistorico] = useState<Record<string, PassoDto[]>>({});
+  const [registrando, setRegistrando] = useState<{ surveyId: string; inviteId: string } | null>(null);
+  const [ocupado, setOcupado] = useState(false);
 
   // Convite individual: a frente escolhida, a pesquisa ativa dela e os canais.
   const [convidando, setConvidando] = useState<SurveyObjective | null>(null);
@@ -69,14 +72,25 @@ export default function ParceiroPage() {
   const carregar = useCallback(async () => {
     try {
       setErro("");
-      const [res, resMe, resP] = await Promise.all([
+      const [res, resMe, resP, resA] = await Promise.all([
         fetch(`/api/pesquisas/parceiros/${contactId}`),
         fetch("/api/auth/me"),
         fetch("/api/pesquisas"),
+        fetch(`/api/pesquisas/alertas?estado=todos&contato=${contactId}`),
       ]);
-      const json = await res.json();
+      const json = (await res.json()) as ParceiroDto & { error?: string };
       if (!res.ok) throw new Error(json.error ?? "Erro ao carregar o parceiro.");
       setDados(json);
+      if (resA.ok) setAlertas(await resA.json());
+      // O histórico de passos de cada convite (no máximo três pedidos).
+      const frentes = SURVEY_OBJECTIVES.map((o) => json.frentes[o]).filter((f) => f !== null);
+      const passos = await Promise.all(
+        frentes.map(async (f) => {
+          const r = await fetch(`/api/pesquisas/${f.surveyId}/convites/${f.inviteId}/passos`);
+          return [f.inviteId, r.ok ? ((await r.json()) as PassoDto[]) : []] as const;
+        })
+      );
+      setHistorico(Object.fromEntries(passos));
       // O Sucesso do cliente só lê o painel; convidar é da Expansão e do admin.
       if (resMe.ok) {
         const me = (await resMe.json()) as { role: Perfil };
@@ -154,6 +168,44 @@ export default function ParceiroPage() {
     }
   }
 
+  async function validar(surveyId: string, inviteId: string, desfazer: boolean) {
+    setOcupado(true);
+    setErro("");
+    try {
+      const res = await fetch(`/api/pesquisas/${surveyId}/convites/${inviteId}/validar`, {
+        method: desfazer ? "DELETE" : "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível validar.");
+      setAviso(desfazer ? "Validação desfeita." : "Resposta validada.");
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function tratarAlerta(a: AlertaDto) {
+    setOcupado(true);
+    setErro("");
+    try {
+      const res = await fetch(`/api/pesquisas/alertas/${a.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acao: "tratar" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível tratar o alerta.");
+      setAviso("Alerta tratado.");
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
   async function copiarLink(link: string) {
     try {
       await navigator.clipboard.writeText(link);
@@ -210,20 +262,84 @@ export default function ParceiroPage() {
         </Card>
       ) : (
         <div className="grid gap-6">
+          <PerfilDoParceiro
+            contactId={contactId}
+            perfil={dados.perfil}
+            saude={dados.saude}
+            alertasAbertos={dados.alertasAbertos}
+            podeEditar={podeConvidar}
+            onSalvo={(m) => {
+              setAviso(m);
+              carregar();
+            }}
+          />
+
+          {alertas.length > 0 ? (
+            <Card className="p-4 sm:p-5">
+              <h2 className="text-base font-medium">Alertas de risco</h2>
+              <p className="mb-3 text-xs text-muted-foreground">Contato da Expansão em até 48h.</p>
+              <ul className="grid gap-2">
+                {alertas.map((a) => (
+                  <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p>
+                        {ALERTA_MOTIVO_LABEL[a.reason]} · <span className="text-muted-foreground">{a.detail}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {OBJETIVO_LABEL[a.survey.objective]} · prazo {formatDateTime(a.dueAt)} ·{" "}
+                        <span className={a.situacao === "vencido" ? "text-destructive" : undefined}>
+                          {SITUACAO_ALERTA_LABEL[a.situacao]}
+                        </span>
+                        {a.handledAt ? ` por ${a.handledByName ?? "alguém"} em ${formatDateTime(a.handledAt)}` : ""}
+                        {a.note ? ` · ${a.note}` : ""}
+                      </p>
+                    </div>
+                    {!a.handledAt && podeConvidar ? (
+                      <Button size="sm" variant="outline" disabled={ocupado} onClick={() => tratarAlerta(a)}>
+                        <CheckCircle2 />
+                        Tratar
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+
           {SURVEY_OBJECTIVES.map((o) => {
             const f = dados.frentes[o];
+            const passos = f ? (historico[f.inviteId] ?? []) : [];
             return (
               <Card key={o} className="p-4 sm:p-5">
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-base font-semibold">{OBJETIVO_LABEL[o]}</h2>
+                    <h2 className="text-base font-medium">{OBJETIVO_LABEL[o]}</h2>
                     <p className="text-xs text-muted-foreground">{OBJETIVO_DESCRICAO[o]}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {f ? (
                       <>
-                        <Badge variant={CONVITE_VARIANT[f.status]}>{CONVITE_STATUS_LABEL[f.status]}</Badge>
+                        <EtapasDoParceiro convite={f} />
                         {f.nps !== null ? <Badge variant="info">NPS {f.nps}</Badge> : null}
+                        {podeConvidar && f.status === "completed" ? (
+                          f.validatedAt ? (
+                            <Button variant="ghost" size="sm" disabled={ocupado} onClick={() => validar(f.surveyId, f.inviteId, true)} title="Desfazer a validação">
+                              <Undo2 />
+                              Desfazer validação
+                            </Button>
+                          ) : (
+                            <Button size="sm" disabled={ocupado} onClick={() => validar(f.surveyId, f.inviteId, false)}>
+                              <BadgeCheck />
+                              Validar dados
+                            </Button>
+                          )
+                        ) : null}
+                        {podeConvidar && ABERTOS.includes(f.status) ? (
+                          <Button variant="outline" size="sm" onClick={() => setRegistrando({ surveyId: f.surveyId, inviteId: f.inviteId })}>
+                            <ClipboardList />
+                            Registrar passo
+                          </Button>
+                        ) : null}
                         <Button variant="ghost" size="sm" asChild>
                           <Link href={`/pesquisas/${f.surveyId}`}>
                             <ExternalLink />
@@ -250,10 +366,25 @@ export default function ParceiroPage() {
                   <p className="text-sm text-muted-foreground">Ainda não foi convidado nesta frente.</p>
                 ) : (
                   <>
-                    <p className="mb-4 text-xs text-muted-foreground">
+                    <p className="mb-1 text-xs text-muted-foreground">
                       Convidado em {formatDate(f.createdAt)}
                       {f.completedAt ? ` · concluiu em ${formatDate(f.completedAt)}` : ` · ${f.respondidas} de ${f.total} respondidas`}
+                      {f.validatedAt ? ` · validado por ${f.validatedByName ?? "alguém"} em ${formatDate(f.validatedAt)}` : ""}
                     </p>
+                    <div className="mb-4 grid gap-1">
+                      <ProximoPassoDaRegua convite={f} />
+                      {passos.length > 0 ? (
+                        <ul className="text-xs text-muted-foreground">
+                          {passos.map((p) => (
+                            <li key={p.id}>
+                              {formatDateTime(p.at)} · {PASSO_LABEL[p.kind]}
+                              {p.byName ? ` · ${p.byName}` : ""}
+                              {p.note ? ` — ${p.note}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
                     {f.respondidas === 0 ? (
                       <p className="text-sm text-muted-foreground">Nenhuma resposta ainda.</p>
                     ) : (
@@ -266,6 +397,20 @@ export default function ParceiroPage() {
           })}
         </div>
       )}
+
+      {registrando ? (
+        <RegistroDePasso
+          surveyId={registrando.surveyId}
+          inviteId={registrando.inviteId}
+          parceiro={dados?.contact.name ?? "Parceiro"}
+          aberto
+          onFechar={() => setRegistrando(null)}
+          onRegistrado={(m) => {
+            setAviso(m);
+            carregar();
+          }}
+        />
+      ) : null}
 
       <Dialog open={convidando !== null} onOpenChange={(open) => !open && setConvidando(null)}>
         <DialogContent>

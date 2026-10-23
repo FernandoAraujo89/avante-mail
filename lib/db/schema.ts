@@ -1323,6 +1323,12 @@ export interface SurveyQuestionOptions {
   minLabel?: string;
   maxLabel?: string;
   unit?: string;
+  /**
+   * Escolhas que, marcadas, geram ALERTA DE RISCO para a Expansão (projeto
+   * Mapeamento da Parceria: "risco de continuidade" → contato em 48h). Só
+   * para escolha única/múltipla; a nota do NPS tem regra própria (0 a 6).
+   */
+  alertOn?: string[];
 }
 
 /** O que uma resposta guarda: texto, número, sim/não ou escolhas. */
@@ -1429,6 +1435,16 @@ export const surveyInvites = pgTable(
     closedAt: timestamp("closed_at", { withTimezone: true }),
     remindersSent: integer("reminders_sent").notNull().default(0),
     lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+    // Etapa 5 do projeto (Mapeamento da Parceria): a Expansão VALIDOU os
+    // dados de uma resposta concluída. Não é status — concluído continua
+    // concluído; é um carimbo por cima.
+    validatedAt: timestamp("validated_at", { withTimezone: true }),
+    validatedByUserId: uuid("validated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    validatedByName: text("validated_by_name"),
+    /** Por que foi encerrado: "sem_resposta" (D+14 da régua) ou nulo (manual). */
+    closedReason: text("closed_reason").$type<SurveyInviteClosedReason>(),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -1470,6 +1486,100 @@ export const surveyAnswers = pgTable(
       t.questionId
     ),
     index("survey_answers_pergunta_idx").on(t.questionId),
+  ]
+);
+
+// ─── Mapeamento da Parceria (projeto da Expansão, 23/10/2026) ──────────────
+// O que o projeto pede além das pesquisas: classificação e responsável por
+// parceiro, a régua de follow-up (D+7 mensagem, D+10 ligação, D+14 reunião ou
+// "sem resposta"), a validação dos dados e os alertas de risco com prazo de
+// 48h. Tudo ao lado do que já existe: nada aqui muda campanha ou contato.
+
+export const SURVEY_INVITE_CLOSED_REASONS = ["sem_resposta"] as const;
+export type SurveyInviteClosedReason = (typeof SURVEY_INVITE_CLOSED_REASONS)[number];
+
+/** Classificação do parceiro (abordagem por classificação: Diamante e Ouro primeiro). */
+export const PARTNER_TIERS = ["diamante", "ouro", "prata", "bronze"] as const;
+export type PartnerTier = (typeof PARTNER_TIERS)[number];
+
+/** Dados da Expansão sobre o parceiro. Uma linha por contato, só quando há algo a dizer. */
+export const partnerProfiles = pgTable("partner_profiles", {
+  contactId: uuid("contact_id")
+    .primaryKey()
+    .references(() => contacts.id, { onDelete: "cascade" }),
+  tier: text("tier").$type<PartnerTier>(),
+  // Quem, na Expansão, responde por este parceiro (faz o D+7 em diante).
+  ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  ownerName: text("owner_name"),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Os passos da régua que a Expansão faz à mão e registra: mensagem pessoal
+ * (D+7), ligação (D+10), reunião (D+14), resposta assistida, ou "sem
+ * resposta" (que encerra o convite). Lembrete automático (D+3) já fica em
+ * campaign_sends e não entra aqui.
+ */
+export const SURVEY_FOLLOWUP_KINDS = [
+  "mensagem",
+  "ligacao",
+  "reuniao",
+  "resposta_assistida",
+  "sem_resposta",
+] as const;
+export type SurveyFollowupKind = (typeof SURVEY_FOLLOWUP_KINDS)[number];
+
+export const surveyFollowups = pgTable(
+  "survey_followups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inviteId: uuid("invite_id")
+      .notNull()
+      .references(() => surveyInvites.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<SurveyFollowupKind>().notNull(),
+    note: text("note"),
+    byUserId: uuid("by_user_id").references(() => users.id, { onDelete: "set null" }),
+    byName: text("by_name"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("survey_followups_convite_idx").on(t.inviteId)]
+);
+
+/** Por que o alerta nasceu: nota do NPS de 0 a 6, ou escolha marcada como risco. */
+export const SURVEY_ALERT_REASONS = ["nps", "risco"] as const;
+export type SurveyAlertReason = (typeof SURVEY_ALERT_REASONS)[number];
+
+export const surveyAlerts = pgTable(
+  "survey_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    inviteId: uuid("invite_id")
+      .notNull()
+      .references(() => surveyInvites.id, { onDelete: "cascade" }),
+    surveyId: uuid("survey_id")
+      .notNull()
+      .references(() => surveys.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id").references(() => surveyQuestions.id, { onDelete: "set null" }),
+    reason: text("reason").$type<SurveyAlertReason>().notNull(),
+    /** O que disparou: "NPS 4" ou "Existe alguma situação...: Sim". */
+    detail: text("detail").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Prazo do contato da Expansão (48h depois de nascer). */
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
+    handledByUserId: uuid("handled_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    handledByName: text("handled_by_name"),
+    note: text("note"),
+  },
+  (t) => [
+    index("survey_alerts_contato_idx").on(t.contactId),
+    // Um alerta por motivo por convite: concluir duas vezes não duplica.
+    uniqueIndex("survey_alerts_convite_motivo_idx").on(t.inviteId, t.reason),
+    index("survey_alerts_abertos_idx").on(t.dueAt).where(sql`${t.handledAt} is null`),
   ]
 );
 
@@ -1522,3 +1632,6 @@ export type SurveyInvite = typeof surveyInvites.$inferSelect;
 export type NewSurveyInvite = typeof surveyInvites.$inferInsert;
 export type SurveyAnswer = typeof surveyAnswers.$inferSelect;
 export type NewSurveyAnswer = typeof surveyAnswers.$inferInsert;
+export type PartnerProfile = typeof partnerProfiles.$inferSelect;
+export type SurveyFollowup = typeof surveyFollowups.$inferSelect;
+export type SurveyAlert = typeof surveyAlerts.$inferSelect;

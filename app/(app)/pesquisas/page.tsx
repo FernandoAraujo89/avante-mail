@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ClipboardCheck, CopyPlus, Pencil, Plus, Trash2, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { IndicadoresDoProjeto } from "@/components/pesquisas/indicadores-do-projeto";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -148,7 +149,7 @@ export default function PesquisasPage() {
     <>
       <PageHeader
         title="Pesquisas com parceiros"
-        description="As três frentes do acompanhamento: cada pesquisa tem um objetivo, e cada parceiro responde pelo link dele."
+        description="As três fases do Mapeamento da Parceria: cada pesquisa é uma fase, e cada parceiro responde pelo link dele."
       >
         <Button onClick={() => abrirNovo("dados_empresa")}>
           <Plus />
@@ -161,6 +162,8 @@ export default function PesquisasPage() {
           {error}
         </div>
       ) : null}
+
+      <IndicadoresDoProjeto />
 
       <div className="grid gap-6">
         {SURVEY_OBJECTIVES.map((obj) => {

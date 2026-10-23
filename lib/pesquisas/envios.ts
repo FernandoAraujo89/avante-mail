@@ -12,6 +12,7 @@ import {
   contacts,
   getDb,
   surveyAnswers,
+  partnerProfiles,
   surveyInvites,
   surveys,
   users,
@@ -21,6 +22,9 @@ import {
   type SurveyInviteStatus,
   type SurveyMessageKind,
   type WhatsAppTemplate,
+  type PartnerTier,
+  type SurveyFollowupKind,
+  type SurveyInviteClosedReason,
 } from "@/lib/db";
 import { naoEhLead } from "@/lib/leads";
 import { getEmailQueue, getWhatsAppQueue } from "@/lib/queue";
@@ -30,6 +34,7 @@ import { isLinhaConfigurada } from "@/lib/whatsapp/client";
 import type { WhatsAppVariableMap } from "@/lib/whatsapp/types";
 
 import { estaPendente, linkDoConvite } from "./convites";
+import { passosPorConvite, type PassoDto } from "./mapeamento-db";
 import {
   CHAVE_LEMBRETE_INTERVALO,
   CHAVE_LEMBRETE_MAXIMO,
@@ -94,6 +99,13 @@ export interface ConviteDto {
   closedAt: string | null;
   remindersSent: number;
   lastReminderAt: string | null;
+  // Mapeamento da Parceria: etapa 5 (validação), fim da régua e passos.
+  validatedAt: string | null;
+  validatedByName: string | null;
+  closedReason: SurveyInviteClosedReason | null;
+  /** Passos da régua já registrados pela Expansão neste convite. */
+  passos: SurveyFollowupKind[];
+  ultimoPasso: PassoDto | null;
   /** Perguntas respondidas / perguntas que pedem resposta. */
   respondidas: number;
   total: number;
@@ -123,6 +135,9 @@ export async function listarConvites(surveyId: string): Promise<ConviteDto[]> {
         closedAt: surveyInvites.closedAt,
         remindersSent: surveyInvites.remindersSent,
         lastReminderAt: surveyInvites.lastReminderAt,
+        validatedAt: surveyInvites.validatedAt,
+        validatedByName: surveyInvites.validatedByName,
+        closedReason: surveyInvites.closedReason,
         createdByName: surveyInvites.createdByName,
         respondidas: sql<number>`(
           select count(*) from survey_answers a where a.invite_id = survey_invites.id
@@ -177,6 +192,7 @@ export async function listarConvites(surveyId: string): Promise<ConviteDto[]> {
     });
   }
 
+  const passos = await passosPorConvite(linhas.map((l) => l.id));
   const base = getBaseUrl();
   return linhas.map((l) => ({
     id: l.id,
@@ -190,6 +206,11 @@ export async function listarConvites(surveyId: string): Promise<ConviteDto[]> {
     closedAt: iso(l.closedAt),
     remindersSent: l.remindersSent,
     lastReminderAt: iso(l.lastReminderAt),
+    validatedAt: iso(l.validatedAt),
+    validatedByName: l.validatedByName,
+    closedReason: l.closedReason,
+    passos: passos.get(l.id)?.kinds ?? [],
+    ultimoPasso: passos.get(l.id)?.ultimo ?? null,
     respondidas: l.respondidas,
     total: totais?.total ?? 0,
     ultimoEnvio: ultimo.get(l.id) ?? null,
@@ -559,6 +580,8 @@ export interface ParceiroEncontrado {
   phone: string | null;
   /** Já tem convite em aberto nesta pesquisa (não entra de novo). */
   convidado: boolean;
+  /** Classificação do parceiro (Mapeamento da Parceria), se definida. */
+  tier: PartnerTier | null;
 }
 
 export const BUSCA_DE_PARCEIROS_LIMITE = 100;
@@ -572,9 +595,39 @@ export async function buscarParceiros(args: {
   surveyId: string;
   q: string;
   listId: string | null;
+  /** Só quem CONCLUIU esta outra pesquisa ("quem conclui a fase recebe a próxima"). */
+  concluiramSurveyId?: string | null;
+  /** Só parceiros desta classificação (abordagem por classificação). */
+  tier?: PartnerTier | null;
 }): Promise<{ parceiros: ParceiroEncontrado[]; total: number }> {
   const db = getDb();
   const condicoes = [naoEhLead()];
+  if (args.concluiramSurveyId) {
+    condicoes.push(
+      exists(
+        db
+          .select({ um: surveyInvites.id })
+          .from(surveyInvites)
+          .where(
+            and(
+              eq(surveyInvites.contactId, contacts.id),
+              eq(surveyInvites.surveyId, args.concluiramSurveyId),
+              eq(surveyInvites.status, "completed")
+            )
+          )
+      )
+    );
+  }
+  if (args.tier) {
+    condicoes.push(
+      exists(
+        db
+          .select({ um: partnerProfiles.contactId })
+          .from(partnerProfiles)
+          .where(and(eq(partnerProfiles.contactId, contacts.id), eq(partnerProfiles.tier, args.tier)))
+      )
+    );
+  }
   const termo = args.q.trim();
   if (termo) {
     const padrao = `%${termo}%`;
@@ -608,15 +661,17 @@ export async function buscarParceiros(args: {
           where i.contact_id = contacts.id and i.survey_id = ${args.surveyId}
             and i.status not in ('completed', 'closed')
         )`,
+        tier: partnerProfiles.tier,
       })
       .from(contacts)
+      .leftJoin(partnerProfiles, eq(partnerProfiles.contactId, contacts.id))
       .where(where)
       .orderBy(asc(contacts.name))
       .limit(BUSCA_DE_PARCEIROS_LIMITE),
   ]);
   return {
     total,
-    parceiros: linhas.map((l) => ({ ...l, convidado: Boolean(l.convidado) })),
+    parceiros: linhas.map((l) => ({ ...l, convidado: Boolean(l.convidado), tier: l.tier ?? null })),
   };
 }
 

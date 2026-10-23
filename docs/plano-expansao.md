@@ -476,3 +476,48 @@ linha em `app_settings`.
 **Testes:** regras puras com vitest (`lib/pesquisas/*.test.ts`,
 `lib/whatsapp/linhas.test.ts`, `lib/auth/google.test.ts`); fluxo completo com
 cookie jar de admin e Graph falsa, como nos planos anteriores.
+
+## 12. Mapeamento da Parceria — o projeto que o sistema sustenta (23/10/2026)
+
+A apresentação "Mapeamento da Parceria" (Expansão · white label) define o
+projeto para o qual as pesquisas existem. O que ela pede e onde o sistema
+responde:
+
+| O projeto pede | No sistema |
+|---|---|
+| Três fases, três formulários: F1 Diagnóstico e organização (identificação, carteira, produtos), F2 Nível de satisfação (operação/implantação/suporte + relacionamento, com NPS), F3 Melhorias (estratégia + prioridades e plano de 90 dias) | Os três objetivos de pesquisa viraram as fases (`OBJETIVO_LABEL`); o seed (`scripts/seed-pesquisas.ts --substituir`) monta cada fase com a composição da apresentação e as perguntas do documento da Expansão |
+| Fluxo: campanha → link → respondeu? → aba Expansão; não → régua de follow-up até D+10 → resposta assistida | Convite por e-mail/WhatsApp com link por parceiro; painel e ficha do parceiro; régua (abaixo) |
+| Régua: D0 convite, D+3 lembrete (Marketing), D+7 mensagem pessoal, D+10 ligação, D+14 reunião ou "sem resposta" (Expansão) | `lib/pesquisas/mapeamento.ts` (`REGUA`, `proximoPasso`): cada convite aberto mostra D+N e o próximo passo com atraso. A Expansão registra mensagem, ligação, reunião, resposta assistida ou "sem resposta" (`survey_followups`; "sem resposta" encerra o convite com `closed_reason`) na ficha do parceiro e no acompanhamento da pesquisa |
+| Cinco etapas por fase: Enviado · Abriu · Iniciou · Concluiu · Validado | `etapaDoConvite` + `survey_invites.validated_at/_by`; botão "Validar dados" (etapa 5) para resposta concluída; componente `EtapasDoParceiro` em todo lugar que mostrava só o status |
+| Aba Expansão: status, data da resposta e responsável por parceiro, filtro por fase e classificação | Painel de parceiros com colunas Saúde · Classificação · Responsável e filtros por fase, etapa, saúde, classificação e responsável; `partner_profiles` (classificação Diamante/Ouro/Prata/Bronze, responsável, notas) editável na ficha pela Expansão, só leitura para o Sucesso do cliente |
+| Alerta de risco: NPS de 0 a 6 ou "risco de continuidade" → contato da Expansão em 48h | Ao concluir, `criarAlertasDaConclusao` detecta NPS ≤ 6 e escolhas marcadas como risco (`options.alertOn`, configurável no editor por opção) e grava `survey_alerts` com prazo de 48h; tela **Alertas de risco** (em aberto / tratados) com "Tratar" e observação; o alerta aparece também na ficha do parceiro |
+| Mapa de saúde: Saudável · Atenção · Em risco | `saudeDoParceiro`: NPS 9–10 saudável, 7–8 atenção, 0–6 ou risco/alerta aberto em risco, sem nota = sem medição; badge no painel e na ficha, contagem na tela de pesquisas |
+| Indicadores: taxa de resposta por fase, base validada, NPS da base, alertas tratados em 48h | Bloco "Mapeamento da Parceria" no topo de /pesquisas (`/api/pesquisas/indicadores`) |
+| "Quem conclui a fase recebe a próxima"; abordagem por classificação (Diamante e Ouro antes) | No convite, o seletor de parceiros filtra "que concluíram a fase X" e por classificação |
+| Repetir a Fase 2 a cada semestre | Já existia: convite novo depois de concluído/encerrado é a rodada seguinte |
+| Piloto de 10 a 15 parceiros | Lista "carteira-piloto" + convite por lista ou um a um |
+
+**Modelo de dados (migração `migrate-mapeamento-parceria.ts`, só aditiva):**
+`partner_profiles` (contact_id PK, tier, owner_user_id, owner_name, notes);
+`survey_invites` + `validated_at`, `validated_by_user_id`, `validated_by_name`,
+`closed_reason`; `survey_followups` (invite_id, kind, note, by_*, at);
+`survey_alerts` (invite_id, survey_id, contact_id, question_id, reason, detail,
+due_at, handled_*, note; um por motivo por convite).
+`survey_questions.options.alertOn` (jsonb, sem migração).
+
+**APIs novas (prefixo `/api/pesquisas`, Expansão e admin; CS só lê o painel):**
+`PATCH /parceiros/[contactId]` (perfil), `GET /responsaveis`,
+`POST|DELETE /[id]/convites/[conviteId]/validar`,
+`GET|POST /[id]/convites/[conviteId]/passos`, `GET /alertas?estado=&contato=`,
+`PATCH /alertas/[alertaId]` ({acao:"tratar", note}), `GET /indicadores`;
+`GET /[id]/parceiros?concluiram=&classificacao=`.
+
+**Fora do sistema (ideias da apresentação que ficaram para depois):**
+pré-preencher CNPJ/licenças/classificação a partir dos exports Distribuidor e
+Contrato (precisa dos exports); devolutiva ao parceiro com o resumo do
+diagnóstico (dá para fazer com o e-mail transacional quando o texto existir).
+
+**Pontos de toque no que já existia:** `concluirConvite` chama a detecção de
+alertas DEPOIS de gravar a conclusão, em try/catch (falha não atrapalha o
+parceiro); `listarConvites`, `painelDeParceiros` e `buscarParceiros` só ganharam
+campos e filtros opcionais; rótulos das frentes passaram a ser as fases.

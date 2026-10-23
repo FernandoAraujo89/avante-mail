@@ -6,9 +6,11 @@ import { useParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  BadgeCheck,
   BarChart3,
   BellRing,
   CheckCircle2,
+  ClipboardList,
   Copy,
   CopyPlus,
   Eye,
@@ -29,6 +31,8 @@ import {
   BarraDeAndamento,
   BarraDeRespostas,
 } from "@/components/pesquisas/barra-de-andamento";
+import { ProximoPassoDaRegua } from "@/components/pesquisas/regua";
+import { RegistroDePasso } from "@/components/pesquisas/registro-de-passo";
 import { SeletorDeParceiros } from "@/components/pesquisas/seletor-de-parceiros";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +59,7 @@ import type { SurveyInviteStatus, SurveyStatus } from "@/lib/db/schema";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { ConviteDto, ResultadoConvite, ResultadoLembrete } from "@/lib/pesquisas/envios";
 import type { LimitesDeLembrete } from "@/lib/pesquisas/lembretes";
+import { PASSO_LABEL } from "@/lib/pesquisas/mapeamento";
 import {
   CONVITE_STATUS_LABEL,
   OBJETIVO_LABEL,
@@ -121,6 +126,9 @@ export default function AcompanhamentoPage() {
   const [escopoLembrete, setEscopoLembrete] = useState<"selecionados" | "pendentes">("pendentes");
   const [enviando, setEnviando] = useState(false);
   const [formError, setFormError] = useState("");
+
+  // Mapeamento da Parceria: registrar um passo da régua num convite.
+  const [registrando, setRegistrando] = useState<ConviteDto | null>(null);
 
   // Gerenciar a pesquisa: duplicar, mudar a situação, excluir.
   const [gerenciarAberto, setGerenciarAberto] = useState(false);
@@ -191,6 +199,20 @@ export default function AcompanhamentoPage() {
       else copia.add(conviteId);
       return copia;
     });
+  }
+
+  async function validar(c: ConviteDto, desfazer: boolean) {
+    setErro("");
+    setAviso("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}/convites/${c.id}/validar`, { method: desfazer ? "DELETE" : "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível validar.");
+      setAviso(desfazer ? `Validação de ${c.contact.name} desfeita.` : `Resposta de ${c.contact.name} validada.`);
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function copiarLink(c: ConviteDto) {
@@ -568,6 +590,7 @@ export default function AcompanhamentoPage() {
                   <TableHead>Convidado em</TableHead>
                   <TableHead>Último envio</TableHead>
                   <TableHead>Lembretes</TableHead>
+                  <TableHead>Régua</TableHead>
                   <TableActionsHead>Ações</TableActionsHead>
                 </TableRow>
               </TableHeader>
@@ -626,6 +649,23 @@ export default function AcompanhamentoPage() {
                           <span className="text-xs text-muted-foreground"> · {formatDateTime(c.lastReminderAt)}</span>
                         ) : null}
                       </TableCell>
+                      <TableCell>
+                        <div className="grid min-w-48 gap-0.5">
+                          <ProximoPassoDaRegua convite={c} />
+                          {c.validatedAt ? (
+                            <span className="text-xs text-success-dark">
+                              Validado{c.validatedByName ? ` por ${c.validatedByName}` : ""} · {formatDate(c.validatedAt)}
+                            </span>
+                          ) : c.closedReason === "sem_resposta" ? (
+                            <span className="text-xs text-muted-foreground">Sem resposta (régua encerrada)</span>
+                          ) : null}
+                          {c.ultimoPasso ? (
+                            <span className="text-xs text-muted-foreground" title={c.ultimoPasso.note ?? undefined}>
+                              Último: {PASSO_LABEL[c.ultimoPasso.kind]} · {formatDate(c.ultimoPasso.at)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </TableCell>
                       <TableActionsCell>
                         <Button
                           variant="ghost"
@@ -636,6 +676,28 @@ export default function AcompanhamentoPage() {
                         >
                           <Copy />
                         </Button>
+                        {pendente ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Registrar passo da régua para ${c.contact.name}`}
+                            title="Registrar passo da régua (mensagem, ligação, reunião, sem resposta)"
+                            onClick={() => setRegistrando(c)}
+                          >
+                            <ClipboardList />
+                          </Button>
+                        ) : null}
+                        {c.status === "completed" && !c.validatedAt ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Validar resposta de ${c.contact.name}`}
+                            title="Validar os dados (etapa 5)"
+                            onClick={() => validar(c, false)}
+                          >
+                            <BadgeCheck />
+                          </Button>
+                        ) : null}
                         {pendente ? (
                           <Button
                             variant="ghost"
@@ -689,6 +751,20 @@ export default function AcompanhamentoPage() {
           </div>
         )}
       </Card>
+
+      {registrando ? (
+        <RegistroDePasso
+          surveyId={id}
+          inviteId={registrando.id}
+          parceiro={registrando.contact.name}
+          aberto
+          onFechar={() => setRegistrando(null)}
+          onRegistrado={(m) => {
+            setAviso(m);
+            carregar();
+          }}
+        />
+      ) : null}
 
       <Dialog open={convidarAberto} onOpenChange={setConvidarAberto}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">

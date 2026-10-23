@@ -8,18 +8,24 @@ import type {
 } from "@/lib/db/schema";
 import type { WhatsAppVariableMap } from "@/lib/whatsapp/types";
 
+// As três fases do projeto Mapeamento da Parceria (Expansão, 23/10/2026):
+// cada objetivo é uma fase, e o parceiro passa por elas nessa ordem.
 export const OBJETIVO_LABEL: Record<SurveyObjective, string> = {
-  dados_empresa: "Dados da empresa",
-  nps: "Satisfação (NPS)",
-  crescimento: "Crescimento",
+  dados_empresa: "Fase 1 · Diagnóstico",
+  nps: "Fase 2 · Satisfação",
+  crescimento: "Fase 3 · Melhorias",
+};
+
+export const OBJETIVO_NOME_COMPLETO: Record<SurveyObjective, string> = {
+  dados_empresa: "Diagnóstico e organização",
+  nps: "Nível de satisfação",
+  crescimento: "Melhorias",
 };
 
 export const OBJETIVO_DESCRICAO: Record<SurveyObjective, string> = {
-  dados_empresa:
-    "Entender a realidade e o estado atual da empresa do parceiro.",
-  nps: "Medir o nível de satisfação do parceiro com a Avante.",
-  crescimento:
-    "Descobrir melhorias e ações que ajudem a empresa do parceiro a crescer.",
+  dados_empresa: "Quem é o parceiro, o tamanho da operação e o que ele vende.",
+  nps: "Como ele avalia a parceria, a operação e o suporte — e onde estão os riscos de saída.",
+  crescimento: "Metas, obstáculos e o plano de ação para os próximos 90 dias.",
 };
 
 /** A chamada do painel azul da página de resposta, por frente. */
@@ -56,7 +62,7 @@ export const TIPO_LABEL: Record<SurveyQuestionType, string> = {
 };
 
 export const CONVITE_STATUS_LABEL: Record<SurveyInviteStatus, string> = {
-  pending: "Convidado",
+  pending: "Enviado",
   opened: "Abriu",
   in_progress: "Respondendo",
   completed: "Concluída",

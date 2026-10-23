@@ -12,6 +12,8 @@ import {
   surveyQuestions,
   surveys,
   type SurveyAnswerValue,
+  type SurveyFollowupKind,
+  type SurveyInviteClosedReason,
   type SurveyInviteStatus,
   type SurveyObjective,
   type SurveyStatus,
@@ -20,6 +22,8 @@ import { getBaseUrl } from "@/lib/base-url";
 import { naoEhLead } from "@/lib/leads";
 
 import { linkDoConvite } from "./convites";
+import { saudeDoParceiro, type Saude } from "./mapeamento";
+import { passosPorConvite, perfisDosParceiros, sinaisDeAlerta, type PerfilDto } from "./mapeamento-db";
 import {
   relatorio,
   type ConviteDoRelatorio,
@@ -171,6 +175,14 @@ export interface FrenteDoParceiro {
   nps: number | null;
   /** O link do convite (para copiar da ficha do parceiro). */
   link: string;
+  // Mapeamento da Parceria: etapa 5, fim da régua, passos e risco assinalado.
+  validatedAt: string | null;
+  validatedByName: string | null;
+  closedReason: SurveyInviteClosedReason | null;
+  remindersSent: number;
+  passos: SurveyFollowupKind[];
+  /** Marcou uma escolha de risco neste convite (gerou alerta). */
+  riscoAssinalado: boolean;
 }
 
 export type FrentesDoParceiro = Record<SurveyObjective, FrenteDoParceiro | null>;
@@ -178,6 +190,11 @@ export type FrentesDoParceiro = Record<SurveyObjective, FrenteDoParceiro | null>
 export interface LinhaDoPainel {
   contact: { id: string; name: string; company: string | null };
   frentes: FrentesDoParceiro;
+  /** Classificação e responsável (Mapeamento da Parceria); nulo = nunca preenchido. */
+  perfil: PerfilDto | null;
+  /** Mapa de saúde: Saudável · Atenção · Em risco · Sem medição. */
+  saude: Saude;
+  alertasAbertos: number;
 }
 
 function frentesVazias(): FrentesDoParceiro {
@@ -188,9 +205,7 @@ function frentesVazias(): FrentesDoParceiro {
  * Convites mais recentes por (parceiro, frente), com progresso e nota do NPS.
  * Só parceiros (lead fica fora, como nas telas). `contactIds` restringe.
  */
-async function frentesPorParceiro(
-  contactIds: string[] | null
-): Promise<Map<string, { contact: LinhaDoPainel["contact"]; frentes: FrentesDoParceiro }>> {
+async function frentesPorParceiro(contactIds: string[] | null): Promise<Map<string, LinhaDoPainel>> {
   const db = getDb();
   if (contactIds && contactIds.length === 0) return new Map();
 
@@ -201,6 +216,10 @@ async function frentesPorParceiro(
       token: surveyInvites.token,
       createdAt: surveyInvites.createdAt,
       completedAt: surveyInvites.completedAt,
+      validatedAt: surveyInvites.validatedAt,
+      validatedByName: surveyInvites.validatedByName,
+      closedReason: surveyInvites.closedReason,
+      remindersSent: surveyInvites.remindersSent,
       surveyId: surveys.id,
       surveyName: surveys.name,
       objective: surveys.objective,
@@ -223,13 +242,16 @@ async function frentesPorParceiro(
     )
     .orderBy(desc(surveyInvites.createdAt));
 
-  const mapa = new Map<string, { contact: LinhaDoPainel["contact"]; frentes: FrentesDoParceiro }>();
+  const mapa = new Map<string, LinhaDoPainel>();
   const npsInvites: string[] = [];
   const base = getBaseUrl();
   for (const c of convites) {
-    const linha = mapa.get(c.contactId) ?? {
+    const linha: LinhaDoPainel = mapa.get(c.contactId) ?? {
       contact: { id: c.contactId, name: c.name, company: c.company },
       frentes: frentesVazias(),
+      perfil: null,
+      saude: "sem_medicao",
+      alertasAbertos: 0,
     };
     if (!linha.frentes[c.objective]) {
       linha.frentes[c.objective] = {
@@ -243,6 +265,12 @@ async function frentesPorParceiro(
         total: c.total,
         nps: null,
         link: linkDoConvite(base, c.token),
+        validatedAt: iso(c.validatedAt),
+        validatedByName: c.validatedByName,
+        closedReason: c.closedReason,
+        remindersSent: c.remindersSent,
+        passos: [],
+        riscoAssinalado: false,
       };
       if (c.objective === "nps") npsInvites.push(c.inviteId);
     }
@@ -261,6 +289,34 @@ async function frentesPorParceiro(
       if (f && porConvite.has(f.inviteId)) f.nps = porConvite.get(f.inviteId) ?? null;
     }
   }
+
+  // Mapeamento da Parceria: perfil, passos da régua, alertas e o mapa de saúde.
+  const ids = [...mapa.keys()];
+  const inviteIds = [...mapa.values()].flatMap((l) =>
+    SURVEY_OBJECTIVES.map((o) => l.frentes[o]?.inviteId).filter((id): id is string => Boolean(id))
+  );
+  const [perfis, passos, sinais] = await Promise.all([
+    perfisDosParceiros(ids),
+    passosPorConvite(inviteIds),
+    sinaisDeAlerta({ contactIds: ids, inviteIds }),
+  ]);
+  for (const linha of mapa.values()) {
+    linha.perfil = perfis.get(linha.contact.id) ?? null;
+    linha.alertasAbertos = sinais.abertosPorContato.get(linha.contact.id) ?? 0;
+    let riscoAssinalado = false;
+    for (const o of SURVEY_OBJECTIVES) {
+      const f = linha.frentes[o];
+      if (!f) continue;
+      f.passos = passos.get(f.inviteId)?.kinds ?? [];
+      f.riscoAssinalado = sinais.riscoPorConvite.has(f.inviteId);
+      riscoAssinalado ||= f.riscoAssinalado;
+    }
+    linha.saude = saudeDoParceiro({
+      nps: linha.frentes.nps?.nps ?? null,
+      riscoAssinalado,
+      alertaAberto: linha.alertasAbertos > 0,
+    });
+  }
   return mapa;
 }
 
@@ -278,11 +334,20 @@ export async function painelDeParceiros(listId: string | null): Promise<LinhaDoP
     .innerJoin(contacts, eq(contacts.id, contactLists.contactId))
     .where(and(eq(contactLists.listId, listId), naoEhLead()))
     .orderBy(asc(contacts.name));
-  const frentes = await frentesPorParceiro(membros.map((m) => m.id));
-  return membros.map((m) => ({
-    contact: { id: m.id, name: m.name, company: m.company },
-    frentes: frentes.get(m.id)?.frentes ?? frentesVazias(),
-  }));
+  const [frentes, perfis] = await Promise.all([
+    frentesPorParceiro(membros.map((m) => m.id)),
+    perfisDosParceiros(membros.map((m) => m.id)),
+  ]);
+  return membros.map(
+    (m) =>
+      frentes.get(m.id) ?? {
+        contact: { id: m.id, name: m.name, company: m.company },
+        frentes: frentesVazias(),
+        perfil: perfis.get(m.id) ?? null,
+        saude: "sem_medicao" as const,
+        alertasAbertos: 0,
+      }
+  );
 }
 
 export async function frentesResumidasDoParceiro(contactId: string): Promise<FrentesDoParceiro> {
@@ -298,6 +363,9 @@ export interface FrenteComRespostas extends FrenteDoParceiro {
 export interface ParceiroDto {
   contact: { id: string; name: string; company: string | null };
   frentes: Record<SurveyObjective, FrenteComRespostas | null>;
+  perfil: PerfilDto | null;
+  saude: Saude;
+  alertasAbertos: number;
 }
 
 /** O parceiro nas 3 frentes, com as respostas do convite mais recente de cada. */
@@ -309,7 +377,8 @@ export async function frentesDoParceiro(contactId: string): Promise<ParceiroDto 
     .where(and(eq(contacts.id, contactId), naoEhLead()));
   if (!contact) return null;
 
-  const resumo = await frentesResumidasDoParceiro(contactId);
+  const linha = (await frentesPorParceiro([contactId])).get(contactId);
+  const resumo = linha?.frentes ?? frentesVazias();
   const frentes = Object.fromEntries(
     SURVEY_OBJECTIVES.map((o) => [o, null])
   ) as ParceiroDto["frentes"];
@@ -341,5 +410,13 @@ export async function frentesDoParceiro(contactId: string): Promise<ParceiroDto 
       respostas: Object.fromEntries(respostas.map((r) => [r.questionId, r.value])),
     };
   }
-  return { contact, frentes };
+  // Sem convite nenhum, o perfil ainda pode existir (classificação dada antes do convite).
+  const perfil = linha?.perfil ?? (await perfisDosParceiros([contactId])).get(contactId) ?? null;
+  return {
+    contact,
+    frentes,
+    perfil,
+    saude: linha?.saude ?? "sem_medicao",
+    alertasAbertos: linha?.alertasAbertos ?? 0,
+  };
 }

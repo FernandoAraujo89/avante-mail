@@ -180,6 +180,7 @@ export function EditorPergunta({
           <span className="hidden shrink-0 items-center gap-1 sm:flex">
             {pergunta.required ? <Badge variant="secondary">Obrigatória</Badge> : null}
             {pergunta.isNps ? <Badge variant="info">NPS</Badge> : null}
+            {(o.alertOn?.length ?? 0) > 0 ? <Badge variant="warning">Alerta de risco</Badge> : null}
             {tipoTravado ? (
               <Badge variant="outline" title="Já tem respostas: o tipo não muda; remover arquiva.">
                 {pergunta.answerCount} resp.
@@ -269,6 +270,36 @@ export function EditorPergunta({
                 <input type="checkbox" className="h-4 w-4 accent-primary" checked={o.other === true} onChange={(e) => opcoes({ other: e.target.checked })} />
                 Permitir &quot;Outro&quot; com texto livre
               </label>
+              {(o.choices ?? []).some((c) => c.trim()) ? (
+                <fieldset className="grid gap-1.5 rounded-lg border border-border px-3 py-2">
+                  <legend className="px-1 text-sm">Gera alerta de risco quando a resposta for</legend>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {(o.choices ?? [])
+                      .map((c) => c.trim())
+                      .filter(Boolean)
+                      .map((c) => (
+                        <label key={c} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-primary"
+                            checked={(o.alertOn ?? []).includes(c)}
+                            onChange={(e) =>
+                              opcoes({
+                                alertOn: e.target.checked
+                                  ? [...(o.alertOn ?? []), c]
+                                  : (o.alertOn ?? []).filter((a) => a !== c),
+                              })
+                            }
+                          />
+                          {c}
+                        </label>
+                      ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    A Expansão recebe um alerta com prazo de 48h para fazer contato (Mapeamento da Parceria).
+                  </p>
+                </fieldset>
+              ) : null}
             </div>
           ) : null}
 

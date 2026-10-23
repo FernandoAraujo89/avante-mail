@@ -15,6 +15,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ParceiroEncontrado } from "@/lib/pesquisas/envios";
+import { PARTNER_TIERS } from "@/lib/db/schema";
+import { TIER_LABEL } from "@/lib/pesquisas/mapeamento";
+import { OBJETIVO_LABEL, type PesquisaResumoDto } from "@/lib/pesquisas/rotulos";
 
 // Escolher parceiros um a um para o convite: busca por nome, empresa ou
 // e-mail, dentro de uma lista ou em todas; quem já está convidado nesta
@@ -36,6 +39,23 @@ export function SeletorDeParceiros({
 }) {
   const [q, setQ] = useState("");
   const [lista, setLista] = useState(TODAS);
+  // Projeto: "quem conclui a fase recebe a próxima" e abordagem por classificação.
+  const [concluiram, setConcluiram] = useState(TODAS);
+  const [tier, setTier] = useState(TODAS);
+  const [pesquisas, setPesquisas] = useState<PesquisaResumoDto[]>([]);
+
+  useEffect(() => {
+    let ativo = true;
+    fetch("/api/pesquisas")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((lista: PesquisaResumoDto[]) => {
+        if (ativo) setPesquisas(lista.filter((p) => p.id !== surveyId));
+      })
+      .catch(() => {});
+    return () => {
+      ativo = false;
+    };
+  }, [surveyId]);
   const [resultado, setResultado] = useState<{ parceiros: ParceiroEncontrado[]; total: number } | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
@@ -48,6 +68,8 @@ export function SeletorDeParceiros({
         const p = new URLSearchParams();
         if (q.trim()) p.set("q", q.trim());
         if (lista !== TODAS) p.set("lista", lista);
+        if (concluiram !== TODAS) p.set("concluiram", concluiram);
+        if (tier !== TODAS) p.set("classificacao", tier);
         const res = await fetch(`/api/pesquisas/${surveyId}/parceiros?${p.toString()}`);
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Erro ao buscar parceiros.");
@@ -65,7 +87,7 @@ export function SeletorDeParceiros({
       ativo = false;
       clearTimeout(timer);
     };
-  }, [q, lista, surveyId]);
+  }, [q, lista, concluiram, tier, surveyId]);
 
   const elegiveis = (resultado?.parceiros ?? []).filter((p) => !p.convidado);
 
@@ -115,6 +137,41 @@ export function SeletorDeParceiros({
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="busca-concluiram">Que concluíram a fase</Label>
+          <Select value={concluiram} onValueChange={setConcluiram}>
+            <SelectTrigger id="busca-concluiram">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODAS}>Qualquer parceiro</SelectItem>
+              {pesquisas.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {OBJETIVO_LABEL[p.objective]} · {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="busca-tier">Classificação</Label>
+          <Select value={tier} onValueChange={setTier}>
+            <SelectTrigger id="busca-tier">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODAS}>Qualquer classificação</SelectItem>
+              {PARTNER_TIERS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {TIER_LABEL[t]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
