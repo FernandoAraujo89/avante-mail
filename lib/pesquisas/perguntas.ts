@@ -338,3 +338,27 @@ export function parseMensagens(body: unknown): ParseMensagens {
   }
 }
 
+
+/**
+ * O problema de UMA pergunta como o construtor a vê (antes de salvar), em
+ * português e curto — aparece na própria linha. Null = está em ordem.
+ */
+export function problemaDaPergunta(p: {
+  type: SurveyQuestionType;
+  label: string;
+  options: SurveyQuestionOptions | null;
+}): string | null {
+  if (!p.label.trim()) return p.type === "section" ? "Dê um título à seção." : "Escreva o enunciado.";
+  if (p.label.trim().length > LIMITES.rotulo) return `No máximo ${LIMITES.rotulo} caracteres.`;
+  if (p.type === "single_choice" || p.type === "multiple_choice") {
+    const escolhas = (p.options?.choices ?? []).map((c) => c.trim()).filter(Boolean);
+    if (escolhas.length < 2) return "Precisa de pelo menos 2 opções.";
+    if (new Set(escolhas.map((c) => c.toLowerCase())).size !== escolhas.length) return "Há opções repetidas.";
+  }
+  if (p.type === "scale") {
+    const min = p.options?.min ?? 0;
+    const max = p.options?.max ?? 10;
+    if (max <= min) return "O máximo da escala precisa ser maior que o mínimo.";
+  }
+  return null;
+}

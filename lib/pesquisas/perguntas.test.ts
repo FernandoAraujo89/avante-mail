@@ -4,6 +4,7 @@ import {
   diffPerguntas,
   parsePerguntas,
   parsePesquisa,
+  problemaDaPergunta,
   transicaoDeStatus,
   type PerguntaEntrada,
 } from "./perguntas";
@@ -136,5 +137,21 @@ describe("transicaoDeStatus", () => {
     expect(transicaoDeStatus("active", "draft", 1).ok).toBe(false);
     expect(transicaoDeStatus("draft", "closed", 1).ok).toBe(false);
     expect(transicaoDeStatus("active", "active", 1).ok).toBe(true);
+  });
+});
+
+describe("problemaDaPergunta", () => {
+  it("aponta o que o construtor precisa corrigir, em uma frase", () => {
+    expect(problemaDaPergunta({ type: "short_text", label: " ", options: null })).toBe("Escreva o enunciado.");
+    expect(problemaDaPergunta({ type: "section", label: "", options: null })).toBe("Dê um título à seção.");
+    expect(problemaDaPergunta({ type: "single_choice", label: "x", options: { choices: ["a", " "] } })).toBe(
+      "Precisa de pelo menos 2 opções."
+    );
+    expect(problemaDaPergunta({ type: "multiple_choice", label: "x", options: { choices: ["a", "A"] } })).toBe(
+      "Há opções repetidas."
+    );
+    expect(problemaDaPergunta({ type: "scale", label: "x", options: { min: 1, max: 1 } })).toMatch(/máximo/);
+    expect(problemaDaPergunta({ type: "scale", label: "x", options: { min: 0, max: 10 } })).toBeNull();
+    expect(problemaDaPergunta({ type: "yes_no", label: "ok", options: null })).toBeNull();
   });
 });

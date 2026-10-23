@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Eye, Heading, Plus, Save } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Eye, Save, Undo2 } from "lucide-react";
 
-import { PageHeader } from "@/components/page-header";
 import {
   EditorPergunta,
   type PerguntaLocal,
@@ -14,6 +13,7 @@ import {
   FormularioPesquisa,
   type Respostas,
 } from "@/components/pesquisas/formulario-pesquisa";
+import { ChipsDeTipo } from "@/components/pesquisas/tipo-de-pergunta";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +21,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -34,7 +35,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { SurveyAnswerValue, SurveyStatus } from "@/lib/db/schema";
+import type { SurveyAnswerValue, SurveyQuestionType, SurveyStatus } from "@/lib/db/schema";
+import { formatTime } from "@/lib/format";
+import { assuntoPadrao, corpoPadrao } from "@/lib/pesquisas/mensagens";
+import { opcoesPadrao, problemaDaPergunta } from "@/lib/pesquisas/perguntas";
+import { progresso } from "@/lib/pesquisas/respostas";
+import {
+  OBJETIVO_LABEL,
+  STATUS_LABEL,
+  type PesquisaDto,
+} from "@/lib/pesquisas/rotulos";
 import { modeloTemLinkDinamico } from "@/lib/pesquisas/whatsapp";
 import {
   extractVariables,
@@ -43,14 +53,13 @@ import {
   type WhatsAppVariableMap,
   type WhatsAppVariableSource,
 } from "@/lib/whatsapp/types";
-import { assuntoPadrao, corpoPadrao } from "@/lib/pesquisas/mensagens";
-import { opcoesPadrao } from "@/lib/pesquisas/perguntas";
-import { progresso } from "@/lib/pesquisas/respostas";
-import {
-  OBJETIVO_LABEL,
-  STATUS_LABEL,
-  type PesquisaDto,
-} from "@/lib/pesquisas/rotulos";
+import { cn } from "@/lib/utils";
+
+// O construtor da pesquisa. Três abas (perguntas, textos, convite) para a
+// tela mostrar só o que se está fazendo; a lista de perguntas em linhas que
+// abrem para editar; a barra fixa diz o estado (salvo / não salvo / com
+// problema) e guarda a única ação primária. Remover tem "desfazer";
+// arquivar e descartar pedem confirmação. Ctrl/Cmd+S salva.
 
 const STATUS_VARIANT: Record<SurveyStatus, "secondary" | "success" | "warning"> = {
   draft: "secondary",
@@ -58,7 +67,8 @@ const STATUS_VARIANT: Record<SurveyStatus, "secondary" | "success" | "warning"> 
   closed: "warning",
 };
 
-/** O que a tela precisa de um modelo de WhatsApp para o convite. */
+type Aba = "perguntas" | "textos" | "convite";
+
 type ModeloDto = {
   id: string;
   name: string;
@@ -68,11 +78,26 @@ type ModeloDto = {
 };
 
 const SEM_MODELO = "__nenhum__";
+const DESFAZER_MS = 8000;
 
 function chaveNova(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `nova-${Date.now()}-${Math.random()}`;
+}
+
+function paraLocal(p: PesquisaDto): PerguntaLocal[] {
+  return p.questions.map((q) => ({
+    chave: q.id,
+    id: q.id,
+    type: q.type,
+    label: q.label,
+    help: q.help ?? "",
+    required: q.required,
+    options: q.options,
+    isNps: q.isNps,
+    answerCount: q.answerCount,
+  }));
 }
 
 /** O que vai para a API, sem a chave local. */
@@ -93,7 +118,8 @@ export default function EditarPesquisaPage() {
 
   const [pesquisa, setPesquisa] = useState<PesquisaDto | null>(null);
   const [erro, setErro] = useState("");
-  const [aviso, setAviso] = useState("");
+  const [salvoEm, setSalvoEm] = useState<Date | null>(null);
+  const [aba, setAba] = useState<Aba>("perguntas");
 
   const [nome, setNome] = useState("");
   const [intro, setIntro] = useState("");
@@ -106,8 +132,15 @@ export default function EditarPesquisaPage() {
   const [perguntas, setPerguntas] = useState<PerguntaLocal[]>([]);
   const [salvando, setSalvando] = useState(false);
 
+  const [abertas, setAbertas] = useState<Set<string>>(new Set());
+  const [focar, setFocar] = useState<string | null>(null);
+  const [removida, setRemovida] = useState<{ pergunta: PerguntaLocal; indice: number } | null>(null);
+  const [arquivando, setArquivando] = useState<PerguntaLocal | null>(null);
+  const [descartando, setDescartando] = useState(false);
+
   const [previa, setPrevia] = useState(false);
   const [respostasPrevia, setRespostasPrevia] = useState<Respostas>({});
+  const desfazerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const aplicar = useCallback((p: PesquisaDto) => {
     setPesquisa(p);
@@ -118,19 +151,7 @@ export default function EditarPesquisaPage() {
     setCorpoEmail(p.emailBody ?? "");
     setModeloId(p.whatsappTemplateId ?? SEM_MODELO);
     setVariaveis(p.whatsappVariables ?? {});
-    setPerguntas(
-      p.questions.map((q) => ({
-        chave: q.id,
-        id: q.id,
-        type: q.type,
-        label: q.label,
-        help: q.help ?? "",
-        required: q.required,
-        options: q.options,
-        isNps: q.isNps,
-        answerCount: q.answerCount,
-      }))
-    );
+    setPerguntas(paraLocal(p));
   }, []);
 
   const carregar = useCallback(async () => {
@@ -175,19 +196,7 @@ export default function EditarPesquisaPage() {
       emailBody: pesquisa.emailBody ?? "",
       whatsappTemplateId: pesquisa.whatsappTemplateId ?? SEM_MODELO,
       whatsappVariables: pesquisa.whatsappVariables ?? {},
-      perguntas: paraEnvio(
-        pesquisa.questions.map((q) => ({
-          chave: q.id,
-          id: q.id,
-          type: q.type,
-          label: q.label,
-          help: q.help ?? "",
-          required: q.required,
-          options: q.options,
-          isNps: q.isNps,
-          answerCount: q.answerCount,
-        }))
-      ),
+      perguntas: paraEnvio(paraLocal(pesquisa)),
     });
     const atual = JSON.stringify({
       nome,
@@ -211,44 +220,16 @@ export default function EditarPesquisaPage() {
     return () => window.removeEventListener("beforeunload", avisar);
   }, [sujo]);
 
-  function alterar(chave: string, patch: Partial<PerguntaLocal>) {
-    setPerguntas((lista) =>
-      lista.map((p) => (p.chave === chave ? { ...p, ...patch } : p))
-    );
-  }
+  // O que falta corrigir, por pergunta — a linha mostra, a barra soma.
+  const problemas = useMemo(() => new Map(perguntas.map((p) => [p.chave, problemaDaPergunta(p)])), [perguntas]);
+  const nProblemas = [...problemas.values()].filter(Boolean).length;
+  const nomeVazio = !nome.trim();
+  const podeSalvar = sujo && !salvando && nProblemas === 0 && !nomeVazio;
 
-  function mover(chave: string, direcao: -1 | 1) {
-    setPerguntas((lista) => {
-      const i = lista.findIndex((p) => p.chave === chave);
-      const j = i + direcao;
-      if (i < 0 || j < 0 || j >= lista.length) return lista;
-      const copia = [...lista];
-      [copia[i], copia[j]] = [copia[j], copia[i]];
-      return copia;
-    });
-  }
-
-  function adicionar(type: PerguntaLocal["type"]) {
-    setPerguntas((lista) => [
-      ...lista,
-      {
-        chave: chaveNova(),
-        id: null,
-        type,
-        label: "",
-        help: "",
-        required: false,
-        options: opcoesPadrao(type),
-        isNps: false,
-        answerCount: 0,
-      },
-    ]);
-  }
-
-  async function salvar() {
+  const salvar = useCallback(async () => {
+    if (!podeSalvar) return;
     setSalvando(true);
     setErro("");
-    setAviso("");
     try {
       const resCampos = await fetch(`/api/pesquisas/${id}`, {
         method: "PATCH",
@@ -274,17 +255,40 @@ export default function EditarPesquisaPage() {
       const jsonPerguntas = await resPerguntas.json();
       if (!resPerguntas.ok) throw new Error(jsonPerguntas.error ?? "Erro ao salvar as perguntas.");
       aplicar(jsonPerguntas);
-      setAviso("Pesquisa salva.");
+      setAbertas(new Set());
+      setSalvoEm(new Date());
     } catch (err) {
-      setErro(err instanceof Error ? err.message : String(err));
+      const mensagem = err instanceof Error ? err.message : String(err);
+      setErro(mensagem);
+      // "Pergunta N: …" — abre a pergunta com problema e vai até ela.
+      const m = /^Pergunta (\d+):/.exec(mensagem);
+      if (m) {
+        const alvo = perguntas[Number(m[1]) - 1];
+        if (alvo) {
+          setAba("perguntas");
+          setAbertas((a) => new Set(a).add(alvo.chave));
+          setTimeout(() => document.getElementById(`linha-${alvo.chave}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+        }
+      }
     } finally {
       setSalvando(false);
     }
-  }
+  }, [podeSalvar, id, nome, intro, agradecimento, assuntoEmail, corpoEmail, modeloId, variaveis, perguntas, aplicar]);
+
+  // Ctrl/Cmd+S salva — o atalho que todo editor tem.
+  useEffect(() => {
+    const atalho = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void salvar();
+      }
+    };
+    window.addEventListener("keydown", atalho);
+    return () => window.removeEventListener("keydown", atalho);
+  }, [salvar]);
 
   async function mudarStatus(status: SurveyStatus) {
     setErro("");
-    setAviso("");
     try {
       const res = await fetch(`/api/pesquisas/${id}`, {
         method: "PATCH",
@@ -294,11 +298,100 @@ export default function EditarPesquisaPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erro ao atualizar a pesquisa.");
       aplicar(json);
-      setAviso(`Pesquisa ${STATUS_LABEL[json.status as SurveyStatus].toLowerCase()}.`);
     } catch (err) {
       setErro(err instanceof Error ? err.message : String(err));
     }
   }
+
+  function descartar() {
+    if (pesquisa) aplicar(pesquisa);
+    setAbertas(new Set());
+    setDescartando(false);
+  }
+
+  // ── Perguntas ────────────────────────────────────────────────────────────
+
+  function alternarAberta(chave: string) {
+    setAbertas((a) => {
+      const copia = new Set(a);
+      if (copia.has(chave)) copia.delete(chave);
+      else copia.add(chave);
+      return copia;
+    });
+  }
+
+  function alterar(chave: string, patch: Partial<PerguntaLocal>) {
+    setPerguntas((lista) => lista.map((p) => (p.chave === chave ? { ...p, ...patch } : p)));
+  }
+
+  function mover(chave: string, direcao: -1 | 1) {
+    setPerguntas((lista) => {
+      const i = lista.findIndex((p) => p.chave === chave);
+      const j = i + direcao;
+      if (i < 0 || j < 0 || j >= lista.length) return lista;
+      const copia = [...lista];
+      [copia[i], copia[j]] = [copia[j], copia[i]];
+      return copia;
+    });
+  }
+
+  function adicionar(type: SurveyQuestionType) {
+    const chave = chaveNova();
+    setPerguntas((lista) => [
+      ...lista,
+      { chave, id: null, type, label: "", help: "", required: false, options: opcoesPadrao(type), isNps: false, answerCount: 0 },
+    ]);
+    setAbertas((a) => new Set(a).add(chave));
+    setFocar(chave);
+    setTimeout(() => document.getElementById(`linha-${chave}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  }
+
+  function duplicar(chave: string) {
+    setPerguntas((lista) => {
+      const i = lista.findIndex((p) => p.chave === chave);
+      if (i < 0) return lista;
+      const nova: PerguntaLocal = { ...lista[i], chave: chaveNova(), id: null, isNps: false, answerCount: 0 };
+      const copia = [...lista];
+      copia.splice(i + 1, 0, nova);
+      setAbertas((a) => new Set(a).add(nova.chave));
+      return copia;
+    });
+  }
+
+  function remover(pergunta: PerguntaLocal) {
+    if (pergunta.answerCount > 0) {
+      setArquivando(pergunta);
+      return;
+    }
+    const indice = perguntas.findIndex((p) => p.chave === pergunta.chave);
+    setPerguntas((lista) => lista.filter((p) => p.chave !== pergunta.chave));
+    setRemovida({ pergunta, indice });
+    if (desfazerTimer.current) clearTimeout(desfazerTimer.current);
+    desfazerTimer.current = setTimeout(() => setRemovida(null), DESFAZER_MS);
+  }
+
+  function desfazerRemocao() {
+    if (!removida) return;
+    setPerguntas((lista) => {
+      const copia = [...lista];
+      copia.splice(Math.min(removida.indice, copia.length), 0, removida.pergunta);
+      return copia;
+    });
+    setRemovida(null);
+    if (desfazerTimer.current) clearTimeout(desfazerTimer.current);
+  }
+
+  function confirmarArquivar() {
+    if (!arquivando) return;
+    setPerguntas((lista) => lista.filter((p) => p.chave !== arquivando.chave));
+    setArquivando(null);
+  }
+
+  useEffect(() => () => {
+    if (desfazerTimer.current) clearTimeout(desfazerTimer.current);
+  }, []);
+
+  // ── WhatsApp ─────────────────────────────────────────────────────────────
 
   const modelo = modelos.find((m) => m.id === modeloId) ?? null;
   const indicesDoModelo = modelo ? extractVariables(modelo.bodyText) : [];
@@ -315,8 +408,8 @@ export default function EditarPesquisaPage() {
     });
   }
 
-  // A pré-visualização usa a lista local: o que ainda não foi salvo também
-  // aparece. Pergunta nova usa a chave como id, só para o React.
+  // ── Pré-visualização (a lista local: o que ainda não foi salvo também) ───
+
   const perguntasDaPrevia = perguntas.map((p) => ({
     id: p.chave,
     type: p.type,
@@ -326,6 +419,8 @@ export default function EditarPesquisaPage() {
     options: p.options,
   }));
   const progressoPrevia = progresso(perguntasDaPrevia, respostasPrevia);
+  const nRespondiveis = perguntas.filter((p) => p.type !== "section").length;
+  const nObrigatorias = perguntas.filter((p) => p.required).length;
 
   let numero = 0;
 
@@ -337,313 +432,365 @@ export default function EditarPesquisaPage() {
     );
   }
 
+  const estado = salvando
+    ? "Salvando..."
+    : nProblemas > 0
+      ? `${nProblemas} pergunta${nProblemas === 1 ? "" : "s"} precisa${nProblemas === 1 ? "" : "m"} de atenção`
+      : nomeVazio
+        ? "Dê um nome à pesquisa"
+        : sujo
+          ? "Alterações não salvas"
+          : salvoEm
+            ? `Salvo às ${formatTime(salvoEm)}`
+            : "Tudo salvo";
+
+  const previaConteudo = (
+    <>
+      <p className="text-xs text-muted-foreground">
+        {progressoPrevia.respondidas} de {progressoPrevia.total} respondidas
+      </p>
+      {intro ? <p className="mt-2 text-sm whitespace-pre-line">{intro}</p> : null}
+      <div className="mt-4">
+        <FormularioPesquisa
+          perguntas={perguntasDaPrevia}
+          respostas={respostasPrevia}
+          onResposta={(pid: string, valor: SurveyAnswerValue | null) => setRespostasPrevia((r) => ({ ...r, [pid]: valor }))}
+        />
+      </div>
+      {agradecimento ? (
+        <p className="mt-6 border-t border-border pt-4 text-xs text-muted-foreground">Ao concluir: &quot;{agradecimento}&quot;</p>
+      ) : null}
+    </>
+  );
+
   return (
     <>
-      <div className="mb-6">
-        <Button variant="ghost" size="sm" asChild className="-ml-2 mb-4">
-          <Link href="/pesquisas">
-            <ArrowLeft />
-            Voltar para pesquisas
-          </Link>
-        </Button>
-        {pesquisa ? (
-          <PageHeader
-            title={pesquisa.name}
-            description={`${OBJETIVO_LABEL[pesquisa.objective]} · ${pesquisa.inviteCount} convidado${
-              pesquisa.inviteCount === 1 ? "" : "s"
-            } · ${pesquisa.completedCount} concluída${pesquisa.completedCount === 1 ? "" : "s"}`}
-          >
-            <Badge variant={STATUS_VARIANT[pesquisa.status]}>{STATUS_LABEL[pesquisa.status]}</Badge>
-            <Button variant="outline" onClick={() => setPrevia(true)}>
+      {/* Barra fixa: onde se está, em que estado, e a única ação primária. */}
+      <div className="sticky top-14 z-20 -mx-4 mb-6 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 md:top-0 md:-mx-8 md:px-8">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button variant="ghost" size="sm" asChild className="-ml-2">
+            <Link href={`/pesquisas/${id}`}>
+              <ArrowLeft />
+              Acompanhamento
+            </Link>
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-medium tracking-tight">{nome.trim() || "Pesquisa sem nome"}</h1>
+            <p className="truncate text-xs text-muted-foreground" aria-live="polite">
+              {pesquisa ? OBJETIVO_LABEL[pesquisa.objective] : ""} · <span className={cn(nProblemas > 0 || nomeVazio ? "text-destructive" : sujo ? "text-warning-dark" : "")}>{estado}</span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {pesquisa ? <Badge variant={STATUS_VARIANT[pesquisa.status]}>{STATUS_LABEL[pesquisa.status]}</Badge> : null}
+            <Button variant="outline" size="sm" className="xl:hidden" onClick={() => setPrevia(true)}>
               <Eye />
               Pré-visualizar
             </Button>
-            {pesquisa.status === "draft" ? (
-              <Button variant="outline" disabled={sujo} onClick={() => mudarStatus("active")}>
-                Ativar
+            {sujo ? (
+              <Button variant="ghost" size="sm" onClick={() => setDescartando(true)} disabled={salvando}>
+                Descartar
               </Button>
-            ) : pesquisa.status === "active" ? (
-              <Button variant="outline" disabled={sujo} onClick={() => mudarStatus("closed")}>
-                Encerrar
+            ) : pesquisa?.status === "draft" && nRespondiveis > 0 ? (
+              <Button variant="outline" size="sm" onClick={() => mudarStatus("active")} title="Libera convites e respostas">
+                <CheckCircle2 />
+                Ativar pesquisa
               </Button>
-            ) : (
-              <Button variant="outline" disabled={sujo} onClick={() => mudarStatus("active")}>
-                Reabrir
-              </Button>
-            )}
-            <Button onClick={salvar} disabled={salvando || !sujo}>
+            ) : null}
+            <Button size="sm" onClick={salvar} disabled={!podeSalvar} title="Ctrl/Cmd + S">
               <Save />
               {salvando ? "Salvando..." : "Salvar"}
             </Button>
-          </PageHeader>
-        ) : null}
+          </div>
+        </div>
       </div>
 
       {erro ? (
-        <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
+        <div role="alert" className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive-hover">
           {erro}
         </div>
       ) : null}
-      {aviso ? (
-        <div className="mb-4 rounded-lg border border-success-dark/30 bg-success-light/20 px-4 py-3 text-sm text-success-dark">
-          {aviso}
-        </div>
-      ) : null}
-      {sujo && pesquisa ? (
-        <p className="mb-4 text-xs text-muted-foreground">
-          Há alterações não salvas. Ativar, encerrar e reabrir ficam disponíveis depois de salvar.
-        </p>
-      ) : null}
 
-      {pesquisa ? (
-        <div className="grid gap-6">
-          <Card className="p-4 sm:p-5">
-            <h2 className="mb-3 text-sm font-semibold text-muted-foreground">A pesquisa</h2>
-            <div className="grid gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="pesquisa-nome">Nome</Label>
-                <Input
-                  id="pesquisa-nome"
-                  value={nome}
-                  maxLength={120}
-                  onChange={(e) => setNome(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="pesquisa-intro">
-                  Texto de abertura{" "}
-                  <span className="font-normal text-muted-foreground">
-                    (o parceiro lê antes das perguntas)
-                  </span>
-                </Label>
-                <Textarea
-                  id="pesquisa-intro"
-                  rows={3}
-                  value={intro}
-                  maxLength={2000}
-                  onChange={(e) => setIntro(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="pesquisa-thanks">
-                  Agradecimento{" "}
-                  <span className="font-normal text-muted-foreground">(depois de concluir)</span>
-                </Label>
-                <Textarea
-                  id="pesquisa-thanks"
-                  rows={2}
-                  value={agradecimento}
-                  maxLength={1000}
-                  onChange={(e) => setAgradecimento(e.target.value)}
-                />
-              </div>
-            </div>
-          </Card>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_26rem]">
+        <div className="min-w-0">
+          {/* Abas: cada uma é uma tarefa; o resto fica fora da vista. */}
+          <div className="mb-5 flex gap-1 rounded-lg bg-muted p-1" role="tablist" aria-label="Partes da pesquisa">
+            {(
+              [
+                ["perguntas", <>Perguntas<span className="hidden sm:inline"> ({nRespondiveis})</span></>],
+                ["textos", "Textos"],
+                ["convite", "Convite"],
+              ] as const
+            ).map(([valor, rotulo]) => (
+              <button
+                key={valor}
+                type="button"
+                role="tab"
+                aria-selected={aba === valor}
+                onClick={() => setAba(valor)}
+                className={cn(
+                  "flex-1 rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none",
+                  aba === valor ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {rotulo}
+              </button>
+            ))}
+          </div>
 
-          <Card className="p-4 sm:p-5">
-            <h2 className="mb-1 text-sm font-semibold text-muted-foreground">Convite por e-mail</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              O botão &quot;Responder pesquisa&quot; com o link de cada parceiro entra sozinho no fim.
-              Pode usar {"{{nome}}"}, {"{{empresa}}"} e {"{{pesquisa}}"}. Em branco, vale o texto padrão.
-            </p>
-            <div className="grid gap-4">
-              <div className="grid gap-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="pesquisa-email-assunto">Assunto</Label>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0 text-xs"
-                    onClick={() => setAssuntoEmail(assuntoPadrao(nome || "Pesquisa"))}
-                  >
-                    Usar o padrão
+          {aba === "perguntas" ? (
+            <div className="grid min-w-0 gap-4" role="tabpanel">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {nRespondiveis === 0
+                    ? "Comece pela primeira pergunta — escolha o tipo:"
+                    : `${nRespondiveis} pergunta${nRespondiveis === 1 ? "" : "s"}${nObrigatorias ? ` · ${nObrigatorias} obrigatória${nObrigatorias === 1 ? "" : "s"}` : ""}`}
+                </p>
+                {perguntas.length > 0 ? (
+                  <Button variant="ghost" size="sm" onClick={() => setAbertas(abertas.size ? new Set() : new Set(perguntas.map((p) => p.chave)))}>
+                    {abertas.size ? "Recolher todas" : "Expandir todas"}
                   </Button>
-                </div>
-                <Input
-                  id="pesquisa-email-assunto"
-                  value={assuntoEmail}
-                  maxLength={150}
-                  placeholder={assuntoPadrao(nome || "Pesquisa")}
-                  onChange={(e) => setAssuntoEmail(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="pesquisa-email-corpo">Texto</Label>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0 text-xs"
-                    onClick={() => setCorpoEmail(corpoPadrao())}
-                  >
-                    Usar o padrão
-                  </Button>
-                </div>
-                <Textarea
-                  id="pesquisa-email-corpo"
-                  rows={6}
-                  value={corpoEmail}
-                  maxLength={3000}
-                  placeholder={corpoPadrao()}
-                  onChange={(e) => setCorpoEmail(e.target.value)}
-                />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4 sm:p-5">
-            <h2 className="mb-1 text-sm font-semibold text-muted-foreground">Convite por WhatsApp</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Sai pelo número Avante Expansão com um modelo aprovado pela Meta que tenha um botão de
-              link terminando em {"{{1}}"} — é por ele que vai o link de cada parceiro.
-            </p>
-            <div className="grid gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="pesquisa-modelo">Modelo</Label>
-                <Select value={modeloId} onValueChange={setModeloId}>
-                  <SelectTrigger id="pesquisa-modelo">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SEM_MODELO}>Sem convite por WhatsApp</SelectItem>
-                    {modelos.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name}
-                        {m.status !== "approved"
-                          ? " (não aprovado)"
-                          : modeloTemLinkDinamico(m.buttons)
-                            ? ""
-                            : " (sem botão de link dinâmico)"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {pesquisa.whatsapp && !pesquisa.whatsapp.pronto && modeloId !== SEM_MODELO && !sujo ? (
-                  <p className="text-xs text-warning-dark">{pesquisa.whatsapp.motivo}</p>
                 ) : null}
               </div>
-              {modelo ? (
-                <div className="grid gap-3">
-                  <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm whitespace-pre-line">{modelo.bodyText}</p>
-                  {indicesDoModelo.length > 0 ? (
-                    <div className="grid gap-2">
-                      {indicesDoModelo.map((n) => {
-                        const fonte = variaveis[String(n)];
-                        return (
-                          <div key={n} className="grid gap-2 sm:grid-cols-[6rem_12rem_minmax(0,1fr)] sm:items-center">
-                            <Label htmlFor={`var-${n}`}>{`{{${n}}}`}</Label>
-                            <Select
-                              value={fonte?.source ?? ""}
-                              onValueChange={(v) => definirFonte(n, v as "name" | "company" | "static")}
-                            >
-                              <SelectTrigger id={`var-${n}`}>
-                                <SelectValue placeholder="Escolha a fonte" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="name">Nome do parceiro</SelectItem>
-                                <SelectItem value="company">Empresa do parceiro</SelectItem>
-                                <SelectItem value="static">Texto fixo</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {fonte?.source === "static" ? (
-                              <Input
-                                aria-label={`Texto fixo de {{${n}}}`}
-                                value={fonte.value ?? ""}
-                                onChange={(e) =>
-                                  setVariaveis((atual) => ({
-                                    ...atual,
-                                    [String(n)]: { source: "static", value: e.target.value },
-                                  }))
-                                }
-                              />
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+
+              <ChipsDeTipo onEscolher={adicionar} />
+
+              {removida ? (
+                <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-sm">
+                  <span>
+                    &quot;{removida.pergunta.label.trim() || "Pergunta sem enunciado"}&quot; removida.
+                  </span>
+                  <Button variant="outline" size="sm" onClick={desfazerRemocao}>
+                    <Undo2 />
+                    Desfazer
+                  </Button>
+                </div>
+              ) : null}
+
+              {perguntas.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center">
+                  <p className="text-sm">Nenhuma pergunta ainda.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Uma seção agrupa as perguntas seguintes em uma etapa para o parceiro. A escala 0–10 pode ser a pergunta do NPS.
+                  </p>
+                </div>
+              ) : (
+                <ol className="grid min-w-0 gap-2">
+                  {perguntas.map((p, i) => {
+                    if (p.type !== "section") numero += 1;
+                    return (
+                      <li key={p.chave} id={`linha-${p.chave}`} className="min-w-0">
+                        <EditorPergunta
+                          pergunta={p}
+                          numero={p.type === "section" ? null : numero}
+                          aberta={abertas.has(p.chave)}
+                          problema={problemas.get(p.chave) ?? null}
+                          ehPrimeira={i === 0}
+                          ehUltima={i === perguntas.length - 1}
+                          focarAoAbrir={focar === p.chave}
+                          onToggle={() => alternarAberta(p.chave)}
+                          onChange={(patch) => alterar(p.chave, patch)}
+                          onMover={(direcao) => mover(p.chave, direcao)}
+                          onDuplicar={() => duplicar(p.chave)}
+                          onRemover={() => remover(p)}
+                        />
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+
+              {perguntas.length >= 4 ? (
+                <div className="border-t border-border pt-4">
+                  <p className="mb-2 text-xs text-muted-foreground">Adicionar no fim:</p>
+                  <ChipsDeTipo onEscolher={adicionar} />
                 </div>
               ) : null}
             </div>
-          </Card>
+          ) : null}
 
-          <section aria-labelledby="perguntas-titulo">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 id="perguntas-titulo" className="text-sm font-semibold text-muted-foreground">
-                Perguntas ({perguntasDaPrevia.filter((p) => p.type !== "section").length})
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => adicionar("section")}>
-                  <Heading />
-                  Adicionar seção
-                </Button>
-                <Button size="sm" onClick={() => adicionar("short_text")}>
-                  <Plus />
-                  Adicionar pergunta
-                </Button>
+          {aba === "textos" ? (
+            <Card className="p-4 sm:p-5" role="tabpanel">
+              <div className="grid gap-5">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pesquisa-nome">Nome da pesquisa</Label>
+                  <Input id="pesquisa-nome" value={nome} maxLength={120} aria-invalid={nomeVazio || undefined} onChange={(e) => setNome(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">Aparece no painel azul da página do parceiro e nos relatórios.</p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pesquisa-intro">Texto de abertura</Label>
+                  <Textarea id="pesquisa-intro" rows={4} value={intro} maxLength={2000} onChange={(e) => setIntro(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">
+                    O parceiro lê antes de começar. Diga para que serve e quanto tempo leva. {intro.length}/2000
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pesquisa-thanks">Agradecimento</Label>
+                  <Textarea id="pesquisa-thanks" rows={2} value={agradecimento} maxLength={1000} onChange={(e) => setAgradecimento(e.target.value)} />
+                  <p className="text-xs text-muted-foreground">Aparece ao concluir. {agradecimento.length}/1000</p>
+                </div>
               </div>
-            </div>
+            </Card>
+          ) : null}
 
-            {perguntas.length === 0 ? (
-              <Card>
-                <p className="py-10 text-center text-sm text-muted-foreground">
-                  Nenhuma pergunta ainda. Adicione a primeira.
+          {aba === "convite" ? (
+            <div className="grid gap-4" role="tabpanel">
+              <Card className="p-4 sm:p-5">
+                <h2 className="text-base">Convite por e-mail</h2>
+                <p className="mt-1 mb-4 text-xs text-muted-foreground">
+                  O botão &quot;Responder pesquisa&quot; com o link de cada parceiro entra sozinho no fim. Pode usar {"{{nome}}"}, {"{{empresa}}"} e {"{{pesquisa}}"}. Em branco, vale o texto padrão.
                 </p>
+                <div className="grid gap-4">
+                  <div className="grid gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="pesquisa-email-assunto">Assunto</Label>
+                      <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setAssuntoEmail(assuntoPadrao(nome || "Pesquisa"))}>
+                        Usar o padrão
+                      </Button>
+                    </div>
+                    <Input id="pesquisa-email-assunto" value={assuntoEmail} maxLength={150} placeholder={assuntoPadrao(nome || "Pesquisa")} onChange={(e) => setAssuntoEmail(e.target.value)} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="pesquisa-email-corpo">Texto</Label>
+                      <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setCorpoEmail(corpoPadrao())}>
+                        Usar o padrão
+                      </Button>
+                    </div>
+                    <Textarea id="pesquisa-email-corpo" rows={6} value={corpoEmail} maxLength={3000} placeholder={corpoPadrao()} onChange={(e) => setCorpoEmail(e.target.value)} />
+                  </div>
+                </div>
               </Card>
-            ) : (
-              <div className="grid gap-3">
-                {perguntas.map((p, i) => {
-                  if (p.type !== "section") numero += 1;
-                  return (
-                    <EditorPergunta
-                      key={p.chave}
-                      pergunta={p}
-                      numero={p.type === "section" ? null : numero}
-                      ehPrimeira={i === 0}
-                      ehUltima={i === perguntas.length - 1}
-                      onChange={(patch) => alterar(p.chave, patch)}
-                      onMover={(direcao) => mover(p.chave, direcao)}
-                      onRemover={() =>
-                        setPerguntas((lista) => lista.filter((q) => q.chave !== p.chave))
-                      }
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </section>
+
+              <Card className="p-4 sm:p-5">
+                <h2 className="text-base">Convite por WhatsApp</h2>
+                <p className="mt-1 mb-4 text-xs text-muted-foreground">
+                  Sai pelo número Avante Expansão com um modelo aprovado pela Meta que tenha um botão de link terminando em {"{{1}}"} — por ele vai o link de cada parceiro.
+                </p>
+                <div className="grid gap-4">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="pesquisa-modelo">Modelo</Label>
+                    <Select value={modeloId} onValueChange={setModeloId}>
+                      <SelectTrigger id="pesquisa-modelo">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SEM_MODELO}>Sem convite por WhatsApp</SelectItem>
+                        {modelos.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name}
+                            {m.status !== "approved" ? " (não aprovado)" : modeloTemLinkDinamico(m.buttons) ? "" : " (sem botão de link dinâmico)"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {pesquisa?.whatsapp && !pesquisa.whatsapp.pronto && modeloId !== SEM_MODELO && !sujo ? (
+                      <p className="text-xs text-warning-dark">{pesquisa.whatsapp.motivo}</p>
+                    ) : null}
+                  </div>
+                  {modelo ? (
+                    <div className="grid gap-3">
+                      <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm whitespace-pre-line">{modelo.bodyText}</p>
+                      {indicesDoModelo.length > 0 ? (
+                        <div className="grid gap-2">
+                          {indicesDoModelo.map((n) => {
+                            const fonte = variaveis[String(n)];
+                            return (
+                              <div key={n} className="grid gap-2 sm:grid-cols-[6rem_12rem_minmax(0,1fr)] sm:items-center">
+                                <Label htmlFor={`var-${n}`}>{`{{${n}}}`}</Label>
+                                <Select value={fonte?.source ?? ""} onValueChange={(v) => definirFonte(n, v as "name" | "company" | "static")}>
+                                  <SelectTrigger id={`var-${n}`}>
+                                    <SelectValue placeholder="Escolha a fonte" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="name">Nome do parceiro</SelectItem>
+                                    <SelectItem value="company">Empresa do parceiro</SelectItem>
+                                    <SelectItem value="static">Texto fixo</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {fonte?.source === "static" ? (
+                                  <Input
+                                    aria-label={`Texto fixo de {{${n}}}`}
+                                    value={fonte.value ?? ""}
+                                    onChange={(e) => setVariaveis((atual) => ({ ...atual, [String(n)]: { source: "static", value: e.target.value } }))}
+                                  />
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+
+        {/* Pré-visualização ao vivo nas telas largas: o que o parceiro vê, enquanto se edita. */}
+        <aside className="hidden xl:block">
+          <div className="sticky top-20">
+            <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Eye className="size-3.5" aria-hidden />
+              Como o parceiro vê · pode responder para testar, nada é gravado
+            </p>
+            <div className="max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <h2 className="text-lg">{nome.trim() || "Pesquisa"}</h2>
+              {previaConteudo}
+            </div>
+          </div>
+        </aside>
+      </div>
 
       <Dialog open={previa} onOpenChange={setPrevia}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{nome || "Pesquisa"}</DialogTitle>
-            <DialogDescription>
-              É assim que o parceiro vê. Pode responder aqui para testar — nada é gravado.
-            </DialogDescription>
+            <DialogTitle>{nome.trim() || "Pesquisa"}</DialogTitle>
+            <DialogDescription>É assim que o parceiro vê. Pode responder aqui para testar — nada é gravado.</DialogDescription>
           </DialogHeader>
-          {intro ? <p className="text-sm whitespace-pre-line">{intro}</p> : null}
-          <p className="text-xs text-muted-foreground">
-            {progressoPrevia.respondidas} de {progressoPrevia.total} respondidas
-          </p>
-          <FormularioPesquisa
-            perguntas={perguntasDaPrevia}
-            respostas={respostasPrevia}
-            onResposta={(pid: string, valor: SurveyAnswerValue | null) =>
-              setRespostasPrevia((r) => ({ ...r, [pid]: valor }))
-            }
-          />
-          <div className="flex flex-col gap-2 border-t border-border pt-4">
-            <Button disabled>Concluir (na página real)</Button>
-            {agradecimento ? (
-              <p className="text-xs text-muted-foreground">Ao concluir: &quot;{agradecimento}&quot;</p>
-            ) : null}
-          </div>
+          {previaConteudo}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={arquivando !== null} onOpenChange={(open) => !open && setArquivando(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Arquivar a pergunta?</DialogTitle>
+            <DialogDescription>
+              &quot;{arquivando?.label}&quot; já tem {arquivando?.answerCount} resposta{arquivando?.answerCount === 1 ? "" : "s"}. Ela sai do formulário, mas as respostas continuam no relatório. Vale ao salvar.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArquivando(null)}>
+              Manter
+            </Button>
+            <Button variant="destructive" onClick={confirmarArquivar}>
+              Arquivar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={descartando} onOpenChange={setDescartando}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Descartar as alterações?</DialogTitle>
+            <DialogDescription>A pesquisa volta ao que está salvo. O que você mudou desde então se perde.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDescartando(false)}>
+              Continuar editando
+            </Button>
+            <Button variant="destructive" onClick={descartar}>
+              Descartar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <p className="sr-only" aria-live="polite">
+        {salvoEm ? `Pesquisa salva às ${formatTime(salvoEm)}` : ""}
+      </p>
     </>
   );
 }
