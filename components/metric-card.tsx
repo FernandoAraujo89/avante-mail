@@ -18,7 +18,7 @@ export function MetricCard({
       <CardContent className="flex items-start justify-between p-6">
         <div>
           <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight">{value}</p>
+          <p className="mt-2 text-3xl font-light tracking-tight tabular-nums">{value}</p>
           {hint ? (
             <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
           ) : null}

@@ -110,7 +110,7 @@ export function ConversationsInbox() {
         )}
       >
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-3xl font-medium tracking-tight">
             {minhasLinhas && minhasLinhas.length === 1
               ? `Conversas · ${LINHA_LABEL[minhasLinhas[0]]}`
               : "Conversas"}

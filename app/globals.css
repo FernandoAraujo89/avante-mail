@@ -113,12 +113,27 @@
 
   --font-sans: "NHaasGroteskDS", -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
+
+  /* Tipografia: o peso máximo em todo o sistema é o Medium (500). A
+     hierarquia vem do TAMANHO e do contraste de cor, não do negrito — os
+     utilitários font-semibold/font-bold continuam existindo no código, mas
+     rendem 500 (a família tem 300/400/500; 700 e 900 ficam fora). */
+  --font-weight-semibold: 500;
+  --font-weight-bold: 500;
+  --font-weight-extrabold: 500;
+  --font-weight-black: 500;
 }
 
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+}
+
+/* O mesmo teto para a ênfase semântica do HTML. */
+strong,
+b {
+  font-weight: 500;
 }
 
 ::-webkit-scrollbar {

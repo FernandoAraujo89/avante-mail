@@ -74,7 +74,7 @@ export function KpiTile({
       <CardContent className="p-5">
         <p className="text-sm text-muted-foreground">{label}</p>
         <div className="mt-2 flex items-end justify-between gap-2">
-          <p className="text-2xl font-bold tracking-tight">{value}</p>
+          <p className="text-2xl font-light tracking-tight tabular-nums">{value}</p>
           {sub ? (
             <p className="pb-0.5 text-sm text-muted-foreground">{sub}</p>
           ) : null}

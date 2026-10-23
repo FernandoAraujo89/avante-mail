@@ -169,7 +169,7 @@ export default function PesquisasPage() {
             <section key={obj} aria-labelledby={`objetivo-${obj}`}>
               <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
                 <div>
-                  <h2 id={`objetivo-${obj}`} className="text-base font-semibold">
+                  <h2 id={`objetivo-${obj}`} className="text-lg font-medium">
                     {OBJETIVO_LABEL[obj]}
                   </h2>
                   <p className="text-sm text-muted-foreground">{OBJETIVO_DESCRICAO[obj]}</p>
