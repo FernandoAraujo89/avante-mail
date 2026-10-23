@@ -1,14 +1,20 @@
-// Cria as 3 pesquisas sugeridas (uma por frente) como RASCUNHO, com perguntas
-// para o time da Expansão editar em vez de começar do zero. Só cria a frente
-// que ainda não tem nenhuma pesquisa — rodar de novo não duplica.
+// As 3 pesquisas do mapeamento da parceria (documento "mapeamento da
+// parceria" da Expansão, 23/10/2026), uma por frente, em RASCUNHO:
+//   dados_empresa — blocos 1 a 4 (identificação, carteira, produtos, operação)
+//   nps           — bloco 6 (relacionamento e percepção; a 0–10 é o NPS)
+//   crescimento   — blocos 5 e 7 (estratégia comercial; prioridades)
 //
-// NÃO é migração (o nome não casa com `migrate-*`): roda à mão, uma vez por
-// ambiente: `npx tsx scripts/seed-pesquisas.ts`
+// Sem argumento: cria só a frente que ainda não tem pesquisa (não duplica).
+// Com `--substituir`: nas frentes que já têm pesquisa SEM convites, troca o
+// nome, os textos e todas as perguntas pelas daqui; com convites, não mexe.
+//
+// NÃO é migração (o nome não casa com `migrate-*`): roda à mão —
+//   npx tsx scripts/seed-pesquisas.ts [--substituir]
 import { config } from "dotenv";
 import path from "path";
 config({ path: path.join(process.cwd(), ".env.local") });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import {
   getDb,
@@ -20,164 +26,241 @@ import {
 
 type Pergunta = Omit<NewSurveyQuestion, "surveyId" | "position">;
 
+const secao = (label: string, help: string): Pergunta => ({ type: "section", label, help });
+const curta = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({ type: "short_text", label, ...extra });
+const longa = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({ type: "long_text", label, ...extra });
+const numero = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({ type: "number", label, ...extra });
+const unica = (label: string, choices: string[], extra: Partial<Pergunta> & { other?: boolean } = {}): Pergunta => {
+  const { other, ...resto } = extra;
+  return { type: "single_choice", label, options: { choices, ...(other ? { other: true } : {}) }, ...resto };
+};
+const multipla = (label: string, choices: string[], extra: Partial<Pergunta> & { other?: boolean } = {}): Pergunta => {
+  const { other, ...resto } = extra;
+  return { type: "multiple_choice", label, options: { choices, ...(other ? { other: true } : {}) }, ...resto };
+};
+const escala1a5 = (label: string, extra: Partial<Pergunta> = {}): Pergunta => ({
+  type: "scale",
+  label,
+  options: { min: 1, max: 5, minLabel: "Muito baixo", maxLabel: "Muito alto" },
+  ...extra,
+});
+
+const SIM_PARCIAL_NAO = ["Sim", "Parcialmente", "Não"];
+const SEGMENTOS = ["Varejo", "Alimentação", "Agro", "Saúde", "Beleza", "Pet", "Serviços"];
+
 const SUGERIDAS: Record<
   SurveyObjective,
   { name: string; intro: string; thanks: string; perguntas: Pergunta[] }
 > = {
   dados_empresa: {
-    name: "Raio-X da empresa",
+    name: "Mapeamento da parceria — dados do parceiro",
     intro:
-      "Queremos conhecer melhor a sua empresa para apoiar você do jeito certo. Leva uns 5 minutos, e você pode parar e voltar depois pelo mesmo link.",
-    thanks: "Obrigado! Suas respostas ajudam a Avante a entender a sua realidade e a trabalhar junto com você.",
+      "Queremos entender quem é o parceiro e como a empresa está organizada: estrutura, carteira de clientes, produtos Avante em uso e operação. Leva uns 15 minutos — você pode parar e voltar depois pelo mesmo link.",
+    thanks:
+      "Obrigado! Com a realidade da sua empresa em mãos, a Expansão consegue apoiar você do jeito certo.",
     perguntas: [
-      { type: "section", label: "Sobre a empresa" },
-      { type: "short_text", label: "Nome da empresa (como os clientes conhecem)", required: true },
-      { type: "short_text", label: "Cidade e estado", required: true },
-      { type: "number", label: "Ano de fundação" },
-      {
-        type: "single_choice",
-        label: "Quantas pessoas trabalham na empresa hoje?",
-        required: true,
-        options: { choices: ["Só eu", "2 a 5", "6 a 10", "11 a 30", "31 a 100", "Mais de 100"] },
-      },
-      {
-        type: "single_choice",
-        label: "Faixa de faturamento mensal",
-        options: {
-          choices: [
-            "Até R$ 10 mil",
-            "R$ 10 mil a R$ 50 mil",
-            "R$ 50 mil a R$ 200 mil",
-            "R$ 200 mil a R$ 1 milhão",
-            "Acima de R$ 1 milhão",
-            "Prefiro não informar",
-          ],
-        },
-      },
-      {
-        type: "multiple_choice",
-        label: "Segmentos que a empresa atende",
-        options: {
-          choices: ["Varejo", "Alimentação", "Serviços", "Indústria", "Saúde", "Educação"],
-          other: true,
-        },
-      },
-      { type: "section", label: "Clientes e mercado" },
-      { type: "number", label: "Quantos clientes ativos a empresa tem hoje?", options: { unit: "clientes" } },
-      { type: "short_text", label: "Principais concorrentes na sua região" },
-      {
-        type: "single_choice",
-        label: "Como a empresa conquista a maior parte dos clientes?",
-        options: {
-          choices: ["Indicação", "Redes sociais", "Anúncios", "Equipe de vendas", "Parcerias"],
-          other: true,
-        },
-      },
-      { type: "long_text", label: "O que mais você quer que a Avante saiba sobre a sua empresa?" },
+      secao("Identificação e estrutura da empresa", "Entender quem é o parceiro e como a empresa está organizada."),
+      curta("Nome da empresa / razão social", { required: true }),
+      curta("CNPJ ou identificador interno do parceiro", { required: true }),
+      curta("Nome do responsável principal e cargo", { required: true }),
+      curta("Contato profissional: e-mail e telefone", { required: true }),
+      curta("Cidade, estado e regiões atendidas"),
+      unica("Há quanto tempo a empresa atua no mercado?", ["Até 2 anos", "3 a 5 anos", "6 a 10 anos", "Mais de 10 anos"]),
+      unica(
+        "Qual é a principal atividade da empresa?",
+        ["Software house", "Revenda de software", "Contabilidade", "Consultoria", "Serviços de TI"],
+        { other: true }
+      ),
+      unica("Quantas pessoas trabalham na empresa?", ["1 a 5", "6 a 10", "11 a 30", "31 a 100", "Mais de 100"]),
+      curta("Quantas pessoas atuam em vendas, implantação, suporte e gestão?", {
+        help: "Ex.: vendas 2 · implantação 1 · suporte 2 · gestão 1",
+      }),
+      unica("A empresa depende de uma única pessoa para decisões ou operação?", SIM_PARCIAL_NAO),
+
+      secao("Perfil e carteira de clientes", "Medir o tamanho da operação e o mercado em que o parceiro atua."),
+      unica("Quantos clientes ativos a empresa atende atualmente?", ["Até 20", "21 a 50", "51 a 100", "101 a 300", "Mais de 300"]),
+      numero("Quantos desses clientes utilizam soluções Avante?", { options: { unit: "clientes" }, help: "Número aproximado." }),
+      numero("Quantas licenças Avante estão ativas atualmente?", { options: { unit: "licenças" }, help: "Número aproximado." }),
+      unica("A empresa possui sistema próprio ou de outro fornecedor?", ["Sim", "Não"]),
+      curta("Se sim, qual sistema?"),
+      numero("Quantos clientes ainda utilizam o sistema próprio ou de terceiros?", { options: { unit: "clientes" }, help: "Número aproximado." }),
+      multipla("Quais segmentos representam a maior parte da carteira?", SEGMENTOS, { other: true }),
+      curta("Qual é a principal região de atuação?"),
+      multipla(
+        "Como a empresa conquista novos clientes?",
+        ["Indicação", "Prospecção ativa", "Marketing digital", "Carteira existente", "Parcerias"],
+        { other: true }
+      ),
+      unica("Existe uma carteira com potencial de migração para soluções Avante?", ["Sim", "Não", "Em avaliação"]),
+      numero("Se sim, quantos clientes ou licenças poderiam ser migrados nos próximos 12 meses?", {
+        options: { unit: "clientes ou licenças" },
+        help: "Número estimado.",
+      }),
+      curta("Em qual prazo essa migração poderia acontecer?"),
+
+      secao("Produtos Avante e utilização", "Entender quais soluções o parceiro comercializa, domina e utiliza."),
+      longa("Quais soluções Avante estão contratadas?", { help: "Liste conforme o catálogo Avante." }),
+      longa("Quais soluções o parceiro comercializa ativamente?"),
+      longa("Quais soluções já possuem clientes ativos?"),
+      longa("Quais produtos o parceiro ainda não vende, mas tem interesse em comercializar?"),
+      unica("A identidade visual, domínio e configurações necessárias estão concluídos?", [
+        "Sim",
+        "Parcialmente",
+        "Não",
+        "Não se aplica",
+      ]),
+      escala1a5("Como você avalia o domínio técnico dos produtos pela sua equipe?"),
+      escala1a5("Como você avalia o conhecimento comercial da sua equipe para demonstrar e vender as soluções?"),
+      longa("Quais funcionalidades ou integrações são essenciais para sua operação?"),
+      longa("Existem limitações de produto que impedem ou dificultam vendas?"),
+
+      secao("Operação, implantação e suporte", "Identificar gargalos que comprometem a entrega e a experiência do cliente final."),
+      unica(
+        "Como é realizada a implantação dos sistemas para os clientes finais?",
+        ["Processo interno", "Equipe dedicada", "Atuação conjunta com a Avante"],
+        { other: true }
+      ),
+      numero("Quantas pessoas estão preparadas para implantar as soluções Avante?", { options: { unit: "pessoas" } }),
+      unica("A equipe recebeu os treinamentos necessários?", SIM_PARCIAL_NAO),
+      curta("Se faltam treinamentos, quais?"),
+      unica(
+        "Como é feito o acompanhamento dos clientes após a implantação?",
+        ["Contato periódico", "Sob demanda", "Não existe processo formal"],
+        { other: true }
+      ),
+      longa("Qual é a principal dificuldade na implantação ou migração?"),
+      unica("Existem chamados recorrentes ou problemas que impactam muitos clientes?", ["Sim", "Não"]),
+      longa("Se sim, descreva os chamados ou problemas recorrentes."),
+      multipla(
+        "Quais demandas mais exigem esforço da equipe do parceiro?",
+        ["Treinamento", "Parametrização", "Suporte", "Migração", "Fiscal", "Integrações"],
+        { other: true }
+      ),
+      escala1a5("Como o parceiro avalia o suporte e o retorno das áreas da Avante?"),
+      longa("Justifique a avaliação do suporte e do retorno das áreas da Avante."),
+      longa("Quais demandas estão pendentes e precisam de acompanhamento?", {
+        help: "Descreva e, se houver, informe os números dos tickets.",
+      }),
     ],
   },
+
   nps: {
-    name: "Satisfação com a Avante",
+    name: "Mapeamento da parceria — satisfação",
     intro:
-      "Sua opinião orienta o que a Avante faz em seguida. São poucas perguntas — a primeira é a mais importante.",
-    thanks: "Obrigado pela sinceridade. Vamos usar isso para melhorar.",
+      "Queremos entender a qualidade da relação com a Avante e o que pode melhorar. São poucas perguntas — a primeira é a mais importante.",
+    thanks: "Obrigado pela sinceridade. Vamos usar isso para melhorar a parceria.",
     perguntas: [
+      secao("Relacionamento e percepção da parceria", "Entender a qualidade da relação e o risco de insatisfação."),
       {
         type: "scale",
-        label: "De 0 a 10, o quanto você recomendaria a Avante para outro empresário?",
+        label: "De 0 a 10, quanto você recomendaria a parceria Avante a outra software house?",
         required: true,
         isNps: true,
         options: { min: 0, max: 10, minLabel: "Não recomendaria", maxLabel: "Recomendaria com certeza" },
       },
-      { type: "long_text", label: "O que motivou a sua nota?", required: true },
-      {
-        type: "scale",
-        label: "Como você avalia o suporte da Avante?",
-        options: { min: 1, max: 5, minLabel: "Ruim", maxLabel: "Excelente" },
-      },
-      {
-        type: "scale",
-        label: "Como você avalia o produto?",
-        options: { min: 1, max: 5, minLabel: "Ruim", maxLabel: "Excelente" },
-      },
-      { type: "yes_no", label: "A Avante atendeu o que você esperava neste período?" },
-      { type: "long_text", label: "O que a Avante poderia fazer para merecer uma nota maior?" },
+      longa("Quais são os principais pontos positivos da parceria?"),
+      longa("O que mais precisa melhorar na parceria?"),
+      unica("Você sente que tem clareza sobre a quem recorrer para cada tipo de demanda?", SIM_PARCIAL_NAO),
+      escala1a5("Você considera que a Avante compreende as necessidades do seu negócio?", {
+        options: { min: 1, max: 5, minLabel: "Não compreende", maxLabel: "Compreende totalmente" },
+      }),
+      unica("Existe alguma situação que esteja colocando a continuidade da parceria em risco?", [
+        "Não",
+        "Sim",
+        "Prefiro conversar em reunião",
+      ]),
+      unica("Você considera ampliar, manter ou reduzir a operação com a Avante?", ["Ampliar", "Manter", "Reduzir", "Ainda não decidi"]),
+      longa("Qual é sua principal expectativa em relação ao Sucesso do Cliente?"),
     ],
   },
+
   crescimento: {
-    name: "Plano de crescimento",
+    name: "Mapeamento da parceria — crescimento e melhorias",
     intro:
-      "Queremos entender o que faria a sua empresa crescer mais — e onde a Avante pode ajudar de verdade.",
-    thanks: "Obrigado! A Expansão vai ler suas respostas e voltar a falar com você.",
+      "Queremos identificar o potencial real de expansão da sua empresa, os recursos necessários para realizá-lo e as prioridades dos próximos meses — para transformar o diagnóstico em ações concretas.",
+    thanks: "Obrigado! A Expansão vai ler suas respostas e voltar a falar com você com um plano.",
     perguntas: [
-      {
-        type: "single_choice",
-        label: "Qual é o principal objetivo da sua empresa para os próximos 12 meses?",
-        required: true,
-        options: {
-          choices: [
-            "Conquistar mais clientes",
-            "Aumentar o faturamento com os clientes atuais",
-            "Organizar processos internos",
-            "Contratar e formar equipe",
-            "Lançar novos produtos ou serviços",
-          ],
-          other: true,
-        },
-      },
-      {
-        type: "multiple_choice",
-        label: "Em que áreas a Avante pode ajudar mais a sua empresa a crescer?",
-        required: true,
-        options: {
-          choices: [
-            "Marketing e divulgação",
-            "Vendas e prospecção",
-            "Treinamento da equipe",
-            "Suporte técnico",
-            "Material comercial",
-            "Precificação e planos",
-            "Parcerias locais",
-          ],
-          other: true,
-        },
-      },
-      {
-        type: "scale",
-        label: "Quanto a Avante contribui hoje para o crescimento da sua empresa?",
-        options: { min: 1, max: 5, minLabel: "Quase nada", maxLabel: "Muito" },
-      },
-      { type: "long_text", label: "Qual é o maior obstáculo para a sua empresa crescer hoje?", required: true },
-      { type: "long_text", label: "Que ação concreta da Avante faria diferença nos próximos 3 meses?" },
-      {
-        type: "yes_no",
-        label: "Você gostaria de uma conversa com a Expansão para montar um plano de crescimento?",
-      },
+      secao("Estratégia comercial e crescimento", "Identificar o potencial real de expansão e os recursos necessários para realizá-lo."),
+      longa("Qual é a principal meta de crescimento da empresa para os próximos 12 meses?"),
+      numero("Quantas novas licenças Avante pretende comercializar nos próximos 3 meses?", { options: { unit: "licenças" } }),
+      numero("E nos próximos 6 meses?", { options: { unit: "licenças" } }),
+      numero("E nos próximos 12 meses?", { options: { unit: "licenças" } }),
+      numero("Quantas novas licenças dependem de melhorias ou desenvolvimentos no produto?", { options: { unit: "licenças" } }),
+      longa("Quais funcionalidades seriam necessárias para essas licenças?"),
+      unica("Existe uma base de clientes que poderia migrar para a Avante?", ["Sim", "Não", "Em avaliação"]),
+      numero("Qual seria o volume estimado de migração?", { options: { unit: "clientes ou licenças" } }),
+      curta("Em qual prazo?"),
+      longa("Quais são hoje os três principais obstáculos ao crescimento?"),
+      unica("A empresa tem processo comercial definido, metas e acompanhamento de vendas?", SIM_PARCIAL_NAO),
+      multipla("Quais produtos ou segmentos deseja priorizar?", SEGMENTOS, { other: true }),
+      longa("Por que esses produtos ou segmentos?"),
+      multipla(
+        "Que tipo de apoio da Avante mais ajudaria a atingir as metas?",
+        ["Treinamento", "Material comercial", "Demonstrações", "Apoio técnico", "Produto", "Migração", "Planejamento"],
+        { other: true }
+      ),
+
+      secao("Prioridades e plano de acompanhamento", "Transformar o diagnóstico em ações concretas."),
+      longa("Quais são as três prioridades mais importantes para os próximos 90 dias?"),
+      longa("Quais resultados você espera alcançar com o apoio da Avante?"),
+      longa("Há alguma data, migração ou projeto importante já previsto?", { help: "Informe a data e descreva." }),
+      curta("Quem será o contato principal para o acompanhamento?", { help: "Nome, cargo e contato profissional." }),
+      unica("Qual frequência de acompanhamento faz mais sentido para sua operação?", [
+        "Mensal",
+        "Bimestral",
+        "Trimestral",
+        "Conforme necessidade",
+      ]),
+      longa("Existe alguma informação importante que não foi contemplada?"),
     ],
   },
 };
 
 async function main() {
+  const substituir = process.argv.includes("--substituir");
   const db = getDb();
+
   for (const objective of Object.keys(SUGERIDAS) as SurveyObjective[]) {
-    const [existente] = await db
-      .select({ id: surveys.id })
+    const s = SUGERIDAS[objective];
+    const existentes = await db
+      .select({
+        id: surveys.id,
+        name: surveys.name,
+        convites: sql<number>`(select count(*) from survey_invites i where i.survey_id = surveys.id)`.mapWith(Number),
+      })
       .from(surveys)
-      .where(eq(surveys.objective, objective))
-      .limit(1);
-    if (existente) {
-      console.log(`[SEED] ${objective}: já tem pesquisa, pulando.`);
+      .where(eq(surveys.objective, objective));
+
+    if (existentes.length === 0) {
+      const [criada] = await db
+        .insert(surveys)
+        .values({ objective, name: s.name, intro: s.intro, thanks: s.thanks, createdByName: "Mapeamento da parceria" })
+        .returning({ id: surveys.id });
+      await db.insert(surveyQuestions).values(s.perguntas.map((p, position) => ({ ...p, surveyId: criada.id, position })));
+      console.log(`[SEED] ${objective}: criada "${s.name}" com ${s.perguntas.length} itens.`);
       continue;
     }
-    const s = SUGERIDAS[objective];
-    const [criada] = await db
-      .insert(surveys)
-      .values({ objective, name: s.name, intro: s.intro, thanks: s.thanks, createdByName: "Sugestão inicial" })
-      .returning({ id: surveys.id });
-    await db.insert(surveyQuestions).values(
-      s.perguntas.map((p, position) => ({ ...p, surveyId: criada.id, position }))
-    );
-    console.log(`[SEED] ${objective}: "${s.name}" com ${s.perguntas.length} itens.`);
+
+    if (!substituir) {
+      console.log(`[SEED] ${objective}: já tem pesquisa ("${existentes[0].name}"), pulando. Use --substituir para trocar as perguntas.`);
+      continue;
+    }
+
+    for (const e of existentes) {
+      if (e.convites > 0) {
+        console.log(`[SEED] ${objective}: "${e.name}" tem ${e.convites} convite(s) — não mexo.`);
+        continue;
+      }
+      await db.transaction(async (tx) => {
+        await tx.delete(surveyQuestions).where(eq(surveyQuestions.surveyId, e.id));
+        await tx
+          .update(surveys)
+          .set({ name: s.name, intro: s.intro, thanks: s.thanks, updatedAt: new Date() })
+          .where(eq(surveys.id, e.id));
+        await tx.insert(surveyQuestions).values(s.perguntas.map((p, position) => ({ ...p, surveyId: e.id, position })));
+      });
+      console.log(`[SEED] ${objective}: "${e.name}" → "${s.name}" com ${s.perguntas.length} itens.`);
+    }
   }
   process.exit(0);
 }
