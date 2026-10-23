@@ -347,7 +347,7 @@ export default function LeadsPage() {
     <>
       <PageHeader
         title="Gestão de leads"
-        description="Nutrição de quem chegou por formulário, anúncio ou integração. Aqui a gente esquenta e mede o interesse; a venda acontece no Pipedrive."
+        description="Nutrição de quem chegou por formulário, anúncio ou integração. Aqui a gente esquenta e mede o interesse; a venda acontece no CRM (NRG Hub)."
       >
         <Button variant="outline" asChild>
           <Link href="/leads/relatorio">

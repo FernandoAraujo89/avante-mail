@@ -249,7 +249,7 @@ export default function EtapasPage() {
 
       <PageHeader
         title="Etapas do funil"
-        description="Espelho dos funis do Pipedrive, etapa por etapa. O comercial move o deal lá; a sincronização (e o webhook) trazem a mudança por estes nomes."
+        description="Espelho do funil do CRM (NRG Hub), etapa por etapa. O comercial move o deal lá; a sincronização (e o webhook) trazem a mudança por estes nomes."
       />
 
       {erro ? (

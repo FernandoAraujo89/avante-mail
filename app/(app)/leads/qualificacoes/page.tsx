@@ -205,7 +205,7 @@ export default function QualificacoesPage() {
 
       <PageHeader
         title="Qualificações"
-        description="Espelho do campo &ldquo;Lead qualificado&rdquo; do Pipedrive. O vendedor (SDR) qualifica o lead lá; a sincronização traz por estes nomes."
+        description="Espelho do campo &ldquo;Lead qualificado&rdquo; do CRM (NRG Hub). O vendedor (SDR) qualifica o lead lá; a sincronização traz por estes nomes."
       />
 
       {erro ? (
@@ -427,7 +427,7 @@ export default function QualificacoesPage() {
           {detalhes ? (
             <div className="grid gap-4">
               <div className="grid gap-1.5">
-                <Label htmlFor="det-label">Nome (como no Pipedrive)</Label>
+                <Label htmlFor="det-label">Nome (como no CRM)</Label>
                 <Input
                   id="det-label"
                   value={detalhes.label}
