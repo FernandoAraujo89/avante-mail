@@ -305,7 +305,7 @@ export default function EtapasPage() {
       <Card className="mb-6">
         <CardContent className="grid gap-3 py-4 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
           <div className="grid gap-1.5">
-            <Label htmlFor="nova-etapa">Nome da etapa no Pipedrive</Label>
+            <Label htmlFor="nova-etapa">Nome da etapa no CRM</Label>
             <Input
               id="nova-etapa"
               value={nova}
