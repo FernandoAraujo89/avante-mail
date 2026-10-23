@@ -3,9 +3,9 @@ import path from "path";
 
 config({ path: path.resolve(process.cwd(), ".env.local") });
 
-import { and, isNotNull, isNull } from "drizzle-orm";
+import { and, isNotNull, isNull, notExists, eq } from "drizzle-orm";
 
-import { contacts, getDb } from "../lib/db";
+import { contacts, getDb, pipedriveDeals } from "../lib/db";
 import { enviarLeadAoHub } from "../lib/nrg/captacao";
 
 // Carga única: manda ao NRG Hub (fonte de captação, NRG_HUB_CAPTACAO_URL) os
@@ -13,15 +13,21 @@ import { enviarLeadAoHub } from "../lib/nrg/captacao";
 // Quem já existe lá pelo telefone vira "Duplicado" no Hub (só completa o que
 // faltava), então repetir a carga não cria pessoa duas vezes.
 //
-//   npx tsx scripts/enviar-leads-ao-hub.ts --dry-run      (só conta)
-//   npx tsx scripts/enviar-leads-ao-hub.ts --limite 50    (manda os 50 primeiros)
-//   npx tsx scripts/enviar-leads-ao-hub.ts                (manda todos)
+//   npx tsx scripts/enviar-leads-ao-hub.ts --dry-run        (só conta)
+//   npx tsx scripts/enviar-leads-ao-hub.ts --limite 50      (manda os 50 primeiros)
+//   npx tsx scripts/enviar-leads-ao-hub.ts --sem-historico  (só quem nunca teve negócio em CRM nenhum)
+//   npx tsx scripts/enviar-leads-ao-hub.ts                  (manda todos)
+//
+// --sem-historico: deixa de fora quem já teve negócio no espelho do CRM
+// (Pipedrive ou Hub) — esses provavelmente estão num funil do Hub que o token
+// ainda não enxerga (SDR, IA SDR); mandá-los criaria um card a mais lá.
 
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const i = args.indexOf("--limite");
   const limite = i >= 0 ? Number(args[i + 1]) : Infinity;
+  const semHistorico = args.includes("--sem-historico");
   if (!process.env.NRG_HUB_CAPTACAO_URL && !dryRun) {
     console.error("NRG_HUB_CAPTACAO_URL não definida.");
     process.exit(1);
@@ -42,9 +48,18 @@ async function main() {
       origem: contacts.sourceDetail,
     })
     .from(contacts)
-    .where(and(isNotNull(contacts.stage), isNull(contacts.crmFunil), isNotNull(contacts.phone)))
+    .where(
+      and(
+        isNotNull(contacts.stage),
+        isNull(contacts.crmFunil),
+        isNotNull(contacts.phone),
+        semHistorico
+          ? notExists(db.select({ um: pipedriveDeals.id }).from(pipedriveDeals).where(eq(pipedriveDeals.contactId, contacts.id)))
+          : undefined
+      )
+    )
     .orderBy(contacts.createdAt);
-  console.log(`${leads.length} lead(s) sem funil e com telefone${dryRun ? " (dry-run, nada enviado)" : ""}.`);
+  console.log(`${leads.length} lead(s) sem funil e com telefone${semHistorico ? ", sem negócio em CRM nenhum" : ""}${dryRun ? " (dry-run, nada enviado)" : ""}.`);
   if (dryRun) return;
 
   let ok = 0;
