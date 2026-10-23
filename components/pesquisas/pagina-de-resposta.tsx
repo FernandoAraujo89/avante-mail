@@ -30,9 +30,16 @@ type Gravacao = "parado" | "salvando" | "salvo" | "erro";
 export function PaginaDeResposta({
   token,
   convite,
+  modoPrevia = false,
 }: {
   token: string;
   convite: ConviteCarregado;
+  /**
+   * Pré-visualização da Expansão (/pesquisa/previa/[id]): mesma tela, mas
+   * nada vai ao servidor — as respostas ficam na memória e "Concluir" só
+   * confere as obrigatórias e mostra o agradecimento. Padrão: desligado.
+   */
+  modoPrevia?: boolean;
 }) {
   const etapas = useMemo(() => montarEtapas(convite.questions), [convite.questions]);
   // 0 = boas-vindas; 1..n = perguntas; n+1 = concluído.
@@ -54,6 +61,11 @@ export function PaginaDeResposta({
 
   const enviar = useCallback(
     async (perguntaId: string, valor: SurveyAnswerValue | null) => {
+      // Prévia: a resposta já está no estado; só mostra "Salvo", como na vida real.
+      if (modoPrevia) {
+        setGravacao("salvo");
+        return;
+      }
       setGravacao("salvando");
       const promessa = (async () => {
         try {
@@ -87,7 +99,7 @@ export function PaginaDeResposta({
       emVoo.current.set(perguntaId, promessa.catch(() => {}));
       await promessa.catch(() => {});
     },
-    [token]
+    [token, modoPrevia]
   );
 
   const responder = useCallback(
@@ -161,6 +173,19 @@ export function PaginaDeResposta({
 
   async function concluir() {
     setErroGeral("");
+    if (modoPrevia) {
+      // A mesma regra do servidor (todas as obrigatórias), sem gravar nada.
+      const faltam = progresso(convite.questions, respostas).faltamObrigatorias;
+      if (faltam.length > 0) {
+        const i = etapas.findIndex((e) => e.perguntas.some((p) => faltam.includes(p.id)));
+        if (i >= 0 && i + 1 !== etapa) irPara(i + 1);
+        setTimeout(() => marcarFaltantes(faltam), 50);
+        return;
+      }
+      setAgradecimento(convite.survey.thanks);
+      irPara(ultimaEtapa);
+      return;
+    }
     const res = await fetch(`/api/pesquisa/${token}/concluir`, { method: "POST" });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {

@@ -222,9 +222,15 @@ users
 2. Construtor: adiciona perguntas por tipo; reordena com setas (sem
    arrastar-e-soltar — barato e acessível); marca obrigatórias; na pesquisa
    NPS marca a pergunta-chave (escala 0–10). Pré-visualização idêntica à página
-   pública.
+   pública; **"Ver como o parceiro"** (construtor e acompanhamento) abre a
+   pesquisa salva com o layout real em `/pesquisa/previa/[id]` — dá para
+   responder e concluir, nada é gravado (23/10/2026).
 3. Mensagens do convite: assunto e texto do e-mail (o botão "Responder" entra
    sozinho); modelo de WhatsApp (dos aprovados na WABA, com botão de link).
+   A aba mostra, ao lado dos campos, o convite como chega: o e-mail (o mesmo
+   HTML que o worker manda, convite ou lembrete) e o balão do WhatsApp com as
+   variáveis preenchidas por um parceiro de exemplo; o botão dos dois leva à
+   pré-visualização da pesquisa.
 4. **Ativar**. Um seed cria as 3 pesquisas em rascunho com perguntas sugeridas
    (dados da empresa, NPS padrão "de 0 a 10, o quanto você recomendaria a
    Avante…" + "por quê", crescimento), para o time editar em vez de começar do zero.
@@ -325,6 +331,7 @@ users
 | `/contacts/[id]` | todos que veem a ficha | Bloco "Pesquisas" com as 3 frentes (admin e expansão) |
 | `/conversations` | admin, expansão | Linha no topo; Expansão fixa na dela |
 | `/pesquisa/[token]` | público | Página de resposta |
+| `/pesquisa/previa/[id]` | expansão, admin (a página confere a sessão — o prefixo `/pesquisa/` é público no middleware) | A pesquisa com o layout real do parceiro, sem convite e sem gravar nada |
 | `/login`, `/users` | — | Botão Google; perfil Expansão; senha opcional |
 
 APIs: `/api/pesquisas` (CRUD, perguntas, convites, lembretes, relatório,

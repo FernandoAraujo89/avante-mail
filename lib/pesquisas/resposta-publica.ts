@@ -142,6 +142,52 @@ export async function carregarConvitePorToken(
   };
 }
 
+/**
+ * A pesquisa como o parceiro vai vê-la, SEM convite: para a Expansão
+ * pré-visualizar com o layout real. Monta um "convite" só de leitura — não
+ * existe no banco, nada que a página faça com ele é gravado (a página sabe
+ * disso pelo `modoPrevia`). Funciona para rascunho também: `ativa` é true de
+ * propósito, para a prévia não abrir como "Pesquisa encerrada".
+ */
+export async function carregarPesquisaParaPrevia(
+  surveyId: string,
+  parceiro: { name: string; company: string | null }
+): Promise<ConviteCarregado | null> {
+  const db = getDb();
+  const [pesquisa] = await db
+    .select({
+      id: surveys.id,
+      name: surveys.name,
+      objective: surveys.objective,
+      intro: surveys.intro,
+      thanks: surveys.thanks,
+    })
+    .from(surveys)
+    .where(eq(surveys.id, surveyId));
+  if (!pesquisa) return null;
+
+  const perguntas = await db
+    .select()
+    .from(surveyQuestions)
+    .where(and(eq(surveyQuestions.surveyId, surveyId), isNull(surveyQuestions.archivedAt)))
+    .orderBy(asc(surveyQuestions.position), asc(surveyQuestions.createdAt));
+
+  return {
+    invite: { id: `previa-${surveyId}`, status: "opened", completedAt: null },
+    survey: { ...pesquisa, ativa: true },
+    contact: parceiro,
+    questions: perguntas.map((p) => ({
+      id: p.id,
+      type: p.type,
+      label: p.label,
+      help: p.help,
+      required: p.required,
+      options: p.options,
+    })),
+    answers: {},
+  };
+}
+
 /** O parceiro abriu o link: "convidado" vira "abriu" (uma vez). */
 export async function marcarAberto(inviteId: string, status: SurveyInviteStatus): Promise<void> {
   const novo = estadoAoAbrir(status);

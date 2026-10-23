@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Eye, Save, Undo2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ExternalLink, Eye, Save, Undo2 } from "lucide-react";
 
 import {
   EditorPergunta,
@@ -13,6 +13,7 @@ import {
   FormularioPesquisa,
   type Respostas,
 } from "@/components/pesquisas/formulario-pesquisa";
+import { PreviaDoEmail, PreviaDoWhatsApp } from "@/components/pesquisas/previa-do-convite";
 import { ChipsDeTipo } from "@/components/pesquisas/tipo-de-pergunta";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,10 +36,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { SurveyAnswerValue, SurveyQuestionType, SurveyStatus } from "@/lib/db/schema";
+import type { SurveyAnswerValue, SurveyMessageKind, SurveyQuestionType, SurveyStatus } from "@/lib/db/schema";
 import { formatTime } from "@/lib/format";
 import { assuntoPadrao, corpoPadrao } from "@/lib/pesquisas/mensagens";
 import { opcoesPadrao, problemaDaPergunta } from "@/lib/pesquisas/perguntas";
+import { linkDaPrevia } from "@/lib/pesquisas/previa";
 import { progresso } from "@/lib/pesquisas/respostas";
 import {
   OBJETIVO_LABEL,
@@ -49,6 +51,7 @@ import { modeloTemLinkDinamico } from "@/lib/pesquisas/whatsapp";
 import {
   extractVariables,
   type WhatsAppButton,
+  type WhatsAppHeaderType,
   type WhatsAppTemplateStatus,
   type WhatsAppVariableMap,
   type WhatsAppVariableSource,
@@ -75,6 +78,12 @@ type ModeloDto = {
   status: WhatsAppTemplateStatus;
   bodyText: string;
   buttons: WhatsAppButton[] | null;
+  // O resto do modelo, para a prévia mostrar o balão inteiro.
+  headerType: WhatsAppHeaderType;
+  headerText: string | null;
+  headerMediaUrl: string | null;
+  headerMediaFilename: string | null;
+  footerText: string | null;
 };
 
 const SEM_MODELO = "__nenhum__";
@@ -142,6 +151,13 @@ export default function EditarPesquisaPage() {
 
   const [previa, setPrevia] = useState(false);
   const [respostasPrevia, setRespostasPrevia] = useState<Respostas>({});
+  /** Convite ou lembrete, na prévia do e-mail. */
+  const [tipoPrevia, setTipoPrevia] = useState<SurveyMessageKind>("invite");
+  /** A origem desta tela (https://…), para o link dos convites de exemplo. */
+  const [origem, setOrigem] = useState("");
+  useEffect(() => {
+    setOrigem(window.location.origin);
+  }, []);
   const desfazerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const aplicar = useCallback((p: PesquisaDto) => {
@@ -549,6 +565,20 @@ export default function EditarPesquisaPage() {
               <Eye />
               Pré-visualizar
             </Button>
+            {/* A pesquisa com o layout real do parceiro, em nova aba — a versão salva. */}
+            {sujo ? (
+              <Button variant="outline" size="sm" disabled title="Salve para ver a versão atual como o parceiro">
+                <ExternalLink />
+                Ver como o parceiro
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" asChild>
+                <a href={linkDaPrevia(id)} target="_blank" rel="noopener" title="Abre a pesquisa com o layout real do parceiro, em nova aba">
+                  <ExternalLink />
+                  Ver como o parceiro
+                </a>
+              </Button>
+            )}
             {sujo ? (
               <Button variant="ghost" size="sm" onClick={() => setDescartando(true)} disabled={salvando}>
                 Descartar
@@ -716,12 +746,14 @@ export default function EditarPesquisaPage() {
 
           {aba === "convite" ? (
             <div className="grid gap-4" role="tabpanel">
-              <Card className="p-4 sm:p-5">
+              {/* "@container": os campos e a prévia ficam lado a lado só quando o cartão é largo o bastante (não a janela). */}
+              <Card className="@container p-4 sm:p-5">
                 <h2 className="text-base">Convite por e-mail</h2>
                 <p className="mt-1 mb-4 text-xs text-muted-foreground">
                   O botão &quot;Responder pesquisa&quot; com o link de cada parceiro entra sozinho no fim. Pode usar {"{{nome}}"}, {"{{empresa}}"} e {"{{pesquisa}}"}. Em branco, vale o texto padrão.
                 </p>
-                <div className="grid gap-4">
+                <div className="grid gap-6 @2xl:grid-cols-2">
+                <div className="grid content-start gap-4">
                   <div className="grid gap-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <Label htmlFor="pesquisa-email-assunto">Assunto</Label>
@@ -741,14 +773,41 @@ export default function EditarPesquisaPage() {
                     <Textarea id="pesquisa-email-corpo" rows={6} value={corpoEmail} maxLength={3000} placeholder={corpoPadrao()} onChange={(e) => setCorpoEmail(e.target.value)} />
                   </div>
                 </div>
+                {/* Como chega: o MESMO HTML que o worker manda — convite ou lembrete. Em branco, o padrão, como no envio. */}
+                <div className="grid content-start gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Eye className="size-3.5" aria-hidden />
+                      Como o parceiro recebe
+                    </p>
+                    <div className="flex gap-1" role="group" aria-label="Tipo de mensagem">
+                      <Button type="button" size="sm" variant={tipoPrevia === "invite" ? "secondary" : "ghost"} aria-pressed={tipoPrevia === "invite"} onClick={() => setTipoPrevia("invite")}>
+                        Convite
+                      </Button>
+                      <Button type="button" size="sm" variant={tipoPrevia === "reminder" ? "secondary" : "ghost"} aria-pressed={tipoPrevia === "reminder"} onClick={() => setTipoPrevia("reminder")}>
+                        Lembrete
+                      </Button>
+                    </div>
+                  </div>
+                  <PreviaDoEmail
+                    assunto={assuntoEmail.trim() || assuntoPadrao(nome.trim() || "Pesquisa")}
+                    corpo={corpoEmail.trim() || corpoPadrao()}
+                    nomeDaPesquisa={nome.trim() || "Pesquisa"}
+                    link={linkDaPrevia(id, origem)}
+                    tipo={tipoPrevia}
+                  />
+                  <p className="text-xs text-muted-foreground">O botão &quot;Responder pesquisa&quot; abre a pré-visualização da pesquisa; no envio real, abre o link de cada parceiro.</p>
+                </div>
+                </div>
               </Card>
 
-              <Card className="p-4 sm:p-5">
+              <Card className="@container p-4 sm:p-5">
                 <h2 className="text-base">Convite por WhatsApp</h2>
                 <p className="mt-1 mb-4 text-xs text-muted-foreground">
                   Sai pelo número Avante Expansão com um modelo aprovado pela Meta que tenha um botão de link terminando em {"{{1}}"} — por ele vai o link de cada parceiro.
                 </p>
-                <div className="grid gap-4">
+                <div className="grid gap-6 @2xl:grid-cols-2">
+                <div className="grid content-start gap-4">
                   <div className="grid gap-1.5">
                     <Label htmlFor="pesquisa-modelo">Modelo</Label>
                     <Select value={modeloId} onValueChange={setModeloId}>
@@ -771,7 +830,9 @@ export default function EditarPesquisaPage() {
                   </div>
                   {modelo ? (
                     <div className="grid gap-3">
-                      <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm whitespace-pre-line">{modelo.bodyText}</p>
+                      {indicesDoModelo.length > 0 ? (
+                        <p className="text-xs text-muted-foreground">De onde vem cada variável do modelo:</p>
+                      ) : null}
                       {indicesDoModelo.length > 0 ? (
                         <div className="grid gap-2">
                           {indicesDoModelo.map((n) => {
@@ -803,6 +864,22 @@ export default function EditarPesquisaPage() {
                       ) : null}
                     </div>
                   ) : null}
+                </div>
+                {/* O balão como chega, com o parceiro de exemplo nas variáveis. */}
+                {modelo ? (
+                  <div className="grid content-start gap-2">
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Eye className="size-3.5" aria-hidden />
+                      Como o parceiro recebe
+                    </p>
+                    <PreviaDoWhatsApp modelo={modelo} variaveis={variaveis} />
+                    <p className="text-xs text-muted-foreground">
+                      {modeloTemLinkDinamico(modelo.buttons)
+                        ? "O botão de link abre a pesquisa do parceiro."
+                        : "Este modelo não tem botão de link dinâmico — o parceiro não teria como abrir a pesquisa."}
+                    </p>
+                  </div>
+                ) : null}
                 </div>
               </Card>
             </div>

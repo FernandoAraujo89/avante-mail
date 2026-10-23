@@ -58,6 +58,7 @@ import {
 import type { SurveyInviteStatus, SurveyStatus } from "@/lib/db/schema";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { ConviteDto, ResultadoConvite, ResultadoLembrete } from "@/lib/pesquisas/envios";
+import { linkDaPrevia } from "@/lib/pesquisas/previa";
 import type { LimitesDeLembrete } from "@/lib/pesquisas/lembretes";
 import { PASSO_LABEL } from "@/lib/pesquisas/mapeamento";
 import {
@@ -472,6 +473,12 @@ export default function AcompanhamentoPage() {
                 <BarChart3 />
                 Relatório
               </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <a href={linkDaPrevia(id)} target="_blank" rel="noopener" title="Abre a pesquisa com o layout real do parceiro, em nova aba">
+                <Eye />
+                Ver como o parceiro
+              </a>
             </Button>
             <Button
               variant="outline"
