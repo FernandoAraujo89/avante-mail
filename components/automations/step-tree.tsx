@@ -295,7 +295,7 @@ function Cartao({
       className={cn(
         "group relative w-72 overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-colors cursor-pointer",
         selecionado
-          ? "border-primary ring-[3px] ring-ring/30"
+          ? "border-primary ring-[3px] ring-ring/60"
           : "border-border hover:border-primary/60",
         alerta ? "border-destructive/60" : "",
         // Passo que não executa fica visivelmente apagado: ele está na tela

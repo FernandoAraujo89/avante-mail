@@ -513,7 +513,7 @@ export default function EditarPesquisaPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="min-w-0">
           {/* Abas: cada uma é uma tarefa; o resto fica fora da vista. */}
-          <div className="mb-5 flex gap-1 rounded-lg bg-muted p-1" role="tablist" aria-label="Partes da pesquisa">
+          <div className="mb-5 flex gap-1 rounded-lg border border-border bg-muted p-1" role="tablist" aria-label="Partes da pesquisa">
             {(
               [
                 ["perguntas", <>Perguntas<span className="hidden sm:inline"> ({nRespondiveis})</span></>],
@@ -528,7 +528,7 @@ export default function EditarPesquisaPage() {
                 aria-selected={aba === valor}
                 onClick={() => setAba(valor)}
                 className={cn(
-                  "flex-1 rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none",
+                  "flex-1 rounded-md px-2 py-1.5 text-sm whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none",
                   aba === valor ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}
               >

@@ -60,7 +60,7 @@ export function ChipsDeTipo({
             type="button"
             onClick={() => onEscolher(t)}
             title={`Adicionar ${TIPO_LABEL[t].toLowerCase()}`}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm text-foreground transition-colors hover:border-primary hover:bg-accent hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm text-foreground transition-colors hover:border-primary hover:bg-accent hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none"
           >
             <Icone className="size-4 text-muted-foreground" aria-hidden />
             {TIPO_CURTO[t]}

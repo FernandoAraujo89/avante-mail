@@ -90,7 +90,7 @@ export function KpiTile({
           >
             <Icon className="size-3" />
             {delta.text}
-            <span className="text-muted-foreground/70">vs. anterior</span>
+            <span className="text-muted-foreground">vs. anterior</span>
           </div>
         ) : null}
       </CardContent>

@@ -97,12 +97,58 @@ export function EditorPergunta({
     onChange({ options: { ...o, ...patch } });
   }
 
+  // Seção: só o título importa. Barra escura (superfície invertida) com o
+  // título digitado direto na linha — distinta de pergunta e de campo
+  // desabilitado — e as ações ao lado; não abre nem fecha.
+  if (ehSecao) {
+    const acaoNaBarra = "text-inverse-foreground hover:bg-white/15 hover:text-inverse-foreground active:bg-white/25 disabled:opacity-40";
+    return (
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-inverse px-3 py-2 text-inverse-foreground",
+          problema && "ring-2 ring-warning ring-inset"
+        )}
+      >
+        <Icone className="size-4 shrink-0 text-inverse-muted" aria-hidden />
+        <input
+          ref={enunciadoRef}
+          id={campoId("label")}
+          value={pergunta.label}
+          maxLength={300}
+          aria-label="Título da seção"
+          aria-invalid={!pergunta.label.trim() || undefined}
+          placeholder="Título da seção — ex.: Sobre a empresa"
+          onChange={(e) => onChange({ label: e.target.value })}
+          className="h-9 min-w-[10rem] flex-1 border-b border-transparent bg-transparent px-1 text-base font-medium text-inverse-foreground placeholder:font-light placeholder:text-inverse-muted focus-visible:border-inverse-foreground/70 focus-visible:outline-none"
+        />
+        {problema ? (
+          <span className="text-xs text-warning-light" role="alert">
+            {problema}
+          </span>
+        ) : null}
+        <div className="ml-auto flex shrink-0 items-center">
+          <Button type="button" variant="ghost" size="icon" className={acaoNaBarra} aria-label="Mover para cima" title="Mover para cima" disabled={ehPrimeira} onClick={onMover.bind(null, -1)}>
+            <ArrowUp />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className={acaoNaBarra} aria-label="Mover para baixo" title="Mover para baixo" disabled={ehUltima} onClick={onMover.bind(null, 1)}>
+            <ArrowDown />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className={acaoNaBarra} aria-label="Duplicar" title="Duplicar" onClick={onDuplicar}>
+            <CopyPlus />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className={acaoNaBarra} aria-label="Remover" title="Remover" onClick={onRemover}>
+            <Trash2 />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
         "rounded-xl border bg-card transition-colors",
-        problema ? "border-destructive/50" : aberta ? "border-primary/50" : "border-border",
-        ehSecao && !aberta && "bg-muted/40"
+        problema ? "border-destructive/50" : aberta ? "border-primary/50" : "border-border"
       )}
     >
       {/* Cabeçalho da linha: clique abre/fecha; as ações ficam fora do botão. */}
@@ -112,7 +158,7 @@ export function EditorPergunta({
           onClick={onToggle}
           aria-expanded={aberta}
           aria-controls={campoId("corpo")}
-          className="flex min-h-9 min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none"
+          className="flex min-h-9 min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none"
         >
           <span className="w-6 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
             {numero ?? ""}
@@ -120,7 +166,7 @@ export function EditorPergunta({
           <Icone className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1">
             <span className={cn("block truncate text-sm", !pergunta.label.trim() && "text-muted-foreground italic")}>
-              {pergunta.label.trim() || (ehSecao ? "Seção sem título" : "Pergunta sem enunciado")}
+              {pergunta.label.trim() || "Pergunta sem enunciado"}
             </span>
             <span className="block truncate text-xs text-muted-foreground">
               {TIPO_CURTO[pergunta.type]}
@@ -173,14 +219,14 @@ export function EditorPergunta({
         <div id={campoId("corpo")} className="border-t border-border px-4 pt-4 pb-4">
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
             <div className="grid gap-1.5">
-              <Label htmlFor={campoId("label")}>{ehSecao ? "Título da seção" : "Enunciado"}</Label>
+              <Label htmlFor={campoId("label")}>Enunciado</Label>
               <Input
                 ref={enunciadoRef}
                 id={campoId("label")}
                 value={pergunta.label}
                 maxLength={300}
                 aria-invalid={!pergunta.label.trim() || undefined}
-                placeholder={ehSecao ? "ex.: Sobre a empresa" : "ex.: Quantos clientes ativos a empresa tem hoje?"}
+                placeholder="ex.: Quantos clientes ativos a empresa tem hoje?"
                 onChange={(e) => onChange({ label: e.target.value })}
               />
             </div>

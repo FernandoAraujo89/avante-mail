@@ -297,7 +297,7 @@ export function Sidebar() {
               {group.label ? (
                 <p
                   className={cn(
-                    "px-3 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/70",
+                    "px-3 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground",
                     indice > 0 ? "mt-3" : ""
                   )}
                 >
