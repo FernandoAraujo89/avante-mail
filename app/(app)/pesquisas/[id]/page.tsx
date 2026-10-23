@@ -3,23 +3,32 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BarChart3,
   BellRing,
   CheckCircle2,
   Copy,
+  CopyPlus,
   Eye,
   Lock,
   LockOpen,
   Pencil,
   Send,
+  Settings2,
+  Trash2,
   UserPlus,
   Users,
 } from "lucide-react";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import {
+  andamento,
+  BarraDeAndamento,
+  BarraDeRespostas,
+} from "@/components/pesquisas/barra-de-andamento";
 import { SeletorDeParceiros } from "@/components/pesquisas/seletor-de-parceiros";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -90,6 +99,7 @@ type Filtro = "todos" | "pendentes" | "completed" | "closed";
 
 export default function AcompanhamentoPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
 
   const [pesquisa, setPesquisa] = useState<PesquisaDto | null>(null);
   const [convites, setConvites] = useState<ConviteDto[] | null>(null);
@@ -111,6 +121,11 @@ export default function AcompanhamentoPage() {
   const [escopoLembrete, setEscopoLembrete] = useState<"selecionados" | "pendentes">("pendentes");
   const [enviando, setEnviando] = useState(false);
   const [formError, setFormError] = useState("");
+
+  // Gerenciar a pesquisa: duplicar, mudar a situação, excluir.
+  const [gerenciarAberto, setGerenciarAberto] = useState(false);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -163,6 +178,7 @@ export default function AcompanhamentoPage() {
   }, [convites]);
 
   const ativa = pesquisa?.status === "active";
+  const progresso = useMemo(() => andamento(convites ?? []), [convites]);
   const whatsappPronto = pesquisa?.whatsapp.pronto ?? false;
   const canais = [porEmail ? "email" : null, porWhatsApp && whatsappPronto ? "whatsapp" : null].filter(
     Boolean
@@ -183,6 +199,121 @@ export default function AcompanhamentoPage() {
       setAviso(`Link de ${c.contact.name} copiado.`);
     } catch {
       setAviso(`Link de ${c.contact.name}: ${c.link}`);
+    }
+  }
+
+  async function mudarStatus(status: SurveyStatus) {
+    setOcupado(true);
+    setErro("");
+    setAviso("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível atualizar a pesquisa.");
+      setAviso(`Pesquisa ${STATUS_LABEL[json.status as SurveyStatus].toLowerCase()}.`);
+      setGerenciarAberto(false);
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function duplicar() {
+    setOcupado(true);
+    setErro("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}/duplicar`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível duplicar.");
+      router.push(`/pesquisas/${json.id}/editar`);
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+      setOcupado(false);
+    }
+  }
+
+  async function excluir() {
+    setOcupado(true);
+    setErro("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível excluir.");
+      router.push("/pesquisas");
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+      setConfirmandoExclusao(false);
+      setGerenciarAberto(false);
+      setOcupado(false);
+    }
+  }
+
+  async function reenviar(c: ConviteDto) {
+    setErro("");
+    setAviso("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}/convites/${c.id}/enviar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channels: whatsappPronto ? ["email", "whatsapp"] : ["email"] }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível reenviar.");
+      const partes = [
+        json.enfileirados?.email ? "e-mail na fila" : null,
+        json.enfileirados?.whatsapp ? "WhatsApp na fila" : null,
+      ].filter(Boolean);
+      setAviso(
+        partes.length
+          ? `Convite de ${c.contact.name} reenviado: ${partes.join(" e ")}.`
+          : `${c.contact.name} não tem endereço que aceite o canal — copie o link.`
+      );
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function excluirConvite(c: ConviteDto) {
+    setErro("");
+    setAviso("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}/convites/${c.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível excluir o convite.");
+      setAviso(`Convite de ${c.contact.name} excluído.`);
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function emLote(acao: "encerrar" | "reabrir") {
+    setErro("");
+    setAviso("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}/convites`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inviteIds: [...selecionados], acao }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível aplicar.");
+      setAviso(
+        `${json.feitos} convite${json.feitos === 1 ? "" : "s"} ${acao === "encerrar" ? "encerrado" : "reaberto"}${
+          json.feitos === 1 ? "" : "s"
+        }${json.pulados ? ` · ${json.pulados} sem mudança (${json.erros.join("; ")})` : ""}.`
+      );
+      setSelecionados(new Set());
+      await carregar();
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -304,6 +435,10 @@ export default function AcompanhamentoPage() {
             }${pesquisa.createdByName ? ` · criada por ${pesquisa.createdByName}` : ""}`}
           >
             <Badge variant={STATUS_VARIANT[pesquisa.status]}>{STATUS_LABEL[pesquisa.status]}</Badge>
+            <Button variant="outline" onClick={() => setGerenciarAberto(true)}>
+              <Settings2 />
+              Gerenciar
+            </Button>
             <Button variant="outline" asChild>
               <Link href={`/pesquisas/${id}/editar`}>
                 <Pencil />
@@ -360,6 +495,12 @@ export default function AcompanhamentoPage() {
         <MetricCard label="Concluíram" value={String(contagem.concluidas)} icon={CheckCircle2} />
       </div>
 
+      {convites ? (
+        <Card className="mt-4 p-4 sm:p-5">
+          <BarraDeAndamento dados={progresso} />
+        </Card>
+      ) : null}
+
       <div className="mt-8 mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtro">
           {(
@@ -382,9 +523,22 @@ export default function AcompanhamentoPage() {
           ))}
         </div>
         {selecionados.size > 0 ? (
-          <p className="text-xs text-muted-foreground">
-            {selecionados.size} selecionado{selecionados.size === 1 ? "" : "s"}
-          </p>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Ações nos selecionados">
+            <span className="text-xs text-muted-foreground">
+              {selecionados.size} selecionado{selecionados.size === 1 ? "" : "s"}:
+            </span>
+            <Button size="sm" variant="outline" disabled={!ativa} onClick={abrirLembrar}>
+              <BellRing />
+              Lembrar
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => emLote("encerrar")}>
+              <Lock />
+              Encerrar
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelecionados(new Set())}>
+              Limpar
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -428,7 +582,6 @@ export default function AcompanhamentoPage() {
                           className="h-4 w-4 accent-primary"
                           aria-label={`Selecionar ${c.contact.name}`}
                           checked={selecionados.has(c.id)}
-                          disabled={!pendente}
                           onChange={() => alternarSelecao(c.id)}
                         />
                       </TableCell>
@@ -443,8 +596,8 @@ export default function AcompanhamentoPage() {
                       <TableCell>
                         <Badge variant={CONVITE_VARIANT[c.status]}>{CONVITE_STATUS_LABEL[c.status]}</Badge>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {c.respondidas}/{c.total}
+                      <TableCell>
+                        <BarraDeRespostas respondidas={c.respondidas} total={c.total} />
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{formatDate(c.createdAt)}</TableCell>
                       <TableCell className="whitespace-nowrap">
@@ -487,6 +640,18 @@ export default function AcompanhamentoPage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={`Reenviar convite de ${c.contact.name}`}
+                            title={ativa ? "Reenviar o convite (e-mail; e WhatsApp, se pronto)" : "A pesquisa precisa estar ativa"}
+                            disabled={!ativa}
+                            onClick={() => reenviar(c)}
+                          >
+                            <Send />
+                          </Button>
+                        ) : null}
+                        {pendente ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             aria-label={`Encerrar convite de ${c.contact.name}`}
                             title="Encerrar (o link deixa de aceitar resposta)"
                             onClick={() => acaoNoConvite(c, "encerrar")}
@@ -504,6 +669,17 @@ export default function AcompanhamentoPage() {
                             <LockOpen />
                           </Button>
                         )}
+                        {c.respondidas === 0 ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Excluir convite de ${c.contact.name}`}
+                            title="Excluir o convite (só sem respostas)"
+                            onClick={() => excluirConvite(c)}
+                          >
+                            <Trash2 />
+                          </Button>
+                        ) : null}
                       </TableActionsCell>
                     </TableRow>
                   );
@@ -632,6 +808,78 @@ export default function AcompanhamentoPage() {
                   : "Convidar"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={gerenciarAberto} onOpenChange={(open) => { setGerenciarAberto(open); if (!open) setConfirmandoExclusao(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Gerenciar a pesquisa</DialogTitle>
+            <DialogDescription>
+              {pesquisa ? `${pesquisa.name} · ${STATUS_LABEL[pesquisa.status].toLowerCase()} · ${contagem.convidados} convidado${contagem.convidados === 1 ? "" : "s"}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {!confirmandoExclusao ? (
+            <div className="grid gap-2">
+              <Button variant="outline" className="justify-start" asChild>
+                <Link href={`/pesquisas/${id}/editar`}>
+                  <Pencil />
+                  Editar perguntas, textos e mensagens do convite
+                </Link>
+              </Button>
+              <Button variant="outline" className="justify-start" disabled={ocupado} onClick={duplicar}>
+                <CopyPlus />
+                Duplicar (cópia em rascunho para outra rodada ou variação)
+              </Button>
+              {pesquisa?.status === "draft" ? (
+                <Button variant="outline" className="justify-start" disabled={ocupado} onClick={() => mudarStatus("active")}>
+                  <CheckCircle2 />
+                  Ativar — libera convites e respostas
+                </Button>
+              ) : pesquisa?.status === "active" ? (
+                <Button variant="outline" className="justify-start" disabled={ocupado} onClick={() => mudarStatus("closed")}>
+                  <Lock />
+                  Encerrar — os links param de aceitar respostas
+                </Button>
+              ) : (
+                <Button variant="outline" className="justify-start" disabled={ocupado} onClick={() => mudarStatus("active")}>
+                  <LockOpen />
+                  Reabrir — volta a aceitar respostas e convites
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                className="justify-start border-destructive/40 text-destructive hover:bg-destructive/10"
+                disabled={ocupado || (contagem.convidados > 0 && pesquisa?.status !== "closed")}
+                title={contagem.convidados > 0 && pesquisa?.status !== "closed" ? "Encerre a pesquisa antes de excluir." : undefined}
+                onClick={() => setConfirmandoExclusao(true)}
+              >
+                <Trash2 />
+                Excluir a pesquisa
+              </Button>
+              {contagem.convidados > 0 && pesquisa?.status !== "closed" ? (
+                <p className="text-xs text-muted-foreground">
+                  Com parceiros convidados, a exclusão só é liberada depois de encerrar.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              <p className="text-sm">
+                Excluir <strong>{pesquisa?.name}</strong> apaga {contagem.convidados} convite
+                {contagem.convidados === 1 ? "" : "s"}, todas as respostas e o histórico de envios. Não dá para
+                desfazer — o relatório some junto.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConfirmandoExclusao(false)} disabled={ocupado}>
+                  Voltar
+                </Button>
+                <Button variant="destructive" onClick={excluir} disabled={ocupado}>
+                  {ocupado ? "Excluindo..." : "Excluir de vez"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

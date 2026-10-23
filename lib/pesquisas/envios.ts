@@ -619,3 +619,63 @@ export async function buscarParceiros(args: {
     parceiros: linhas.map((l) => ({ ...l, convidado: Boolean(l.convidado) })),
   };
 }
+
+/** Manda o convite de novo (e-mail e/ou WhatsApp) para um convite aberto. */
+export async function reenviarConvite(args: {
+  surveyId: string;
+  inviteId: string;
+  canais: CanalDeConvite[];
+}): Promise<{ ok: true; enfileirados: Record<CanalDeConvite, number> } | { ok: false; error: string }> {
+  const c = await conviteDaPesquisa(args.surveyId, args.inviteId);
+  if (!c) return { ok: false, error: "Convite não encontrado." };
+  if (!estaPendente(c.status)) {
+    return { ok: false, error: "Este convite já está concluído ou encerrado." };
+  }
+  const db = getDb();
+  const enfileirados: Record<CanalDeConvite, number> = { email: 0, whatsapp: 0 };
+  for (const canal of args.canais) {
+    const address = await enderecoParaEnvioUnico(db, canal, c.contactId);
+    if (!address) continue;
+    await registrarEEnfileirar({ inviteId: c.id, contactId: c.contactId, channel: canal, address, kind: "invite" });
+    enfileirados[canal] += 1;
+  }
+  return { ok: true, enfileirados };
+}
+
+/**
+ * Apaga um convite — só sem resposta: convidou por engano, ou quer refazer.
+ * Com resposta, o caminho é encerrar (o relatório continua contando).
+ */
+export async function excluirConvite(surveyId: string, inviteId: string): Promise<Resultado> {
+  const c = await conviteDaPesquisa(surveyId, inviteId);
+  if (!c) return { ok: false, error: "Convite não encontrado." };
+  const db = getDb();
+  const [{ respostas }] = await db
+    .select({ respostas: sql<number>`count(*)`.mapWith(Number) })
+    .from(surveyAnswers)
+    .where(eq(surveyAnswers.inviteId, inviteId));
+  if (respostas > 0) {
+    return { ok: false, error: "Este convite já tem respostas: encerre-o em vez de excluir." };
+  }
+  await db.delete(surveyInvites).where(eq(surveyInvites.id, inviteId));
+  return { ok: true };
+}
+
+/** Encerra ou reabre vários convites; devolve quantos mudaram e os motivos de quem não mudou. */
+export async function acaoEmLote(args: {
+  surveyId: string;
+  inviteIds: string[];
+  acao: "encerrar" | "reabrir";
+}): Promise<{ feitos: number; pulados: number; erros: string[] }> {
+  let feitos = 0;
+  const erros: string[] = [];
+  for (const id of args.inviteIds) {
+    const r =
+      args.acao === "encerrar"
+        ? await encerrarConvite(args.surveyId, id)
+        : await reabrirConvite(args.surveyId, id);
+    if (r.ok) feitos += 1;
+    else erros.push(r.error);
+  }
+  return { feitos, pulados: erros.length, erros: [...new Set(erros)] };
+}

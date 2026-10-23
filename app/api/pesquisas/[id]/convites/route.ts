@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { carregarPesquisa } from "@/lib/pesquisas";
 import {
+  acaoEmLote,
   convidarParceiros,
   lerCanais,
   listarConvites,
@@ -67,6 +68,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
       autor: user ? { id: user.id, name: user.name } : null,
     });
     return NextResponse.json(resultado, { status: 201 });
+  } catch (error) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+  }
+}
+
+/** Em lote: { inviteIds, acao: "encerrar" | "reabrir" }. */
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    if (!UUID_REGEX.test(id)) {
+      return NextResponse.json({ error: "Pesquisa não encontrada." }, { status: 404 });
+    }
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const inviteIds = normalizeIds(body.inviteIds);
+    if (inviteIds.length === 0) {
+      return NextResponse.json({ error: "Escolha os convites." }, { status: 400 });
+    }
+    if (body.acao !== "encerrar" && body.acao !== "reabrir") {
+      return NextResponse.json({ error: "Ação inválida." }, { status: 400 });
+    }
+    return NextResponse.json(await acaoEmLote({ surveyId: id, inviteIds, acao: body.acao }));
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

@@ -103,7 +103,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     if (!resultado.ok) {
       return NextResponse.json({ error: resultado.error }, { status: 409 });
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, convites: resultado.convites });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

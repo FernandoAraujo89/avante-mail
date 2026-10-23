@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { ClipboardCheck, CopyPlus, Pencil, Plus, Trash2, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -116,6 +117,18 @@ export default function PesquisasPage() {
     }
   }
 
+  async function duplicar(p: PesquisaResumoDto) {
+    setError("");
+    try {
+      const res = await fetch(`/api/pesquisas/${p.id}/duplicar`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Não foi possível duplicar.");
+      router.push(`/pesquisas/${json.id}/editar`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function excluir() {
     if (!excluindo) return;
     setError("");
@@ -204,6 +217,29 @@ export default function PesquisasPage() {
                             {p.createdByName ? ` · criada por ${p.createdByName}` : ""} em{" "}
                             {formatDate(p.createdAt)}
                           </p>
+                          {p.inviteCount > 0 ? (
+                            <div
+                              className="mt-2 flex max-w-sm items-center gap-2"
+                              title={`${Math.round((p.completedCount / p.inviteCount) * 100)}% concluíram (${p.completedCount} de ${p.inviteCount})`}
+                            >
+                              <div
+                                className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"
+                                role="progressbar"
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={Math.round((p.completedCount / p.inviteCount) * 100)}
+                                aria-label="Andamento da pesquisa"
+                              >
+                                <div
+                                  className={cn("h-full rounded-full", p.completedCount === p.inviteCount ? "bg-success" : "bg-primary")}
+                                  style={{ width: `${(p.completedCount / p.inviteCount) * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-xs tabular-nums text-muted-foreground">
+                                {Math.round((p.completedCount / p.inviteCount) * 100)}%
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button variant="outline" size="sm" asChild>
@@ -235,11 +271,21 @@ export default function PesquisasPage() {
                               Reabrir
                             </Button>
                           )}
-                          {p.inviteCount === 0 ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Duplicar ${p.name}`}
+                            title="Duplicar (cópia em rascunho)"
+                            onClick={() => duplicar(p)}
+                          >
+                            <CopyPlus />
+                          </Button>
+                          {p.inviteCount === 0 || p.status === "closed" ? (
                             <Button
                               variant="ghost"
                               size="icon"
                               aria-label={`Excluir ${p.name}`}
+                              title="Excluir"
                               onClick={() => setExcluindo(p)}
                             >
                               <Trash2 />
@@ -315,8 +361,9 @@ export default function PesquisasPage() {
           <DialogHeader>
             <DialogTitle>Excluir pesquisa</DialogTitle>
             <DialogDescription>
-              &quot;{excluindo?.name}&quot; ainda não tem convidados e vai sumir com as perguntas.
-              Não dá para desfazer.
+              {excluindo && excluindo.inviteCount > 0
+                ? `"${excluindo.name}" vai sumir com as perguntas, os ${excluindo.inviteCount} convites, todas as respostas e o relatório. Não dá para desfazer.`
+                : `"${excluindo?.name}" ainda não tem convidados e vai sumir com as perguntas. Não dá para desfazer.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

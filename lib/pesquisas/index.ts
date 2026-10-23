@@ -265,24 +265,76 @@ export async function salvarPerguntas(surveyId: string, diff: DiffPerguntas): Pr
 }
 
 /**
- * Só some uma pesquisa sem convites — com convite há resposta de parceiro
- * (ou vai haver); aí o caminho é encerrar.
+ * Some com a pesquisa — e, em cascata, com convites, respostas e o histórico
+ * de envios dela. Com convidados, só depois de encerrada: é a trava contra
+ * apagar no impulso o que parceiros responderam.
  */
 export async function excluirPesquisa(
   id: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; convites: number } | { ok: false; error: string }> {
   const db = getDb();
   const [linha] = await db
-    .select({ id: surveys.id, inviteCount: contagens.inviteCount })
+    .select({ id: surveys.id, status: surveys.status, inviteCount: contagens.inviteCount })
     .from(surveys)
     .where(eq(surveys.id, id));
   if (!linha) return { ok: false, error: "Pesquisa não encontrada." };
-  if (linha.inviteCount > 0) {
+  if (linha.inviteCount > 0 && linha.status !== "closed") {
     return {
       ok: false,
-      error: "Esta pesquisa já tem parceiros convidados. Encerre-a em vez de excluir.",
+      error: "Esta pesquisa tem parceiros convidados: encerre-a antes de excluir.",
     };
   }
   await db.delete(surveys).where(eq(surveys.id, id));
-  return { ok: true };
+  return { ok: true, convites: linha.inviteCount };
+}
+
+/**
+ * Uma cópia em rascunho — perguntas ativas, textos e mensagens do convite —
+ * para começar outra rodada ou uma variação sem mexer na original.
+ */
+export async function duplicarPesquisa(
+  id: string,
+  autor: { id: string; name: string } | null
+): Promise<string | null> {
+  const db = getDb();
+  const [original] = await db.select().from(surveys).where(eq(surveys.id, id));
+  if (!original) return null;
+  const perguntas = await db
+    .select()
+    .from(surveyQuestions)
+    .where(and(eq(surveyQuestions.surveyId, id), isNull(surveyQuestions.archivedAt)))
+    .orderBy(asc(surveyQuestions.position), asc(surveyQuestions.createdAt));
+
+  return db.transaction(async (tx) => {
+    const [copia] = await tx
+      .insert(surveys)
+      .values({
+        objective: original.objective,
+        name: `${original.name} (cópia)`,
+        intro: original.intro,
+        thanks: original.thanks,
+        emailSubject: original.emailSubject,
+        emailBody: original.emailBody,
+        whatsappTemplateId: original.whatsappTemplateId,
+        whatsappVariables: original.whatsappVariables,
+        createdByUserId: autor?.id ?? null,
+        createdByName: autor?.name ?? null,
+      })
+      .returning({ id: surveys.id });
+    if (perguntas.length > 0) {
+      await tx.insert(surveyQuestions).values(
+        perguntas.map((p, position) => ({
+          surveyId: copia.id,
+          position,
+          type: p.type,
+          label: p.label,
+          help: p.help,
+          required: p.required,
+          options: p.options,
+          isNps: p.isNps,
+        }))
+      );
+    }
+    return copia.id;
+  });
 }
