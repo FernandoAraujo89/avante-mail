@@ -134,6 +134,8 @@ export default function EditarPesquisaPage() {
 
   const [abertas, setAbertas] = useState<Set<string>>(new Set());
   const [focar, setFocar] = useState<string | null>(null);
+  /** Seções com as perguntas escondidas (a barra minimizada). */
+  const [recolhidas, setRecolhidas] = useState<Set<string>>(new Set());
   const [removida, setRemovida] = useState<{ pergunta: PerguntaLocal; indice: number } | null>(null);
   const [arquivando, setArquivando] = useState<PerguntaLocal | null>(null);
   const [descartando, setDescartando] = useState(false);
@@ -223,6 +225,55 @@ export default function EditarPesquisaPage() {
   // O que falta corrigir, por pergunta — a linha mostra, a barra soma.
   const problemas = useMemo(() => new Map(perguntas.map((p) => [p.chave, problemaDaPergunta(p)])), [perguntas]);
   const nProblemas = [...problemas.values()].filter(Boolean).length;
+
+  // A que seção cada pergunta pertence (a última seção acima dela), e o
+  // resumo de cada seção: quantas perguntas e quantas precisam de atenção.
+  const secaoDe = useMemo(() => {
+    const mapa = new Map<string, string | null>();
+    let atual: string | null = null;
+    for (const p of perguntas) {
+      if (p.type === "section") atual = p.chave;
+      else mapa.set(p.chave, atual);
+    }
+    return mapa;
+  }, [perguntas]);
+  const resumoDaSecao = useMemo(() => {
+    const mapa = new Map<string, { n: number; problemas: number }>();
+    for (const [chave, secao] of secaoDe) {
+      if (!secao) continue;
+      const r = mapa.get(secao) ?? { n: 0, problemas: 0 };
+      r.n += 1;
+      if (problemas.get(chave)) r.problemas += 1;
+      mapa.set(secao, r);
+    }
+    return mapa;
+  }, [secaoDe, problemas]);
+  const secoes = useMemo(() => perguntas.filter((p) => p.type === "section").map((p) => p.chave), [perguntas]);
+
+
+
+  async function mudarStatus(status: SurveyStatus) {
+    setErro("");
+    try {
+      const res = await fetch(`/api/pesquisas/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erro ao atualizar a pesquisa.");
+      aplicar(json);
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function descartar() {
+    if (pesquisa) aplicar(pesquisa);
+    setAbertas(new Set());
+    setDescartando(false);
+  }
+
   const nomeVazio = !nome.trim();
   const podeSalvar = sujo && !salvando && nProblemas === 0 && !nomeVazio;
 
@@ -267,13 +318,15 @@ export default function EditarPesquisaPage() {
         if (alvo) {
           setAba("perguntas");
           setAbertas((a) => new Set(a).add(alvo.chave));
+          const secao = secaoDe.get(alvo.chave) ?? null;
+          if (secao) setRecolhidas((r) => (r.has(secao) ? new Set([...r].filter((c) => c !== secao)) : r));
           setTimeout(() => document.getElementById(`linha-${alvo.chave}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
         }
       }
     } finally {
       setSalvando(false);
     }
-  }, [podeSalvar, id, nome, intro, agradecimento, assuntoEmail, corpoEmail, modeloId, variaveis, perguntas, aplicar]);
+  }, [podeSalvar, id, nome, intro, agradecimento, assuntoEmail, corpoEmail, modeloId, variaveis, perguntas, aplicar, secaoDe]);
 
   // Ctrl/Cmd+S salva — o atalho que todo editor tem.
   useEffect(() => {
@@ -287,29 +340,28 @@ export default function EditarPesquisaPage() {
     return () => window.removeEventListener("keydown", atalho);
   }, [salvar]);
 
-  async function mudarStatus(status: SurveyStatus) {
-    setErro("");
-    try {
-      const res = await fetch(`/api/pesquisas/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Erro ao atualizar a pesquisa.");
-      aplicar(json);
-    } catch (err) {
-      setErro(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  function descartar() {
-    if (pesquisa) aplicar(pesquisa);
-    setAbertas(new Set());
-    setDescartando(false);
-  }
-
   // ── Perguntas ────────────────────────────────────────────────────────────
+
+  function alternarRecolhida(chave: string) {
+    setRecolhidas((r) => {
+      const copia = new Set(r);
+      if (copia.has(chave)) copia.delete(chave);
+      else copia.add(chave);
+      return copia;
+    });
+  }
+
+  /** Mostra a seção que esconde esta pergunta (nada acontece se já está visível). */
+  function garantirVisivel(chave: string) {
+    const secao = secaoDe.get(chave) ?? null;
+    if (!secao) return;
+    setRecolhidas((r) => {
+      if (!r.has(secao)) return r;
+      const copia = new Set(r);
+      copia.delete(secao);
+      return copia;
+    });
+  }
 
   function alternarAberta(chave: string) {
     setAbertas((a) => {
@@ -341,12 +393,23 @@ export default function EditarPesquisaPage() {
       ...lista,
       { chave, id: null, type, label: "", help: "", required: false, options: opcoesPadrao(type), isNps: false, answerCount: 0 },
     ]);
+    // Entra no fim, dentro da última seção: ela precisa estar expandida.
+    const ultimaSecao = secoes[secoes.length - 1];
+    if (type !== "section" && ultimaSecao) {
+      setRecolhidas((r) => {
+        if (!r.has(ultimaSecao)) return r;
+        const copia = new Set(r);
+        copia.delete(ultimaSecao);
+        return copia;
+      });
+    }
     setAbertas((a) => new Set(a).add(chave));
     setFocar(chave);
     setTimeout(() => document.getElementById(`linha-${chave}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
   }
 
   function duplicar(chave: string) {
+    garantirVisivel(chave);
     setPerguntas((lista) => {
       const i = lista.findIndex((p) => p.chave === chave);
       if (i < 0) return lista;
@@ -545,11 +608,22 @@ export default function EditarPesquisaPage() {
                     ? "Comece pela primeira pergunta — escolha o tipo:"
                     : `${nRespondiveis} pergunta${nRespondiveis === 1 ? "" : "s"}${nObrigatorias ? ` · ${nObrigatorias} obrigatória${nObrigatorias === 1 ? "" : "s"}` : ""}`}
                 </p>
-                {perguntas.length > 0 ? (
-                  <Button variant="ghost" size="sm" onClick={() => setAbertas(abertas.size ? new Set() : new Set(perguntas.map((p) => p.chave)))}>
-                    {abertas.size ? "Recolher todas" : "Expandir todas"}
-                  </Button>
-                ) : null}
+                <div className="flex flex-wrap items-center gap-1">
+                  {secoes.length > 0 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setRecolhidas(recolhidas.size < secoes.length ? new Set(secoes) : new Set())}
+                    >
+                      {recolhidas.size < secoes.length ? "Minimizar seções" : "Ampliar seções"}
+                    </Button>
+                  ) : null}
+                  {perguntas.length > 0 ? (
+                    <Button variant="ghost" size="sm" onClick={() => setAbertas(abertas.size ? new Set() : new Set(perguntas.map((p) => p.chave)))}>
+                      {abertas.size ? "Recolher todas" : "Expandir todas"}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
 
               <ChipsDeTipo onEscolher={adicionar} />
@@ -577,6 +651,10 @@ export default function EditarPesquisaPage() {
                 <ol className="grid min-w-0 gap-2">
                   {perguntas.map((p, i) => {
                     if (p.type !== "section") numero += 1;
+                    const secao = p.type === "section" ? null : (secaoDe.get(p.chave) ?? null);
+                    // Dentro de uma seção minimizada: escondida, mas a numeração segue.
+                    if (secao && recolhidas.has(secao)) return null;
+                    const resumo = p.type === "section" ? resumoDaSecao.get(p.chave) : undefined;
                     return (
                       <li key={p.chave} id={`linha-${p.chave}`} className="min-w-0">
                         <EditorPergunta
@@ -592,6 +670,10 @@ export default function EditarPesquisaPage() {
                           onMover={(direcao) => mover(p.chave, direcao)}
                           onDuplicar={() => duplicar(p.chave)}
                           onRemover={() => remover(p)}
+                          recolhida={p.type === "section" && recolhidas.has(p.chave)}
+                          nDentro={resumo?.n ?? 0}
+                          problemasDentro={resumo?.problemas ?? 0}
+                          onRecolher={() => alternarRecolhida(p.chave)}
                         />
                       </li>
                     );

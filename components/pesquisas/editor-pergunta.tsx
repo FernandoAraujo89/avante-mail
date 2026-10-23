@@ -56,6 +56,10 @@ export function EditorPergunta({
   onMover,
   onDuplicar,
   onRemover,
+  recolhida = false,
+  nDentro = 0,
+  problemasDentro = 0,
+  onRecolher,
 }: {
   pergunta: PerguntaLocal;
   /** Número que o parceiro vê (seção não tem). */
@@ -72,6 +76,14 @@ export function EditorPergunta({
   onMover: (direcao: -1 | 1) => void;
   onDuplicar: () => void;
   onRemover: () => void;
+  // Só para seção: a barra recolhe e expande as perguntas abaixo dela.
+  /** As perguntas desta seção estão escondidas. */
+  recolhida?: boolean;
+  /** Quantas perguntas a seção agrupa (até a próxima seção). */
+  nDentro?: number;
+  /** Quantas delas precisam de atenção — visível mesmo recolhida. */
+  problemasDentro?: number;
+  onRecolher?: () => void;
 }) {
   const o = pergunta.options ?? {};
   const ehSecao = pergunta.type === "section";
@@ -99,17 +111,30 @@ export function EditorPergunta({
 
   // Seção: só o título importa. Barra escura (superfície invertida) com o
   // título digitado direto na linha — distinta de pergunta e de campo
-  // desabilitado — e as ações ao lado; não abre nem fecha.
+  // desabilitado — e as ações ao lado. A seta recolhe/expande as perguntas
+  // abaixo dela (a caixa minimiza): numa pesquisa longa, a lista vira o
+  // índice das seções.
   if (ehSecao) {
     const acaoNaBarra = "text-inverse-foreground hover:bg-white/15 hover:text-inverse-foreground active:bg-white/25 disabled:opacity-40";
     return (
       <div
         className={cn(
-          "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-inverse px-3 py-2 text-inverse-foreground",
+          "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-inverse px-2 py-2 text-inverse-foreground",
           problema && "ring-2 ring-warning ring-inset"
         )}
       >
-        <Icone className="size-4 shrink-0 text-inverse-muted" aria-hidden />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn(acaoNaBarra, "size-8")}
+          aria-expanded={!recolhida}
+          aria-label={recolhida ? "Expandir a seção" : "Recolher a seção"}
+          title={recolhida ? "Mostrar as perguntas desta seção" : "Esconder as perguntas desta seção"}
+          onClick={onRecolher}
+        >
+          <ChevronDown className={cn("transition-transform", recolhida && "-rotate-90")} />
+        </Button>
         <input
           ref={enunciadoRef}
           id={campoId("label")}
@@ -126,6 +151,10 @@ export function EditorPergunta({
             {problema}
           </span>
         ) : null}
+        <span className={cn("text-xs whitespace-nowrap", problemasDentro > 0 ? "text-warning-light" : "text-inverse-muted")}>
+          {nDentro === 0 ? "sem perguntas" : `${nDentro} pergunta${nDentro === 1 ? "" : "s"}`}
+          {problemasDentro > 0 ? ` · ${problemasDentro} com atenção` : ""}
+        </span>
         <div className="ml-auto flex shrink-0 items-center">
           <Button type="button" variant="ghost" size="icon" className={acaoNaBarra} aria-label="Mover para cima" title="Mover para cima" disabled={ehPrimeira} onClick={onMover.bind(null, -1)}>
             <ArrowUp />
