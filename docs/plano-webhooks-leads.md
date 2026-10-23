@@ -215,7 +215,16 @@ com o modelo "Campanhas Avante" (negócio + pessoa + origem, cabeçalho
   `NRG_HUB_API_TOKEN` no ambiente o CRM ativo é o Hub (`crmAtivo()` em
   `lib/pipedrive/funis.ts`); sem ele, o Pipedrive — comportamento antigo.
   Funis por nome em `CRM_FUNIS` (vários, por vírgula; padrão "White Label -
-  Inbound"); `NRG_HUB_URL` só se o endereço mudar.
+  Inbound"); `NRG_HUB_URL` só se o endereço mudar. Desde 23/10 à tarde:
+  `White Label - Inbound,Funil Outbound (Prospecção),Indicador` — o token e o
+  webhook do Hub marcam os mesmos três. Apelidos cadastrados para eles:
+  "Em análise" → agendar-apresentacao-parte-tecnica, "Agendar proposta
+  comercial" → apresentar-proposta-comercial, "Aguardar assinatura" →
+  aguardar-assinatura-e-pagamento; "Não consegui contato" (Outbound) fica sem
+  equivalente de propósito (o lead não se move). SDR e IA SDR têm as mesmas
+  etapas, mas NÃO aparecem em Marketing › Integrações para este usuário: um
+  admin do Hub precisa liberar esses funis para o Marketing antes de entrarem.
+  Leads (SDR por IA), Cliente Final e Geladeira ficaram de fora por decisão.
 
 **O que mudou no código:** ids de funil, etapa, negócio e pessoa viraram
 TEXTO (UUIDs no Hub; os números do Pipedrive viram "123") — migração
