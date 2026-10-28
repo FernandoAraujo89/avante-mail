@@ -12,9 +12,11 @@
 // Sem argumento: cria só a frente que ainda não tem pesquisa (não duplica).
 // Com `--substituir`: nas frentes que já têm pesquisa SEM convites, troca o
 // nome, os textos e todas as perguntas pelas daqui; com convites, não mexe.
+// Com `--frente <objetivo>` (dados_empresa | nps | crescimento): só essa
+// frente — para corrigir uma fase sem encostar nas outras.
 //
 // NÃO é migração (o nome não casa com `migrate-*`): roda à mão —
-//   npx tsx scripts/seed-pesquisas.ts [--substituir]
+//   npx tsx scripts/seed-pesquisas.ts [--substituir] [--frente dados_empresa]
 import { config } from "dotenv";
 import path from "path";
 config({ path: path.join(process.cwd(), ".env.local") });
@@ -69,7 +71,7 @@ const SUGERIDAS: Record<
   dados_empresa: {
     name: "Fase 1 · Diagnóstico e organização",
     intro:
-      "Queremos saber quem é a sua empresa, o tamanho da operação e quais soluções Avante você vende e domina. Leva uns 10 minutos — e dá para parar e voltar depois pelo mesmo link.",
+      "Queremos saber quem é a sua empresa e o tamanho da operação. Leva uns 10 minutos — e dá para parar e voltar depois pelo mesmo link.",
     thanks:
       "Obrigado! Com a realidade da sua empresa em mãos, a Expansão consegue apoiar você do jeito certo.",
     perguntas: [
@@ -78,7 +80,6 @@ const SUGERIDAS: Record<
       curta("CNPJ ou identificador interno do parceiro", { required: true }),
       curta("Nome do responsável principal e cargo", { required: true }),
       curta("Contato profissional: e-mail e telefone", { required: true }),
-      curta("Cidade, estado e regiões atendidas"),
       unica("Há quanto tempo a empresa atua no mercado?", ["Até 2 anos", "3 a 5 anos", "6 a 10 anos", "Mais de 10 anos"]),
       unica(
         "Qual é a principal atividade da empresa?",
@@ -94,7 +95,6 @@ const SUGERIDAS: Record<
       secao("Perfil e carteira de clientes", "Medir o tamanho da operação e o mercado em que o parceiro atua."),
       unica("Quantos clientes ativos a empresa atende atualmente?", ["Até 20", "21 a 50", "51 a 100", "101 a 300", "Mais de 300"]),
       numero("Quantos desses clientes utilizam soluções Avante?", { options: { unit: "clientes" }, help: "Número aproximado." }),
-      numero("Quantas licenças Avante estão ativas atualmente?", { options: { unit: "licenças" }, help: "Número aproximado." }),
       unica("A empresa possui sistema próprio ou de outro fornecedor?", ["Sim", "Não"]),
       curta("Se sim, qual sistema?"),
       numero("Quantos clientes ainda utilizam o sistema próprio ou de terceiros?", { options: { unit: "clientes" }, help: "Número aproximado." }),
@@ -112,17 +112,11 @@ const SUGERIDAS: Record<
       }),
       curta("Em qual prazo essa migração poderia acontecer?"),
 
-      secao("Produtos Avante e utilização", "Entender quais soluções o parceiro comercializa, domina e utiliza."),
-      longa("Quais soluções Avante estão contratadas?", { help: "Liste conforme o catálogo Avante." }),
-      longa("Quais soluções o parceiro comercializa ativamente?"),
-      longa("Quais soluções já possuem clientes ativos?"),
+      // Correção da Mayra (28/10/2026): soluções contratadas/comercializadas/com
+      // clientes e licenças ativas já estão no Avante Gestão; cidade/regiões e
+      // identidade visual também saíram.
+      secao("Produtos Avante e utilização", "Entender o interesse em novos produtos, o domínio da equipe e o que falta no produto."),
       longa("Quais produtos o parceiro ainda não vende, mas tem interesse em comercializar?"),
-      unica("A identidade visual, domínio e configurações necessárias estão concluídos?", [
-        "Sim",
-        "Parcialmente",
-        "Não",
-        "Não se aplica",
-      ]),
       escala1a5("Como você avalia o domínio técnico dos produtos pela sua equipe?"),
       escala1a5("Como você avalia o conhecimento comercial da sua equipe para demonstrar e vender as soluções?"),
       longa("Quais funcionalidades ou integrações são essenciais para sua operação?"),
@@ -234,9 +228,16 @@ const SUGERIDAS: Record<
 
 async function main() {
   const substituir = process.argv.includes("--substituir");
+  const frenteIdx = process.argv.indexOf("--frente");
+  const frente = frenteIdx >= 0 ? process.argv[frenteIdx + 1] : undefined;
+  if (frenteIdx >= 0 && !(frente && frente in SUGERIDAS)) {
+    console.error(`[SEED] --frente precisa de um destes: ${Object.keys(SUGERIDAS).join(", ")}.`);
+    process.exit(1);
+  }
+  const frentes = (frente ? [frente] : Object.keys(SUGERIDAS)) as SurveyObjective[];
   const db = getDb();
 
-  for (const objective of Object.keys(SUGERIDAS) as SurveyObjective[]) {
+  for (const objective of frentes) {
     const s = SUGERIDAS[objective];
     const existentes = await db
       .select({

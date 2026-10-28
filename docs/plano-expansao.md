@@ -528,3 +528,14 @@ diagnóstico (dá para fazer com o e-mail transacional quando o texto existir).
 alertas DEPOIS de gravar a conclusão, em try/catch (falha não atrapalha o
 parceiro); `listarConvites`, `painelDeParceiros` e `buscarParceiros` só ganharam
 campos e filtros opcionais; rótulos das frentes passaram a ser as fases.
+
+**Correção da Fase 1 (28/10/2026, Mayra):** saíram a frase "quais soluções
+Avante você vende e domina" da introdução e as perguntas de cidade/regiões,
+licenças ativas, soluções contratadas/comercializadas/com clientes ativos e
+identidade visual — tudo isso já está no Avante Gestão. A fase ficou com 25
+perguntas em 3 seções. O seed ganhou `--frente <objetivo>` para trocar uma
+fase sem encostar nas outras: `npx tsx scripts/seed-pesquisas.ts --substituir
+--frente dados_empresa` (só troca se a fase não tiver convite). Em produção a
+Fase 1 já estava ativa com convites, então a correção entrou como o editor
+faria: as 6 perguntas foram arquivadas (somem do formulário, ficam no
+relatório) e a introdução e o subtítulo da seção foram atualizados.
