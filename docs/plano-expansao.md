@@ -374,7 +374,7 @@ tipo, funil) — a tela, a rota JSON e o CSV leem do mesmo lugar, como em
 
 | Fase | Entrega | Depende de | Dias |
 |---|---|---|---|
-| **0. Trâmites (sem código, começa no dia 1)** | Número novo na WABA, nome "Avante Expansão" em análise, modelo UTILITY do convite submetido, credencial OAuth no Google Cloud | Acesso ao Business Manager e ao Google Cloud | — |
+| **0. Trâmites (sem código, começa no dia 1)** ✅ 29/10/2026 | Número +55 37 99876-0551 na WABA "Avante Comunicados" (phone_number_id 1382237371645372), nome "Avante Expansão" em análise, modelo UTILITY `pesquisa_convite_v1` (botão de link `…/pesquisa/{{1}}`) aprovado; o Google foi desistido | Acesso ao Business Manager | — |
 | **1. Perfil Expansão** ✅ 22/10/2026 | Perfil, prefixos, menu, página inicial, formulário de usuário; cadastro das duas profissionais em produção (fora do código) | — | 0,5–1 |
 | **2. Pesquisas: modelo e construtor** ✅ 22/10/2026 | Tabelas + migração (`migrate-pesquisas.ts`), CRUD, construtor em `/pesquisas/[id]/editar` com pré-visualização, seed das 3 pesquisas sugeridas (`seed-pesquisas.ts`, roda à mão), regras puras em `lib/pesquisas/{perguntas,respostas}.ts` com testes | 1 | 3–4 |
 | **3. Página pública de resposta** ✅ 22/10/2026 | `/pesquisa/[token]` (server) + `components/pesquisas/pagina-de-resposta.tsx`; gravação por pergunta com atraso de 600 ms (`PUT /api/pesquisa/[token]/respostas/[perguntaId]`), funil pending → opened → in_progress → completed, concluir trava, rate limit fechado por IP; convite mínimo por contato em `POST /api/pesquisas/[id]/convites` (reabrir fica para a parte 4) | 2 | 2–3 |
@@ -382,7 +382,7 @@ tipo, funil) — a tela, a rota JSON e o CSV leem do mesmo lugar, como em
 | **5. Linhas de WhatsApp e caixa da Expansão** ✅ 22/10/2026 | `lib/whatsapp/linhas.ts` (comunicados = `WHATSAPP_PHONE_NUMBER_ID`, expansao = `WHATSAPP_EXPANSAO_PHONE_NUMBER_ID`), cliente envia pela linha, webhook lê `metadata.phone_number_id` (id desconhecido cai em comunicados com aviso), `whatsapp_conversations.line` + única por (linha, telefone) (`migrate-whatsapp-linhas.ts`), caixa com seletor de linha para o admin e fixa para a Expansão, contador do menu por linha, rotas da conversa fechadas por linha (`linhas-acesso.ts`), resposta automática só em comunicados, ficha do contato mostra a conversa das linhas do perfil. Testado localmente com id falso no webhook; o número real entra como configuração | 1; número registrado para testar de verdade | 2–3 |
 | **6. Relatórios e painel das 3 frentes** ✅ 22/10/2026 | `/pesquisas/[id]/relatorio` (funil, NPS em arco, barras, distribuição, textos com busca; filtro por lista e período; CSV em `?formato=csv`), `lib/pesquisas/relatorio.ts` puro + testes, `relatorio-db.ts`; `/pesquisas/parceiros` (parceiro × 3 frentes, convite mais recente, nota do NPS) e `/pesquisas/parceiros/[contactId]` (respostas das 3 frentes); bloco "Pesquisas da Expansão" e convites/lembretes no histórico da ficha do contato; Sucesso do cliente lê o painel (decisão 4) | 3 | 3–4 |
 | **7. Login com Google** ✗ desistido em 22/10/2026 | Foi implementado e removido no mesmo dia a pedido do Fernando (commit 8f0b574 guarda a versão, se um dia voltar). Ficou só o que a Expansão usa: cadastro de usuário sem senha, que define a sua por "Esqueci minha senha" (`migrate-senha-opcional.ts`, que também apaga as colunas do Google) | — | — |
-| **8. Endurecimento e deploy** ◐ | Feito: regras puras testadas (vitest), tsc/lint limpos, fluxos verificados localmente (curl + navegador + Graph falsa). Falta: deploy (migrações rodam no loop; `seed-pesquisas.ts` à mão), cadastrar as duas usuárias da Expansão, envs novas no servidor, trâmites na Meta (número + modelo do convite) (o Google foi desistido) | tudo | 1–2 |
+| **8. Endurecimento e deploy** ✅ 29/10/2026 | Regras puras testadas (vitest), tsc/lint limpos, fluxos verificados localmente (curl + navegador + Graph falsa); em produção desde 22/10 (migrações no loop; `seed-pesquisas.ts` à mão), usuárias da Expansão cadastradas, `WHATSAPP_EXPANSAO_PHONE_NUMBER_ID` no servidor e número registrado em 29/10, modelo do convite aprovado (o Google foi desistido) | tudo | 1–2 |
 | | | **Total** | **16–23** |
 
 Ordem sugerida: **1 → 2 → 3 → 4 (e-mail) → 6 → 5 → 4 (WhatsApp) → 7 → 8**.
@@ -468,6 +468,14 @@ são os mesmos — atribuir o número ao System User na Meta), Nada muda nas exi
 registrar o número novo pela API, rodar os scripts de operação com o id dele:
 `WHATSAPP_PHONE_NUMBER_ID=<id novo> node scripts/wa-register.mjs request|verify|register`.
 
+Como foi feito em 29/10/2026: o número foi adicionado e verificado por SMS no
+WhatsApp Manager (WABA "Avante Comunicados"), registrado na Cloud API com
+`POST /<phone_number_id>/register` (PIN de duas etapas definido na hora), a env
+gravada em `/root/avante-mail/.env.local` e `app`, `worker` e `whatsapp-worker`
+recriados. Teste: mensagem para o número caiu na caixa da Expansão. Gotcha: o
+`.env.local` do servidor não pode ser carregado com `source` (valores com `<`
+sem aspas); para usar uma env em shell, extrair a linha com `sed`.
+
 **Middleware:** prefixos públicos novos `/pesquisa/`, `/api/pesquisa/`,
 `/api/auth/google`.
 
@@ -478,7 +486,10 @@ tabelas.
 
 **Cadastros em produção, fora do código:** as duas usuárias da Expansão
 (perfil `expansao`, sem senha se o Google entrar antes), rótulo e número da
-linha em `app_settings`.
+linha em `app_settings`. Modelo do convite `pesquisa_convite_v1` (Utilidade,
+`{{1}}` nome e `{{2}}` empresa no corpo, botão "Responder à pesquisa" com
+`https://campanhas.avantetools.com.br/pesquisa/{{1}}`), criado pela tela de
+modelos e aprovado em 29/10/2026; escolher na aba Convite de cada pesquisa.
 
 **Testes:** regras puras com vitest (`lib/pesquisas/*.test.ts`,
 `lib/whatsapp/linhas.test.ts`, `lib/auth/google.test.ts`); fluxo completo com
