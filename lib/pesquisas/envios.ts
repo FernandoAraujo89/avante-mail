@@ -139,8 +139,11 @@ export async function listarConvites(surveyId: string): Promise<ConviteDto[]> {
         validatedByName: surveyInvites.validatedByName,
         closedReason: surveyInvites.closedReason,
         createdByName: surveyInvites.createdByName,
+        // Só perguntas ativas: resposta a pergunta arquivada não conta (nem no total).
         respondidas: sql<number>`(
-          select count(*) from survey_answers a where a.invite_id = survey_invites.id
+          select count(*) from survey_answers a
+          join survey_questions q on q.id = a.question_id
+          where a.invite_id = survey_invites.id and q.archived_at is null
         )`.mapWith(Number),
       })
       .from(surveyInvites)
@@ -698,10 +701,17 @@ export async function reenviarConvite(args: {
 }
 
 /**
- * Apaga um convite — só sem resposta: convidou por engano, ou quer refazer.
- * Com resposta, o caminho é encerrar (o relatório continua contando).
+ * Apaga um convite. Sem resposta, apaga direto: convidou por engano, ou quer
+ * refazer. Com resposta, só com `comRespostas` — a Expansão confirmou na tela
+ * que quer perder as respostas (ex.: convite de teste, ou refazer por outro
+ * canal); senão o caminho é encerrar (o relatório continua contando). A
+ * cascata leva respostas, envios, passos da régua e alertas do convite.
  */
-export async function excluirConvite(surveyId: string, inviteId: string): Promise<Resultado> {
+export async function excluirConvite(
+  surveyId: string,
+  inviteId: string,
+  opcoes: { comRespostas?: boolean } = {}
+): Promise<{ ok: true; respostas: number } | { ok: false; error: string }> {
   const c = await conviteDaPesquisa(surveyId, inviteId);
   if (!c) return { ok: false, error: "Convite não encontrado." };
   const db = getDb();
@@ -709,11 +719,11 @@ export async function excluirConvite(surveyId: string, inviteId: string): Promis
     .select({ respostas: sql<number>`count(*)`.mapWith(Number) })
     .from(surveyAnswers)
     .where(eq(surveyAnswers.inviteId, inviteId));
-  if (respostas > 0) {
+  if (respostas > 0 && !opcoes.comRespostas) {
     return { ok: false, error: "Este convite já tem respostas: encerre-o em vez de excluir." };
   }
   await db.delete(surveyInvites).where(eq(surveyInvites.id, inviteId));
-  return { ok: true };
+  return { ok: true, respostas };
 }
 
 /** Encerra ou reabre vários convites; devolve quantos mudaram e os motivos de quem não mudou. */

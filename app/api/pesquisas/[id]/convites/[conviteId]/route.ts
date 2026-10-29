@@ -30,18 +30,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
-/** Apaga o convite — só sem respostas. */
-export async function DELETE(_request: NextRequest, context: RouteContext) {
+/**
+ * Apaga o convite. Sem respostas, direto; com respostas, só com
+ * `?respostas=apagar` (a tela pede confirmação antes).
+ */
+export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id, conviteId } = await context.params;
     if (!UUID_REGEX.test(id) || !UUID_REGEX.test(conviteId)) {
       return NextResponse.json({ error: "Convite não encontrado." }, { status: 404 });
     }
-    const resultado = await excluirConvite(id, conviteId);
+    const comRespostas = request.nextUrl.searchParams.get("respostas") === "apagar";
+    const resultado = await excluirConvite(id, conviteId, { comRespostas });
     if (!resultado.ok) {
       return NextResponse.json({ error: resultado.error }, { status: 409 });
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, respostas: resultado.respostas });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }

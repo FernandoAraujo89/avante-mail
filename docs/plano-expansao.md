@@ -550,3 +550,13 @@ fase sem encostar nas outras: `npx tsx scripts/seed-pesquisas.ts --substituir
 Fase 1 já estava ativa com convites, então a correção entrou como o editor
 faria: as 6 perguntas foram arquivadas (somem do formulário, ficam no
 relatório) e a introdução e o subtítulo da seção foram atualizados.
+
+**Excluir convite com respostas (29/10/2026):** a Expansão pode excluir um
+convite mesmo respondido (pedido do Fernando: convite de teste por e-mail que
+precisava ser refeito por WhatsApp). Sem resposta, apaga direto como antes; com
+resposta, a tela abre confirmação dizendo quantas perguntas estão respondidas e
+que respostas, envios e passos da régua somem de vez (a cascata do banco leva
+tudo), e só então chama `DELETE .../convites/[conviteId]?respostas=apagar`.
+Sem o parâmetro, a API continua recusando (409). Junto: "respondidas" passou a
+contar só perguntas ativas, porque resposta a pergunta arquivada aparecia como
+"31/25" depois da correção da Fase 1.

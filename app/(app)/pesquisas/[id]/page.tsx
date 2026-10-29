@@ -135,6 +135,9 @@ export default function AcompanhamentoPage() {
   const [gerenciarAberto, setGerenciarAberto] = useState(false);
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+  // Excluir convite COM respostas pede confirmação (apaga as respostas de vez).
+  const [excluindoConvite, setExcluindoConvite] = useState<ConviteDto | null>(null);
+  const [excluindo, setExcluindo] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -303,17 +306,27 @@ export default function AcompanhamentoPage() {
     }
   }
 
-  async function excluirConvite(c: ConviteDto) {
+  async function excluirConvite(c: ConviteDto, comRespostas = false) {
     setErro("");
     setAviso("");
+    setExcluindo(true);
     try {
-      const res = await fetch(`/api/pesquisas/${id}/convites/${c.id}`, { method: "DELETE" });
+      const url = `/api/pesquisas/${id}/convites/${c.id}${comRespostas ? "?respostas=apagar" : ""}`;
+      const res = await fetch(url, { method: "DELETE" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Não foi possível excluir o convite.");
-      setAviso(`Convite de ${c.contact.name} excluído.`);
+      const n = Number(json.respostas ?? 0);
+      setAviso(
+        n > 0
+          ? `Convite de ${c.contact.name} excluído com ${n} resposta${n === 1 ? "" : "s"}. Dá para convidar de novo.`
+          : `Convite de ${c.contact.name} excluído.`
+      );
+      setExcluindoConvite(null);
       await carregar();
     } catch (err) {
       setErro(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExcluindo(false);
     }
   }
 
@@ -738,17 +751,19 @@ export default function AcompanhamentoPage() {
                             <LockOpen />
                           </Button>
                         )}
-                        {c.respondidas === 0 ? (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Excluir convite de ${c.contact.name}`}
-                            title="Excluir o convite (só sem respostas)"
-                            onClick={() => excluirConvite(c)}
-                          >
-                            <Trash2 />
-                          </Button>
-                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Excluir convite de ${c.contact.name}`}
+                          title={
+                            c.respondidas === 0
+                              ? "Excluir o convite"
+                              : "Excluir o convite e as respostas dele (pede confirmação)"
+                          }
+                          onClick={() => (c.respondidas === 0 ? excluirConvite(c) : setExcluindoConvite(c))}
+                        >
+                          <Trash2 />
+                        </Button>
                       </TableActionsCell>
                     </TableRow>
                   );
@@ -963,6 +978,38 @@ export default function AcompanhamentoPage() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={excluindoConvite !== null} onOpenChange={(aberto) => !aberto && !excluindo && setExcluindoConvite(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir o convite de {excluindoConvite?.contact.name}?</DialogTitle>
+            <DialogDescription>
+              Este convite tem {excluindoConvite?.respondidas} de {excluindoConvite?.total} perguntas respondidas.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <p className="text-sm">
+              Excluir apaga as respostas, o histórico de envios e os passos da régua deste parceiro, de vez. O
+              relatório deixa de contar com ele. Depois, dá para convidar de novo, por qualquer canal.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Para manter as respostas sem o parceiro poder editar, encerre o convite em vez de excluir.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setExcluindoConvite(null)} disabled={excluindo}>
+                Voltar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => excluindoConvite && excluirConvite(excluindoConvite, true)}
+                disabled={excluindo}
+              >
+                {excluindo ? "Excluindo..." : "Excluir com as respostas"}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 

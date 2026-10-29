@@ -226,8 +226,11 @@ async function frentesPorParceiro(contactIds: string[] | null): Promise<Map<stri
       contactId: contacts.id,
       name: contacts.name,
       company: contacts.company,
+      // Só perguntas ativas: resposta a pergunta arquivada não conta (nem no total).
       respondidas: sql<number>`(
-        select count(*) from survey_answers a where a.invite_id = survey_invites.id
+        select count(*) from survey_answers a
+        join survey_questions q on q.id = a.question_id
+        where a.invite_id = survey_invites.id and q.archived_at is null
       )`.mapWith(Number),
       total: sql<number>`(
         select count(*) from survey_questions q
