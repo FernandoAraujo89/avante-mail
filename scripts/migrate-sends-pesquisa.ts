@@ -1,6 +1,8 @@
 import { config } from "dotenv";
 import { Client } from "pg";
 
+import { recriarRestricaoDeOrigem } from "../lib/db/origem-de-envio";
+
 // Migração idempotente: convites e lembretes de pesquisa como terceira origem
 // de campaign_sends (docs/plano-expansao.md, parte 4). Roda DEPOIS de
 // migrate-campaign-sends-origem.ts e migrate-pesquisas.ts (ordem alfabética
@@ -38,18 +40,9 @@ async function main() {
   );
 
   console.log("[MIGRATE] campaign_sends: restrição de origem com a pesquisa...");
-  await client.query(
-    `ALTER TABLE campaign_sends DROP CONSTRAINT IF EXISTS campaign_sends_origem_check`
-  );
-  await client.query(`
-    ALTER TABLE campaign_sends ADD CONSTRAINT campaign_sends_origem_check
-      CHECK (
-        campaign_id IS NOT NULL
-        OR automation_run_id IS NOT NULL
-        OR automation_step_id IS NOT NULL
-        OR survey_invite_id IS NOT NULL
-      )
-  `);
+  // Mesma definição das outras duas migrações (lib/db/origem-de-envio.ts).
+  const expressao = await recriarRestricaoDeOrigem(client);
+  console.log(`[MIGRATE]   CHECK (${expressao})`);
 
   console.log("[MIGRATE] Concluído.");
   await client.end();

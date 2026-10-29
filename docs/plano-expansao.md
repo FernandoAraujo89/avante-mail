@@ -484,6 +484,17 @@ sem aspas); para usar uma env em shell, extrair a linha com `sed`.
 do deploy. Conferir a ordem alfabética contra os scripts que mexem nas mesmas
 tabelas.
 
+Aconteceu (29/10/2026): o primeiro deploy depois dos primeiros convites reais
+parou em `migrate-campaign-sends-origem.ts`, que recriava a restrição de
+origem de `campaign_sends` SEM a cláusula `survey_invite_id` (a cláusula só
+entrava em `migrate-sends-pesquisa.ts`, que roda depois). Com 3 envios de
+convite na tabela, o ADD falhou depois do DROP e a tabela ficou sem restrição;
+o `up -d` não rodou e produção seguiu na versão anterior. Correção: a
+definição do CHECK vive em `lib/db/origem-de-envio.ts` e é montada a partir das
+colunas de origem que existem na hora (campanha, percurso, passo, convite); as
+três migrações que mexem nela usam a mesma função, e o DROP + ADD vai num
+`ALTER TABLE` só, atômico.
+
 **Cadastros em produção, fora do código:** as duas usuárias da Expansão
 (perfil `expansao`, sem senha se o Google entrar antes), rótulo e número da
 linha em `app_settings`. Modelo do convite `pesquisa_convite_v1` (Utilidade,

@@ -1,6 +1,8 @@
 import { config } from "dotenv";
 import { Client } from "pg";
 
+import { colunasDeOrigemExistentes, expressaoDeOrigem } from "../lib/db/origem-de-envio";
+
 // Migração idempotente: campaign_sends genérica (Fase 2 do
 // docs/plano-automacoes.md).
 //
@@ -74,6 +76,10 @@ async function main() {
   );
   // Envio sem origem nenhuma é lixo silencioso: não aparece em relatório
   // nenhum, mas foi cobrado. A restrição impede que exista.
+  // A definição vem de lib/db/origem-de-envio.ts (uma só para as três
+  // migrações que mexem nela), com as colunas que existem neste momento —
+  // inclusive survey_invite_id, se a migração da pesquisa já rodou antes.
+  const expressao = expressaoDeOrigem(await colunasDeOrigemExistentes(client));
   await client.query(`
     DO $$
     BEGIN
@@ -81,7 +87,7 @@ async function main() {
         SELECT 1 FROM pg_constraint WHERE conname = 'campaign_sends_origem_check'
       ) THEN
         ALTER TABLE campaign_sends ADD CONSTRAINT campaign_sends_origem_check
-          CHECK (campaign_id IS NOT NULL OR automation_run_id IS NOT NULL);
+          CHECK (${expressao});
       END IF;
     END $$;
   `);

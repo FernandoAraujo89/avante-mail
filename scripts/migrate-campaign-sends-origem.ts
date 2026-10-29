@@ -1,6 +1,8 @@
 import { config } from "dotenv";
 import { Client } from "pg";
 
+import { recriarRestricaoDeOrigem } from "../lib/db/origem-de-envio";
+
 // Migração idempotente: corrige a restrição de origem de campaign_sends.
 //
 // A restrição criada na fase 2 exigia campanha OU percurso. Só que a chave
@@ -13,6 +15,12 @@ import { Client } from "pg";
 // A restrição agora aceita também o passo (automation_step_id, que não tem FK e
 // permanece na linha). Continua barrando o que ela existia para barrar: envio
 // gravado sem origem nenhuma — cobrado e invisível em qualquer relatório.
+//
+// 29/10/2026: a definição passou a vir de lib/db/origem-de-envio.ts, com as
+// colunas que existem no momento (inclusive survey_invite_id, da pesquisa).
+// Este script recriava a restrição sem a pesquisa a cada deploy e, no primeiro
+// deploy depois dos primeiros convites reais, falhou e deixou a tabela sem
+// restrição. O DROP e o ADD agora vão num ALTER só, atômico.
 //
 // Rode uma vez: `npx tsx scripts/migrate-campaign-sends-origem.ts`
 
@@ -34,18 +42,8 @@ async function main() {
   await client.connect();
 
   console.log("[MIGRATE] campaign_sends: restrição de origem...");
-  await client.query(
-    `ALTER TABLE campaign_sends
-       DROP CONSTRAINT IF EXISTS campaign_sends_origem_check`
-  );
-  await client.query(`
-    ALTER TABLE campaign_sends ADD CONSTRAINT campaign_sends_origem_check
-      CHECK (
-        campaign_id IS NOT NULL
-        OR automation_run_id IS NOT NULL
-        OR automation_step_id IS NOT NULL
-      )
-  `);
+  const expressao = await recriarRestricaoDeOrigem(client);
+  console.log(`[MIGRATE]   CHECK (${expressao})`);
 
   console.log("[MIGRATE] Concluído.");
 
