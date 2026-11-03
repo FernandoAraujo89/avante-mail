@@ -253,14 +253,21 @@ Leads, Cliente Final, Geladeira), com apelidos para as etapas dos funis Leads
 "Qualificando lead" → qualificar-lead, "Agendar apresentação" → agendar-…) e
 Cliente Final ("Leads novos" → qualificado, "Agendar/Realizar apresentação
 técnica", "Analisar proposta"). Geladeira ("Stand-by", "Recontatar") e "Falha
-no envio" não têm equivalente: o lead não se move, só ganha o funil. E, para
-o lead captado pelos formulários daqui existir lá, `lib/nrg/captacao.ts`
-manda cada lead NOVO (origem ≠ nrg-hub) para a fonte de captação do Hub
-(`NRG_HUB_CAPTACAO_URL`, Marketing › Fontes de lead, fonte "Campanhas
-Avante" → funil Leads); `scripts/enviar-leads-ao-hub.ts` faz a carga dos que
-já existiam sem funil (`--dry-run`, `--limite`). O Hub deduplica pelo
-telefone (sem telefone não vai: 2 dos 419). SDR e IA SDR seguem fora até um
-admin do Hub liberá-los para o Marketing.
+no envio" não têm equivalente: o lead não se move, só ganha o funil. SDR e
+IA SDR foram liberados pelo admin do Hub no mesmo dia.
+
+**Caminho de ida REMOVIDO (3/11/2026) — o Campanhas só lê o Hub:** entre
+23/10 e 3/11 existiu um envio de cada lead novo daqui (origem ≠ nrg-hub) à
+fonte de captação do Hub (`NRG_HUB_CAPTACAO_URL`, `lib/nrg/captacao.ts`,
+mais a carga única `scripts/enviar-leads-ao-hub.ts`). Isso DUPLICAVA leads no
+Hub: ele já capta os mesmos formulários (Meta, site) por conta própria, e o
+mesmo lead chegava pelos dois lados com segundos de diferença — o Hub chegou
+a responder 500 "Failed to create contact" nos casos em que já tinha o
+contato. Decisão do Fernando: o Campanhas nunca envia lead ao Hub; a troca é
+de mão única, Hub → Campanhas (webhook de saída do Hub + API de leitura). A
+variável saiu do `.env.local` do servidor (backup em /root/backups) e o
+código foi removido. Se a fonte "Campanhas Avante" ainda existir em Marketing
+› Fontes de lead do Hub, pode ser apagada — nada mais a chama.
 
 **Virada:** token do Hub no servidor (`NRG_HUB_API_TOKEN`), `PIPEDRIVE_API_TOKEN`
 removido — a sincronização antiga para sozinha, e a primeira passada do Hub lê

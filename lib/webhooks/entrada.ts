@@ -19,7 +19,6 @@ import {
   resolverEtapa,
 } from "@/lib/leads/etapas";
 import { resolverQualificacao } from "@/lib/leads/qualificacoes";
-import { enviarLeadAoHub } from "@/lib/nrg/captacao";
 import {
   costurarVisitante,
   type ResultadoDaCostura,
@@ -458,29 +457,11 @@ export async function processarEntrada(args: {
       });
     }
 
-    // Caminho de volta ao CRM: todo lead novo captado aqui vai para o NRG Hub
-    // (fonte de captação), para existir lá e ganhar funil. O que veio do
-    // próprio Hub não volta (seria um laço). Fora do fluxo da resposta: uma
-    // falha lá não atrapalha a entrega aqui — fica no log.
-    if (origem.slug !== "nrg-hub" && process.env.NRG_HUB_CAPTACAO_URL) {
-      void enviarLeadAoHub({
-        id: contactId,
-        name: novo.name,
-        email,
-        phone: telefone,
-        company: novo.company ?? null,
-        utmSource: novo.utmSource,
-        utmMedium: novo.utmMedium,
-        utmCampaign: novo.utmCampaign,
-        utmContent: novo.utmContent,
-        utmTerm: novo.utmTerm,
-        origem: origem.name,
-      }).then((r) => {
-        if (!r.ok && r.motivo !== "sem-telefone") {
-          console.error(`[NRG-HUB] lead ${contactId} não foi para o Hub: ${r.motivo} ${r.status ?? ""} ${r.detalhe ?? ""}`);
-        }
-      });
-    }
+    // NÃO há caminho de volta ao CRM. O Campanhas só LÊ o NRG Hub (webhook de
+    // saída do Hub + API de leitura): entre 23/10 e 3/11/2026 cada lead novo
+    // daqui era mandado à fonte de captação do Hub, e isso DUPLICAVA leads lá
+    // — o Hub já capta os mesmos formulários por conta própria. Decisão de
+    // 3/11/2026: nunca enviar lead ao Hub a partir daqui.
   }
 
   // TRAVA 1: lead entra SÓ na lista de leads. O `listId` vem do defaults da
