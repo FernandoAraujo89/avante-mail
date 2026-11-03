@@ -704,6 +704,7 @@ export default function RelatorioPage() {
                       { tipo: "email_opened", rotulo: "E-mails abertos" },
                       { tipo: "email_clicked", rotulo: "Cliques em e-mail" },
                       { tipo: "whatsapp_replied", rotulo: "Respostas no WhatsApp" },
+                      { tipo: "whatsapp_clicked", rotulo: "Cliques no WhatsApp" },
                       { tipo: "site_visited", rotulo: "Visitas ao site" },
                       { tipo: "lead_qualified", rotulo: "Qualificações no CRM" },
                       { tipo: "lead_stage_changed", rotulo: "Movimentos no funil" },

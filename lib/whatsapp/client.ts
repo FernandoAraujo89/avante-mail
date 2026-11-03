@@ -6,10 +6,12 @@ import {
   phoneNumberIdDaLinha,
   type Linha,
 } from "./linhas";
+import { getBaseUrl } from "../base-url";
 import {
   extractVariables,
   isDynamicUrl,
   isMediaHeader,
+  trackedLinkMetaUrl,
   WHATSAPP_MEDIA_HEADERS,
   type WhatsAppButton,
   type WhatsAppHeaderType,
@@ -467,17 +469,27 @@ export function buildTemplateComponents(template: {
   }
 
   if (template.buttons && template.buttons.length > 0) {
+    // Botão rastreado: a Meta recebe o link da plataforma com o fim variável;
+    // o destino de verdade fica só aqui (lib/whatsapp/rastreio-de-link.ts).
+    const linkRastreado = trackedLinkMetaUrl(getBaseUrl());
     components.push({
       type: "BUTTONS",
       buttons: template.buttons.map((b) =>
         b.type === "URL"
-          ? {
-              type: "URL",
-              text: b.text,
-              url: b.url,
-              // Link dinâmico: a Meta exige um exemplo do sufixo para aprovar.
-              ...(isDynamicUrl(b.url) ? { example: [b.example || "exemplo"] } : {}),
-            }
+          ? b.tracked
+            ? {
+                type: "URL",
+                text: b.text,
+                url: linkRastreado,
+                example: [linkRastreado.replace("{{1}}", "abc123")],
+              }
+            : {
+                type: "URL",
+                text: b.text,
+                url: b.url,
+                // Link dinâmico: a Meta exige um exemplo do sufixo para aprovar.
+                ...(isDynamicUrl(b.url) ? { example: [b.example || "exemplo"] } : {}),
+              }
           : { type: "QUICK_REPLY", text: b.text }
       ),
     });

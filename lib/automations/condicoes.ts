@@ -25,6 +25,7 @@ export const AUTOMATION_CONDITION_TYPES = [
   "email_opened",
   "email_clicked",
   "whatsapp_replied",
+  "whatsapp_clicked",
   "whatsapp_subscribed",
   "field_equals",
 ] as const;
@@ -150,6 +151,9 @@ async function avaliarUma(
 
     case "whatsapp_replied":
       return envioMarcado(runId, cond.stepId, campaignSends.repliedAt);
+
+    case "whatsapp_clicked":
+      return envioMarcado(runId, cond.stepId, campaignSends.clickedAt);
 
     case "whatsapp_subscribed":
       return contato.whatsappSubscribed && Boolean(contato.phone);

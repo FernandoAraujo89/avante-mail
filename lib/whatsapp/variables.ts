@@ -4,6 +4,7 @@ import {
   dynamicUrlButtonIndex,
   extractVariables,
   isMediaHeader,
+  trackedUrlButtonIndex,
   type WhatsAppButton,
   type WhatsAppHeaderType,
   type WhatsAppMediaHeaderType,
@@ -86,6 +87,12 @@ export function buildSendComponents(args: {
   contact: VariableContact;
   /** O fim do link do botão dinâmico deste envio (o token do convite). */
   buttonUrlSuffix?: string;
+  /**
+   * O fim do link do botão RASTREADO deste envio (o código que a rota de
+   * rastreio lê — lib/whatsapp/rastreio-de-link.ts). Modelo sem botão
+   * rastreado ignora.
+   */
+  trackedLinkSuffix?: string;
 }): TemplateMessageComponent[] {
   const { template } = args;
   const components: TemplateMessageComponent[] = [];
@@ -131,6 +138,18 @@ export function buildSendComponents(args: {
         sub_type: "url",
         index: String(index),
         parameters: [{ type: "text", text: args.buttonUrlSuffix }],
+      });
+    }
+  }
+
+  if (args.trackedLinkSuffix) {
+    const index = trackedUrlButtonIndex(template.buttons ?? null);
+    if (index !== null) {
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: String(index),
+        parameters: [{ type: "text", text: args.trackedLinkSuffix }],
       });
     }
   }

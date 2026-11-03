@@ -78,6 +78,13 @@ export const REGRAS_PADRAO: {
     points: 15,
     description: "Respondeu no WhatsApp",
   },
+  // Sugestão para instalação nova; em produção, a regra entra pela tela de
+  // pontuação, como qualquer outra.
+  {
+    eventType: "whatsapp_clicked",
+    points: 5,
+    description: "Clicou no link de um WhatsApp",
+  },
   {
     eventType: "email_unsubscribed",
     points: -30,

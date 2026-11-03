@@ -56,6 +56,7 @@ export const TRIGGER_LABEL: Record<AutomationTriggerType, string> = {
   email_opened: "E-mail aberto",
   email_clicked: "Link clicado",
   whatsapp_replied: "Respondeu no WhatsApp",
+  whatsapp_clicked: "Clicou no link do WhatsApp",
   lead_score_changed: "Lead mudou de faixa de pontuação",
   lead_stage_changed: "Lead andou no funil",
   lead_qualified: "Lead foi qualificado",
@@ -98,6 +99,7 @@ export const CONDITION_LABEL: Record<string, string> = {
   email_opened: "Abriu o e-mail",
   email_clicked: "Clicou no e-mail",
   whatsapp_replied: "Respondeu no WhatsApp",
+  whatsapp_clicked: "Clicou no link do WhatsApp",
   whatsapp_subscribed: "Aceita WhatsApp",
   field_equals: "Campo é igual a",
 };

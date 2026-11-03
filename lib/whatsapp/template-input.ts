@@ -209,12 +209,24 @@ export function parseTemplateInput(body: unknown): ParseTemplateResult {
         if (urlCount > 2) {
           return fail("Use no máximo 2 botões de link (limite da Meta).");
         }
+        // Rastreado: o fim do link é do rastreio, então não pode ser dinâmico;
+        // e só um por modelo (cada envio preenche um fim só).
+        const tracked = b.tracked === true;
+        if (tracked && isDynamicUrl(buttonUrl)) {
+          return fail(
+            "Um botão de link rastreado não pode terminar em {{1}}: o fim do link já é usado pelo rastreio."
+          );
+        }
+        if (tracked && parsed.some((p) => p.type === "URL" && p.tracked)) {
+          return fail("Só um botão de link pode ser rastreado por modelo.");
+        }
         const example = typeof b.example === "string" ? b.example.trim() : "";
         parsed.push({
           type: "URL",
           text,
           url: buttonUrl,
           ...(isDynamicUrl(buttonUrl) ? { example: example || "exemplo" } : {}),
+          ...(tracked ? { tracked: true } : {}),
         });
       } else if (b.type === "QUICK_REPLY") {
         parsed.push({ type: "QUICK_REPLY", text });

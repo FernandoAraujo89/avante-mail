@@ -126,6 +126,7 @@ export async function GET() {
               "email_opened",
               "email_clicked",
               "whatsapp_replied",
+              "whatsapp_clicked",
               "site_visited",
               "site_event",
               "lead_qualified",

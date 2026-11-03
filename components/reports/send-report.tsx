@@ -52,8 +52,9 @@ import {
   isResendableErrorCode,
   isRestrictionErrorCode,
 } from "@/lib/whatsapp/errors";
+import { cn } from "@/lib/utils";
 import { messagePreview } from "@/lib/whatsapp/inbound";
-import type { WhatsAppButton } from "@/lib/whatsapp/types";
+import { trackedUrlButtonIndex, type WhatsAppButton } from "@/lib/whatsapp/types";
 
 /**
  * Relatório de um disparo (campanha ou edição do Avante News). É o mesmo
@@ -269,6 +270,11 @@ export async function SendReport({
     ).length;
     const read = sends.filter((s) => s.readAt !== null).length;
     const replied = sends.filter((s) => s.repliedAt !== null).length;
+    // Toques no botão de link rastreado (lib/whatsapp/rastreio-de-link.ts).
+    // O cartão só aparece quando o modelo tem o botão, ou quando já houve
+    // clique (modelo mudou depois do disparo).
+    const clicked = sends.filter((s) => s.clickedAt !== null).length;
+    const mostraCliques = trackedUrlButtonIndex(whatsappButtons) !== null || clicked > 0;
     const frequencyCapped = sends.filter(
       (s) => s.errorCode === "131049"
     ).length;
@@ -311,7 +317,15 @@ export async function SendReport({
           />
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={cn("mt-4 grid gap-4 sm:grid-cols-2", mostraCliques ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
+          {mostraCliques ? (
+            <MetricCard
+              label="Cliques no botão"
+              value={String(clicked)}
+              hint={clicked > 0 ? `Taxa: ${formatPercent(clicked, delivered)} das entregues` : "Ninguém tocou no link ainda"}
+              icon={MousePointerClick}
+            />
+          ) : null}
           <MetricCard
             label="Respostas"
             value={String(replied)}

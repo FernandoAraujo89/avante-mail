@@ -168,6 +168,14 @@ export type WhatsAppButton =
        */
       url: string;
       example?: string;
+      /**
+       * RASTREADO: `url` é o destino de verdade (fixo), mas na Meta o botão
+       * vai com o link da plataforma e o fim variável (`…/api/track/l/{{1}}`);
+       * cada envio preenche o fim com o próprio id, e a rota conta o clique e
+       * redireciona ao destino. A Meta não avisa toque em botão de link — este
+       * é o único jeito de medir. Sem a marca, nada muda.
+       */
+      tracked?: boolean;
     };
 
 /** O fim do link muda por envio? (`https://…/pesquisa/{{1}}`) */
@@ -178,6 +186,20 @@ export function isDynamicUrl(url: string): boolean {
 /** Índice (na lista de botões) do botão de link dinâmico, se o modelo tem um. */
 export function dynamicUrlButtonIndex(buttons: WhatsAppButton[] | null): number | null {
   const i = (buttons ?? []).findIndex((b) => b.type === "URL" && isDynamicUrl(b.url));
+  return i === -1 ? null : i;
+}
+
+/** Caminho da rota que conta o clique no botão de link rastreado (app/api/track/l/[codigo]). */
+export const TRACKED_LINK_PATH = "/api/track/l/";
+
+/** A URL que vai à Meta no lugar do destino, quando o botão é rastreado. */
+export function trackedLinkMetaUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}${TRACKED_LINK_PATH}{{1}}`;
+}
+
+/** Índice do botão de link RASTREADO, se o modelo tem um (no máximo um). */
+export function trackedUrlButtonIndex(buttons: WhatsAppButton[] | null): number | null {
+  const i = (buttons ?? []).findIndex((b) => b.type === "URL" && b.tracked === true);
   return i === -1 ? null : i;
 }
 

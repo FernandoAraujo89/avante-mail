@@ -200,4 +200,38 @@ describe("botão de link dinâmico no envio", () => {
     });
     expect(semSufixo.some((c) => c.type === "button")).toBe(false);
   });
+
+  it("o botão rastreado leva o código do envio, no índice dele, ao lado do dinâmico", async () => {
+    const { buildSendComponents } = await import("./variables");
+    const template = {
+      bodyText: "Saiu a edição nova.",
+      variableExamples: null,
+      headerType: "none" as const,
+      headerMediaUrl: null,
+      headerMediaFilename: null,
+      buttons: [
+        { type: "URL" as const, text: "Ler", url: "https://avante.com/news", tracked: true },
+        { type: "URL" as const, text: "Responder", url: "https://x.com/pesquisa/{{1}}" },
+      ],
+    };
+    const components = buildSendComponents({
+      template,
+      variables: null,
+      contact: { name: "Ana", company: null },
+      buttonUrlSuffix: "tok123",
+      trackedLinkSuffix: "envio-1",
+    });
+    expect(components).toEqual([
+      { type: "button", sub_type: "url", index: "1", parameters: [{ type: "text", text: "tok123" }] },
+      { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "envio-1" }] },
+    ]);
+    // Modelo sem botão rastreado ignora o código: nada muda para quem não usa.
+    const semRastreio = buildSendComponents({
+      template: { ...template, buttons: [template.buttons[1]] },
+      variables: null,
+      contact: { name: "Ana", company: null },
+      trackedLinkSuffix: "envio-1",
+    });
+    expect(semRastreio).toEqual([]);
+  });
 });

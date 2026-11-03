@@ -20,7 +20,8 @@ import {
   isWhatsAppConfigured,
   sendTemplateMessage,
 } from "@/lib/whatsapp/client";
-import { missingHeaderMedia } from "@/lib/whatsapp/types";
+import { codigoDeTeste } from "@/lib/whatsapp/rastreio-de-link";
+import { missingHeaderMedia, trackedUrlButtonIndex } from "@/lib/whatsapp/types";
 import { buildSendComponents } from "@/lib/whatsapp/variables";
 
 export const dynamic = "force-dynamic";
@@ -116,6 +117,10 @@ async function sendWhatsAppTest(
     template,
     variables: campaign.whatsappVariables,
     contact: { name: "Parceiro Teste", company: "Empresa Exemplo" },
+    // Botão de link rastreado: o teste não tem linha em campaign_sends, então
+    // leva o código de teste — redireciona ao destino sem contar clique.
+    trackedLinkSuffix:
+      trackedUrlButtonIndex(template.buttons) !== null ? codigoDeTeste(template.id) : undefined,
   });
 
   const results = await Promise.allSettled(

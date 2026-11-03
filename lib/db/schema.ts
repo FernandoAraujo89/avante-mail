@@ -119,6 +119,9 @@ export const CONTACT_EVENT_TYPES = [
   "email_opened",
   "email_clicked",
   "whatsapp_replied",
+  // Tocou no botão de link rastreado de um WhatsApp (lib/whatsapp/rastreio-
+  // de-link.ts). Como o clique de e-mail: só o primeiro clique vira evento.
+  "whatsapp_clicked",
   "whatsapp_unsubscribed",
   // Canal SMS (Twilio): resposta recebida no inbound e opt-out por palavra
   // (PARAR/SAIR/…) ou pelo erro 21610/21614 no status callback. Mesma lógica
@@ -461,6 +464,7 @@ export const AUTOMATION_TRIGGER_TYPES = [
   "email_opened",
   "email_clicked",
   "whatsapp_replied",
+  "whatsapp_clicked",
   // Fase F+ — o lead mudou de FAIXA de pontuação (frio/morno/quente). Só a
   // virada de faixa vira evento, nunca a variação do número, então este
   // gatilho não dispara a cada recálculo. E a reentrada é barrada pelo índice

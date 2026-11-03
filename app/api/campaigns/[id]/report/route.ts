@@ -104,6 +104,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         ).length,
         delivered,
         read: sends.filter((s) => s.readAt !== null).length,
+        // Toques no botão de link rastreado (lib/whatsapp/rastreio-de-link.ts).
+        clicked: sends.filter((s) => s.clickedAt !== null).length,
         replied: sends.filter((s) => s.repliedAt !== null).length,
         failed,
         // 131049 = limite de marketing do destinatário (esperado; não é

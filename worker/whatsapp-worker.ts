@@ -29,9 +29,11 @@ import {
 } from "../lib/whatsapp/client";
 import {
   missingHeaderMedia,
+  trackedUrlButtonIndex,
   type WhatsAppVariableMap,
 } from "../lib/whatsapp/types";
 import { LINHA_PADRAO, type Linha } from "../lib/whatsapp/linhas";
+import { codigoDoEnvio } from "../lib/whatsapp/rastreio-de-link";
 import { buildSendComponents } from "../lib/whatsapp/variables";
 import { errorMessage } from "../lib/utils";
 
@@ -216,6 +218,10 @@ async function processJob(job: Job<WhatsAppJobData>): Promise<void> {
       variables,
       contact,
       buttonUrlSuffix,
+      // Botão de link rastreado: o fim do link é o id deste envio, que a
+      // rota /api/track/l lê de volta para contar o clique.
+      trackedLinkSuffix:
+        trackedUrlButtonIndex(template.buttons) !== null ? codigoDoEnvio(sendId) : undefined,
     });
 
     const { wamid } = await sendTemplateMessage({

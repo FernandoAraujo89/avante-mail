@@ -40,6 +40,7 @@ import {
   fillVariables,
   isMediaHeader,
   parseHeaderType,
+  trackedLinkMetaUrl,
   WHATSAPP_LIMITS,
   WHATSAPP_MEDIA_HEADERS,
   type WhatsAppButton,
@@ -63,7 +64,11 @@ type ButtonRow = {
   url: string;
   /** Exemplo do fim do link, quando a URL termina em {{1}} (link dinâmico). */
   example: string;
+  /** Rastrear cliques: o botão passa pela plataforma antes de abrir a URL. */
+  tracked: boolean;
 };
+
+const URL_DINAMICA = /\{\{1\}\}\s*$/;
 
 interface TemplateDto {
   id: string;
@@ -121,6 +126,11 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
   const [footerText, setFooterText] = useState(DEFAULT_FOOTER);
   const [buttons, setButtons] = useState<ButtonRow[]>([]);
   const [examples, setExamples] = useState<Record<string, string>>({});
+  /** A origem desta tela (https://…), para mostrar o link que o botão rastreado leva à Meta. */
+  const [origem, setOrigem] = useState("");
+  useEffect(() => {
+    setOrigem(window.location.origin);
+  }, []);
   const [status, setStatus] = useState("draft");
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(isEditing);
@@ -170,6 +180,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
             text: b.text,
             url: b.type === "URL" ? b.url : "",
             example: b.type === "URL" ? (b.example ?? "") : "",
+            tracked: b.type === "URL" ? b.tracked === true : false,
           }))
         );
         setExamples(json.variableExamples ?? {});
@@ -318,7 +329,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
         footerText,
         buttons: buttons.map((b) =>
           b.type === "URL"
-            ? { type: "URL", text: b.text, url: b.url, example: b.example }
+            ? { type: "URL", text: b.text, url: b.url, example: b.example, tracked: b.tracked }
             : { type: "QUICK_REPLY", text: b.text }
         ),
         variableExamples: examples,
@@ -664,7 +675,7 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       onClick={() =>
                         setButtons((cur) => [
                           ...cur,
-                          { type: "QUICK_REPLY", text: "", url: "", example: "" },
+                          { type: "QUICK_REPLY", text: "", url: "", example: "", tracked: false },
                         ])
                       }
                       disabled={readOnly || buttons.length >= WHATSAPP_LIMITS.buttons}
@@ -717,14 +728,30 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                           <Input
                             value={button.url}
                             onChange={(e) =>
-                              updateButton(index, { url: e.target.value })
+                              updateButton(index, {
+                                url: e.target.value,
+                                // Link dinâmico não pode ser rastreado: o fim já é do rastreio.
+                                tracked: button.tracked && !URL_DINAMICA.test(e.target.value),
+                              })
                             }
                             placeholder="https://… (termine com {{1}} para o link mudar por envio)"
                             className="min-w-48 flex-1"
                             disabled={readOnly}
                           />
                         ) : null}
-                        {button.type === "URL" && /\{\{1\}\}\s*$/.test(button.url) ? (
+                        {button.type === "URL" && !URL_DINAMICA.test(button.url) ? (
+                          <label className="flex items-center gap-2 text-sm whitespace-nowrap">
+                            <input
+                              type="checkbox"
+                              className="size-4 accent-primary"
+                              checked={button.tracked}
+                              onChange={(e) => updateButton(index, { tracked: e.target.checked })}
+                              disabled={readOnly}
+                            />
+                            Rastrear cliques
+                          </label>
+                        ) : null}
+                        {button.type === "URL" && URL_DINAMICA.test(button.url) ? (
                           <Input
                             value={button.example}
                             onChange={(e) =>
@@ -753,6 +780,14 @@ export function WhatsAppTemplateForm({ templateId }: { templateId?: string }) {
                       </div>
                     ))
                   )}
+                  {buttons.some((b) => b.type === "URL" && b.tracked) ? (
+                    <p className="text-xs text-muted-foreground">
+                      Botão rastreado: na Meta o link fica como {trackedLinkMetaUrl(origem || "https://…")}. Ao
+                      tocar, o parceiro passa pela plataforma, o clique entra no relatório da campanha e ele
+                      segue ao endereço acima. Em modelo já aprovado, ligar o rastreio manda o modelo de
+                      volta à análise da Meta.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-wrap gap-2 pt-2">
