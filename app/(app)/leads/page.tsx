@@ -13,6 +13,7 @@ import {
   Magnet,
   RefreshCw,
   Search,
+  Tags,
   Trash2,
   Webhook,
 } from "lucide-react";
@@ -380,6 +381,12 @@ export default function LeadsPage() {
           <Link href="/leads/qualificacoes">
             <BadgeCheck />
             Qualificações
+          </Link>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href="/leads/motivos-de-perda">
+            <Tags />
+            Motivos de perda
           </Link>
         </Button>
         <Button variant="outline" asChild>

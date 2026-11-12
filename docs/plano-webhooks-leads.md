@@ -260,7 +260,25 @@ adianta a releitura completa (apaga `nrg_releitura_ultima`) para os
 perdidos antigos ganharem o motivo na passada seguinte. Pela documentação do
 Hub, troca de motivo por função administrativa (catálogo) pode não mudar
 `alterado_em` — a releitura diária cobre. O webhook não mapeia o motivo: a
-sincronização de 5 min basta.
+sincronização de 5 min basta. Em produção (12/11, 19h UTC): 1.338 leads
+perdidos, 1.328 com motivo, 37 motivos.
+
+**Tags de motivo de perda (12/11/2026), para as automações de remarketing:**
+campanha nunca inclui lead (trava 2), então o remarketing de lead é por
+automação, e a automação dispara por "Tag adicionada". Cada lead perdido
+carrega UMA tag `perda: <motivo>` (minúsculas, vírgula vira " - " porque a
+ficha do contato separa tags por vírgula, ponto final cai, até 80
+caracteres — `lib/leads/tags-de-perda.ts`). Entra com a perda, troca com o
+motivo, sai quando o lead reabre ou compra; grava só quem muda, com
+`tag_added`/`tag_removed`. DESLIGADO por padrão (`app_settings`
+`leads_tags_motivo_perda` = quando foi ligado): o motor consome cada evento
+uma vez, contra as automações ativas naquele instante, então tag aplicada
+antes da automação existir não dispara nada depois. A ordem em
+`/leads/motivos-de-perda` (tabela motivo → tag com botão de copiar) é: criar e
+ativar a automação com as tags, e só então ligar — ligar marca na hora todos
+os leads perdidos com motivo (decisão do Fernando: os já perdidos entram).
+Depois disso a sincronização mantém a tag de cada lote recalculado.
+Desligar só para de manter; as tags ficam.
 
 **Caminho de volta (23/10, fim da tarde) — todo lead existe no Hub:** o
 Fernando decidiu que não pode haver lead "sem funil conhecido": os funis do

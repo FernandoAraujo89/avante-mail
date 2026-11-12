@@ -10,6 +10,7 @@ import {
 import { listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { aplicarMudancaDoLead } from "@/lib/leads/mudanca";
+import { aplicarTagsDePerda, tagsDePerdaLigadasEm } from "@/lib/leads/tags-de-perda-aplicar";
 import { contatosPorEnderecos } from "@/lib/contatos/enderecos";
 import { normalizePhone } from "@/lib/phone";
 import { phoneCandidatesFromWaId } from "@/lib/whatsapp/inbound";
@@ -394,6 +395,9 @@ export async function sincronizarPipedrive(args?: {
     etapas,
     qualificacoes,
     contagem,
+    // Tags de motivo de perda: só com o interruptor de /leads/motivos-de-perda
+    // ligado (desligado por padrão — lib/leads/tags-de-perda-aplicar.ts).
+    tagsDePerda: Boolean(await tagsDePerdaLigadasEm()),
   });
 
   for (const [funilId, marca] of marcas) {
@@ -539,6 +543,8 @@ async function recalcularLeads(
     etapas: LeadStageRow[];
     qualificacoes: LeadQualificationRow[];
     contagem: Contagem;
+    /** Manter a tag "perda: <motivo>" dos leads (interruptor ligado). */
+    tagsDePerda?: boolean;
   }
 ): Promise<void> {
   const { funis, nomesDosFunis, etapas, qualificacoes, contagem } = ctx;
@@ -626,5 +632,10 @@ async function recalcularLeads(
       if (aplicado.convertidoPara) contagem.convertidos++;
       if (aplicado.conversaoRecusada) contagem.recusas++;
     }
+
+    // Depois do lote decidido: a tag segue o motivo que acabou de ser gravado
+    // (entra com a perda, troca com o motivo, sai quando o lead reabre ou
+    // compra). Grava só quem muda, então a releitura diária não gera evento.
+    if (ctx.tagsDePerda) await aplicarTagsDePerda(lote);
   }
 }
