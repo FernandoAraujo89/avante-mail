@@ -5,7 +5,6 @@ import { LoaderCircle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatShortWhen } from "@/lib/format";
 import { plainWhatsAppText } from "@/lib/whatsapp/format";
-import { LINHA_LABEL } from "@/lib/whatsapp/linhas";
 import type { ConversationSummary } from "@/lib/whatsapp/thread-types";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +32,7 @@ export function ConversationList({
   error,
 }: {
   conversations: ConversationSummary[] | null;
-  /** Mostra de que linha é cada conversa (quando a lista mistura as duas). */
+  /** Mostra de que número é cada conversa (quando a lista mistura os números). */
   mostrarLinha?: boolean;
   selectedId: string | null;
   search: string;
@@ -137,10 +136,21 @@ export function ConversationList({
                       </span>
                       {mostrarLinha ? (
                         <span
-                          className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
-                          title={LINHA_LABEL[conversation.line]}
+                          className={cn(
+                            "max-w-28 shrink-0 truncate rounded px-1 text-[10px] font-medium",
+                            conversation.caixa === "outros"
+                              ? "bg-warning-soft text-warning-dark"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                          title={[conversation.numero.nome, conversation.numero.telefone]
+                            .filter(Boolean)
+                            .join(" · ")}
                         >
-                          {conversation.line === "expansao" ? "Expansão" : "Comunicados"}
+                          {conversation.caixa === "expansao"
+                            ? "Expansão"
+                            : conversation.caixa === "comunicados"
+                              ? "Comunicados"
+                              : conversation.numero.nome}
                         </span>
                       ) : null}
                       <time

@@ -26,9 +26,12 @@ import {
 } from "@/lib/whatsapp/inbound";
 import {
   LINHA_PADRAO,
+  linhaDaConversaDoEvento,
   linhaDoPhoneNumberId,
-  type Linha,
+  outroNumeroDaLinha,
+  type LinhaDaConversa,
 } from "@/lib/whatsapp/linhas";
+import { registrarOutroNumero } from "@/lib/whatsapp/outros-numeros";
 import {
   isOptOutMessage,
   parseWebhookTimestamp,
@@ -47,7 +50,10 @@ export const runtime = "nodejs";
  *        o hub.challenge de volta em texto puro. Confere WHATSAPP_WEBHOOK_VERIFY_TOKEN.
  * POST — eventos: status de mensagem (sent/delivered/read/failed), mensagens
  *        recebidas (gravadas na conversa, com o botão tocado e o opt-out
- *        "SAIR"), status de template e qualidade do número. Assinado com
+ *        "SAIR"), status de template e qualidade do número. Chegam também os
+ *        eventos de números de OUTROS sistemas inscritos no mesmo app da Meta
+ *        (o NRG Hub): viram conversas desses números, em "outros números",
+ *        sem resposta automática e sem contar para campanha. Assinado com
  *        HMAC-SHA256 (X-Hub-Signature-256) do corpo cru com o App Secret —
  *        verificação timing-safe, fail-closed.
  *
@@ -147,7 +153,12 @@ export async function POST(request: NextRequest) {
             for (const status of change.value?.statuses ?? []) {
               await handleStatus(status);
             }
-            const linha = linhaDoEvento(change.value?.metadata?.phone_number_id);
+            const metadata = change.value?.metadata;
+            const linha = linhaDoEvento(metadata?.phone_number_id);
+            const outroNumero = outroNumeroDaLinha(linha);
+            if (outroNumero && (change.value?.messages?.length ?? 0) > 0) {
+              await registrarOutroNumero(outroNumero, metadata?.display_phone_number);
+            }
             for (const message of change.value?.messages ?? []) {
               await handleInboundMessage(message, change.value?.contacts ?? [], linha);
             }
@@ -177,19 +188,19 @@ export async function POST(request: NextRequest) {
 // ─── Handlers ────────────────────────────────────────────────────────
 
 /**
- * De que linha veio a mensagem. Id desconhecido (número novo ainda sem env,
- * ou evento de teste) cai na linha de comunicados, com aviso no log — melhor
- * que perder a mensagem.
+ * De que número é a mensagem. Número que não é linha nossa vira conversa
+ * própria em "outros números" (lib/whatsapp/linhas.ts). Sem como saber de quem
+ * é o número (evento de teste, servidor sem a linha de comunicados), cai em
+ * comunicados, com aviso no log — melhor que perder a mensagem.
  */
-function linhaDoEvento(phoneNumberId: string | undefined): Linha {
-  const linha = linhaDoPhoneNumberId(phoneNumberId);
-  if (linha) return linha;
-  if (phoneNumberId) {
+function linhaDoEvento(phoneNumberId: string | undefined): LinhaDaConversa {
+  const linha = linhaDaConversaDoEvento(phoneNumberId);
+  if (phoneNumberId && !linhaDoPhoneNumberId(phoneNumberId) && linha === LINHA_PADRAO) {
     console.warn(
       `[WEBHOOK-WA] phone_number_id ${phoneNumberId} não é de nenhuma linha configurada; tratando como ${LINHA_PADRAO}.`
     );
   }
-  return LINHA_PADRAO;
+  return linha;
 }
 
 /** Status de mensagem: casa o wamid e aplica a transição monotônica. */
@@ -241,7 +252,7 @@ async function handleStatus(status: WebhookStatus): Promise<void> {
 async function handleInboundMessage(
   raw: WebhookInboundMessage,
   profiles: { wa_id?: string; profile?: { name?: string } }[],
-  linha: Linha
+  linha: LinhaDaConversa
 ): Promise<void> {
   const message = parseInboundMessage(raw);
   if (!message) return;
@@ -260,9 +271,10 @@ async function handleInboundMessage(
   if (!record) return;
 
   // "Este número não é canal de atendimento" — vale também para quem não está
-  // na base, e SÓ na linha de comunicados: a da Expansão é atendimento. As
-  // regras (SAIR, toque de botão, equipe atendendo, uma vez a cada 24h) moram
-  // em lib/whatsapp/auto-reply.ts.
+  // na base, e SÓ na linha de comunicados: a da Expansão é atendimento, e o
+  // número de outro sistema não é nosso para falar sozinho. As regras (SAIR,
+  // toque de botão, equipe atendendo, uma vez a cada 24h) moram em
+  // lib/whatsapp/auto-reply.ts.
   if (linha === "comunicados") {
     const autoReply = await sendAutoReplyIfNeeded({
       conversationId: record.conversationId,
@@ -277,7 +289,12 @@ async function handleInboundMessage(
   const { contact, send } = record;
   if (!contact || message.isReaction) return;
 
+  // Conversa com outro sistema (o NRG Hub) não é resposta ao Campanhas: não
+  // vira gatilho de automação nem ponto no Lead Score daqui.
+  const deOutroNumero = outroNumeroDaLinha(linha) !== null;
+
   if (
+    !deOutroNumero &&
     shouldEmitRepliedEvent({
       isButtonReply: message.isButtonReply,
       firstReplyToSend: send?.firstReply ?? false,
@@ -309,8 +326,9 @@ async function handleInboundMessage(
 
     // Confirmação em texto livre (grátis, dentro da janela de 24h aberta pela
     // própria mensagem do contato). Best-effort — não bloqueia o opt-out. Vai
-    // pela conversa para a equipe ver o que o contato recebeu.
-    if (isWhatsAppConfigured()) {
+    // pela conversa para a equipe ver o que o contato recebeu. No número de
+    // outro sistema o descadastro vale, mas quem responde é o dono do número.
+    if (isWhatsAppConfigured() && !deOutroNumero) {
       const { error } = await sendTextInConversation({
         conversationId: record.conversationId,
         linha,

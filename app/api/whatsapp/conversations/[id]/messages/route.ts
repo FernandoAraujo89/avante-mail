@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { sessionUserFromRequest } from "@/lib/session";
 import { errorMessage, UUID_REGEX } from "@/lib/utils";
-import { isLinhaConfigurada } from "@/lib/whatsapp/client";
+import { isLinhaDaConversaConfigurada } from "@/lib/whatsapp/client";
 import { sendTextInConversation } from "@/lib/whatsapp/conversations";
-import { LINHA_LABEL } from "@/lib/whatsapp/linhas";
+import { ehLinha, LINHA_LABEL } from "@/lib/whatsapp/linhas";
 import { conversaAlcancavel } from "@/lib/whatsapp/linhas-acesso";
 import { serviceWindow, WHATSAPP_TEXT_MAX } from "@/lib/whatsapp/inbound";
 
@@ -44,10 +44,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    if (!isLinhaConfigurada(conversation.line)) {
+    if (!isLinhaDaConversaConfigurada(conversation.line)) {
       return NextResponse.json(
         {
-          error: `O número "${LINHA_LABEL[conversation.line]}" ainda não está configurado neste servidor — não há como enviar a resposta.`,
+          error: ehLinha(conversation.line)
+            ? `O número "${LINHA_LABEL[conversation.line]}" ainda não está configurado neste servidor — não há como enviar a resposta.`
+            : "O canal WhatsApp não está configurado neste servidor — não há como enviar a resposta.",
         },
         { status: 503 }
       );

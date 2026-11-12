@@ -9,7 +9,7 @@ import { ConversationList } from "@/components/whatsapp/inbox/conversation-list"
 import { ConversationThread } from "@/components/whatsapp/inbox/conversation-thread";
 import type { Perfil } from "@/lib/perfis";
 import { UNREAD_CHANGED_EVENT } from "@/lib/whatsapp/inbox-events";
-import { LINHA_LABEL, linhasDoPerfil, type Linha } from "@/lib/whatsapp/linhas";
+import { CAIXA_LABEL, caixasDoPerfil, type Caixa } from "@/lib/whatsapp/linhas";
 import type { ConversationSummary } from "@/lib/whatsapp/thread-types";
 import { cn } from "@/lib/utils";
 
@@ -34,10 +34,11 @@ export function ConversationsInbox() {
   const [search, setSearch] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [error, setError] = useState("");
-  // As linhas de WhatsApp que o perfil alcança (lib/whatsapp/linhas.ts). Com
-  // mais de uma, dá para olhar uma só; "todas" é o padrão.
-  const [minhasLinhas, setMinhasLinhas] = useState<Linha[] | null>(null);
-  const [linha, setLinha] = useState<Linha | "todas">("todas");
+  // As caixas que o perfil alcança (lib/whatsapp/linhas.ts): as linhas de
+  // WhatsApp nossas e, para o administrador, os números de outros sistemas.
+  // Com mais de uma, dá para olhar uma só; "todas" é o padrão.
+  const [minhasLinhas, setMinhasLinhas] = useState<Caixa[] | null>(null);
+  const [linha, setLinha] = useState<Caixa | "todas">("todas");
 
   useEffect(() => {
     (async () => {
@@ -45,7 +46,7 @@ export function ConversationsInbox() {
         const res = await fetch("/api/auth/me");
         if (res.ok) {
           const me = (await res.json()) as { role: Perfil };
-          setMinhasLinhas(linhasDoPerfil(me.role));
+          setMinhasLinhas(caixasDoPerfil(me.role));
         }
       } catch {
         // sem sessão: o middleware cuida do redirecionamento
@@ -112,12 +113,13 @@ export function ConversationsInbox() {
         <div className="min-w-0">
           <h1 className="text-3xl font-medium tracking-tight">
             {minhasLinhas && minhasLinhas.length === 1
-              ? `Conversas · ${LINHA_LABEL[minhasLinhas[0]]}`
+              ? `Conversas · ${CAIXA_LABEL[minhasLinhas[0]]}`
               : "Conversas"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            O que os contatos respondem no WhatsApp. Até 24h depois da última
-            mensagem do contato, dá para responder por aqui.
+            {linha === "outros"
+              ? "Mensagens que chegam a números de outros sistemas (como o NRG Hub). Aqui aparece só o que o contato escreve."
+              : "O que os contatos respondem no WhatsApp. Até 24h depois da última mensagem do contato, dá para responder por aqui."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -136,7 +138,7 @@ export function ConversationsInbox() {
                       : "text-muted-foreground hover:bg-muted"
                   )}
                 >
-                  {valor === "todas" ? "Todas as linhas" : LINHA_LABEL[valor]}
+                  {valor === "todas" ? "Todas as linhas" : CAIXA_LABEL[valor]}
                 </button>
               ))}
             </div>

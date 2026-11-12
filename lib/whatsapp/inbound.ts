@@ -157,6 +157,9 @@ const TYPE_LABELS: Record<string, string> = {
   sticker: "Figurinha",
   location: "📍 Localização",
   contacts: "👤 Contato",
+  // A Meta avisa que a mensagem existe, mas não manda o conteúdo (enquete,
+  // visualização única, evento...). "Mensagem sem texto" fazia parecer vazia.
+  unsupported: "Mensagem que o WhatsApp não repassa ao sistema (ex.: enquete, visualização única)",
 };
 
 /** Resumo de uma linha para a lista de conversas. */

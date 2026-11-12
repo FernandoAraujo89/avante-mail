@@ -15,7 +15,7 @@ import {
 
 import type { EmailDesign, EditorType, Row } from "../email-builder/types";
 import type { Perfil } from "../perfis";
-import type { Linha } from "../whatsapp/linhas";
+import type { LinhaDaConversa } from "../whatsapp/linhas";
 import type {
   WhatsAppButton,
   WhatsAppHeaderType,
@@ -1108,8 +1108,12 @@ export const whatsappConversations = pgTable(
   "whatsapp_conversations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** O nosso número desta conversa (lib/whatsapp/linhas.ts). */
-    line: text("line").$type<Linha>().notNull().default("comunicados"),
+    /**
+     * O número desta conversa (lib/whatsapp/linhas.ts): uma linha nossa ou,
+     * quando o contato escreveu para um número de outro sistema da mesma
+     * empresa na Meta (ex.: o NRG Hub), `outros:<phone_number_id>`.
+     */
+    line: text("line").$type<LinhaDaConversa>().notNull().default("comunicados"),
     /** E.164 do contato cadastrado ou, sem contato, o número de quem escreveu. */
     phone: text("phone").notNull(),
     /**
@@ -1210,6 +1214,24 @@ export const whatsappMessages = pgTable(
     index("whatsapp_messages_envio_idx").on(t.campaignSendId),
   ]
 );
+
+/**
+ * Números de WhatsApp que NÃO são linhas do Campanhas e mandam eventos para o
+ * webhook — os de outros sistemas (NRG Hub, equipes) inscritos no mesmo app
+ * da Meta. As conversas deles ficam em "outros números" (lib/whatsapp/linhas.ts);
+ * aqui mora só como mostrá-los: o número e o nome verificado na Meta.
+ */
+export const whatsappOutrosNumeros = pgTable("whatsapp_outros_numeros", {
+  /** metadata.phone_number_id do webhook. */
+  phoneNumberId: text("phone_number_id").primaryKey(),
+  /** metadata.display_phone_number, como a Meta manda (só dígitos). */
+  displayPhoneNumber: text("display_phone_number"),
+  /** Nome verificado do número na Meta, quando o token do Campanhas alcança. */
+  verifiedName: text("verified_name"),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // Configurações do sistema (chave/valor). Hoje guarda qual lista recebe o
 // Avante News; serve para qualquer preferência global futura.

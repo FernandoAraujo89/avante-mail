@@ -6,14 +6,15 @@ import type { NextRequest } from "next/server";
 import { getDb, whatsappConversations, type WhatsAppConversation } from "@/lib/db";
 import { sessionUserFromRequest } from "@/lib/session";
 
-import { linhasDoPerfil, type Linha } from "./linhas";
+import { caixaDaLinha, caixasDoPerfil, type Caixa } from "./linhas";
 
-export async function linhasDaRequisicao(request: NextRequest): Promise<Linha[]> {
+/** As caixas da tela de conversas (linhas nossas e outros números) de quem pede. */
+export async function caixasDaRequisicao(request: NextRequest): Promise<Caixa[]> {
   const user = await sessionUserFromRequest(request);
-  return user ? linhasDoPerfil(user.role) : [];
+  return user ? caixasDoPerfil(user.role) : [];
 }
 
-/** A conversa, se existe e está numa linha que quem pede alcança; senão null. */
+/** A conversa, se existe e está numa caixa que quem pede alcança; senão null. */
 export async function conversaAlcancavel(
   request: NextRequest,
   conversationId: string
@@ -23,6 +24,6 @@ export async function conversaAlcancavel(
     .from(whatsappConversations)
     .where(eq(whatsappConversations.id, conversationId));
   if (!conversation) return null;
-  const linhas = await linhasDaRequisicao(request);
-  return linhas.includes(conversation.line) ? conversation : null;
+  const caixas = await caixasDaRequisicao(request);
+  return caixas.includes(caixaDaLinha(conversation.line)) ? conversation : null;
 }

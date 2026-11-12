@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { errorMessage, UUID_REGEX } from "@/lib/utils";
 import { isLinhaConfigurada, markMessageAsRead } from "@/lib/whatsapp/client";
 import { markConversationRead } from "@/lib/whatsapp/conversations";
+import { ehLinha } from "@/lib/whatsapp/linhas";
 import { conversaAlcancavel } from "@/lib/whatsapp/linhas-acesso";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,9 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 
 // Alguém da equipe abriu a conversa: zera as não lidas e manda a confirmação
-// de leitura (os tiques azuis) para o contato.
+// de leitura (os tiques azuis) para o contato — só nas linhas nossas. No
+// número de outro sistema (o NRG Hub), quem decide o que o contato vê é o
+// dono do número: abrir a conversa aqui não pinta os tiques de azul lá.
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
@@ -25,7 +28,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const { lastInboundWamid } = await markConversationRead(id);
 
     // Best-effort: sem os tiques a conversa continua funcionando.
-    if (lastInboundWamid && isLinhaConfigurada(conversation.line)) {
+    if (
+      lastInboundWamid &&
+      ehLinha(conversation.line) &&
+      isLinhaConfigurada(conversation.line)
+    ) {
       try {
         await markMessageAsRead(lastInboundWamid, conversation.line);
       } catch (error) {

@@ -35,6 +35,10 @@ const WAMID_A = `wamid.${MARK}_A`;
 const WAMID_B = `wamid.${MARK}_B`;
 const WAMID_C = `wamid.${MARK}_C`;
 const TEMPLATE_NAME = `${MARK}_tpl`;
+// Número de OUTRO sistema (ex.: o NRG Hub) na mesma empresa da Meta: o
+// webhook recebe os eventos dele, mas ele não é linha do Campanhas.
+const OUTRO_NUMERO_ID = "990000000001";
+const OUTRO_NUMERO_EXIBICAO = "5537998658302";
 const BOTAO_SIM = "Sim, vou participar";
 const BOTAO_NAO = "Não poderei participar";
 
@@ -112,7 +116,13 @@ function statusPayload(wamid: string, status: string, error?: { code: number; me
   };
 }
 
-function messagesPayload(fromPhoneNoPlus: string, message: Record<string, unknown>) {
+function messagesPayload(
+  fromPhoneNoPlus: string,
+  message: Record<string, unknown>,
+  metadata: { phone_number_id: string; display_phone_number?: string } = {
+    phone_number_id: "PNID_TEST",
+  }
+) {
   return {
     object: "whatsapp_business_account",
     entry: [
@@ -123,7 +133,7 @@ function messagesPayload(fromPhoneNoPlus: string, message: Record<string, unknow
             field: "messages",
             value: {
               messaging_product: "whatsapp",
-              metadata: { phone_number_id: "PNID_TEST" },
+              metadata,
               contacts: [{ profile: { name: "Perfil Teste" }, wa_id: fromPhoneNoPlus }],
               messages: [{ from: fromPhoneNoPlus, ...message }],
             },
@@ -263,6 +273,9 @@ async function cleanup() {
     `DELETE FROM whatsapp_conversations WHERE phone IN ($1, $2, $3, $4, $5)`,
     [PHONE_A, PHONE_B, PHONE_C, `+${WA_C_SEM_NONO}`, PHONE_DESCONHECIDO]
   );
+  await db
+    .query(`DELETE FROM whatsapp_outros_numeros WHERE phone_number_id = $1`, [OUTRO_NUMERO_ID])
+    .catch(() => {}); // banco sem a migração dos outros números
 }
 
 async function seed(): Promise<string> {
@@ -296,6 +309,20 @@ async function seed(): Promise<string> {
      VALUES ('Teste C', $1, $2, true, now()) RETURNING id`,
     [`${MARK}_c@exemplo.com`, PHONE_C]
   );
+
+  // Desde os endereços múltiplos (06/10), o contato é achado pelo número em
+  // contact_phones — o resumo em contacts.phone não basta.
+  for (const [contato, phone] of [
+    [contactA, PHONE_A],
+    [contactB, PHONE_B],
+    [contactC, PHONE_C],
+  ] as const) {
+    await db.query(
+      `INSERT INTO contact_phones (contact_id, phone, whatsapp_subscribed, whatsapp_opt_in_at, principal)
+       VALUES ($1, $2, true, now(), true)`,
+      [contato.rows[0].id, phone]
+    );
+  }
 
   // Envios já "sent" (como o worker deixaria após chamar a Cloud API). O
   // sent_at fica um minuto atrás: a resposta sem citação só vale para envio
@@ -572,6 +599,96 @@ async function main() {
     check("toque de botão não gera aviso; o texto seguinte gera um", doC.length === 1, JSON.stringify(doC));
   } else {
     console.log("16) Resposta automática: pulada (defina ESPERA_RESPOSTA_AUTOMATICA=1 com o servidor configurado)");
+  }
+
+  // 17. Número de outro sistema. Só com a linha de comunicados configurada no
+  // servidor (WHATSAPP_PHONE_NUMBER_ID): sem ela não há como saber o que é
+  // nosso, e tudo continua caindo em comunicados.
+  if (process.env.ESPERA_OUTROS_NUMEROS === "1") {
+    console.log("17) Mensagem a número de outro sistema (ex.: NRG Hub)");
+    const outro = { phone_number_id: OUTRO_NUMERO_ID, display_phone_number: OUTRO_NUMERO_EXIBICAO };
+    const eventosAntes = await db.query(
+      `select count(*)::int as n from contact_events e join contacts c on c.id = e.contact_id
+        where c.phone = $1 and e.type = 'whatsapp_replied'`,
+      [PHONE_C]
+    );
+    const wamid = uniqueWamid("outro");
+    await postSigned(
+      messagesPayload(
+        WA_C_SEM_NONO,
+        {
+          id: wamid,
+          timestamp: String(Math.floor(Date.now() / 1000) + 200),
+          type: "text",
+          text: { body: "Quero falar com o comercial" },
+        },
+        outro
+      )
+    );
+    const conversas = await db.query(
+      `select w.line, w.unread_count from whatsapp_conversations w
+         join contacts c on c.id = w.contact_id where c.phone = $1 order by w.line`,
+      [PHONE_C]
+    );
+    const linhas = conversas.rows.map((r) => r.line);
+    check(
+      "conversa própria do outro número, ao lado da de comunicados",
+      linhas.includes(`outros:${OUTRO_NUMERO_ID}`) && linhas.includes("comunicados"),
+      JSON.stringify(conversas.rows)
+    );
+    const msg = await messageByWamid(wamid);
+    check("mensagem não é ligada a envio de campanha", msg?.campaign_send_id === null, JSON.stringify(msg));
+    const daCampanha = await conversationByContactPhone(PHONE_C);
+    const comunicados = conversas.rows.find((r) => r.line === "comunicados");
+    check(
+      "a conversa de comunicados não muda",
+      comunicados?.unread_count === 4,
+      JSON.stringify({ comunicados, daCampanha: daCampanha?.line })
+    );
+    const eventosDepois = await db.query(
+      `select count(*)::int as n from contact_events e join contacts c on c.id = e.contact_id
+        where c.phone = $1 and e.type = 'whatsapp_replied'`,
+      [PHONE_C]
+    );
+    check(
+      "não vira evento whatsapp_replied (automação/Lead Score)",
+      eventosDepois.rows[0].n === eventosAntes.rows[0].n,
+      `${eventosAntes.rows[0].n} → ${eventosDepois.rows[0].n}`
+    );
+    const numero = await db.query(
+      `select display_phone_number from whatsapp_outros_numeros where phone_number_id = $1`,
+      [OUTRO_NUMERO_ID]
+    );
+    check(
+      "número registrado com o telefone de exibição",
+      numero.rows[0]?.display_phone_number === OUTRO_NUMERO_EXIBICAO,
+      JSON.stringify(numero.rows)
+    );
+
+    // SAIR para o outro número: o descadastro vale, mas o Campanhas não
+    // responde por um número que não é dele.
+    await postSigned(
+      messagesPayload(
+        "5548900000002",
+        { id: uniqueWamid("outro_sair"), timestamp: nowUnix(), type: "text", text: { body: "SAIR" } },
+        outro
+      )
+    );
+    const contatoB = await contactByPhone(PHONE_B);
+    check("SAIR no outro número descadastra", contatoB.whatsapp_subscribed === false, String(contatoB.whatsapp_subscribed));
+    const respostas = await db.query(
+      `select m.sent_by_name from whatsapp_messages m
+         join whatsapp_conversations w on w.id = m.conversation_id
+        where w.line = $1 and m.direction = 'outbound'`,
+      [`outros:${OUTRO_NUMERO_ID}`]
+    );
+    check(
+      "nenhuma mensagem automática pelo outro número",
+      respostas.rows.length === 0,
+      JSON.stringify(respostas.rows)
+    );
+  } else {
+    console.log("17) Outro número: pulado (defina ESPERA_OUTROS_NUMEROS=1 com WHATSAPP_PHONE_NUMBER_ID no servidor)");
   }
 
   await cleanup();

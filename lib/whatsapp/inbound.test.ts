@@ -113,6 +113,15 @@ describe("messagePreview", () => {
     expect(messagePreview({ type: "reaction", body: "👍" })).toBe("Reagiu 👍");
     expect(messagePreview({ type: "reaction", body: null })).toBe("Retirou a reação");
   });
+
+  it("mensagem que a Meta não repassa diz isso, em vez de parecer vazia", () => {
+    expect(messagePreview({ type: "unsupported", body: null })).toMatch(
+      /não repassa ao sistema/
+    );
+    expect(messagePreview({ type: "desconhecido", body: null })).toBe(
+      "Mensagem sem texto"
+    );
+  });
 });
 
 describe("serviceWindow", () => {

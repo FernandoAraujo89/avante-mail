@@ -9,6 +9,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  like,
   lte,
   max,
   ne,
@@ -48,13 +49,25 @@ import {
   type AutoReplySkipReason,
 } from "./auto-reply";
 import {
-  isLinhaConfigurada,
+  isLinhaDaConversaConfigurada,
   isWhatsAppConfigured,
   sendCtaUrlMessage,
   sendTextMessage,
   WhatsAppApiError,
 } from "./client";
-import { LINHA_PADRAO, type Linha } from "./linhas";
+import {
+  CAIXA_OUTROS,
+  caixaDaLinha,
+  ehLinha,
+  LINHA_LABEL,
+  LINHA_PADRAO,
+  linhaDeOutroNumero,
+  outroNumeroDaLinha,
+  type Caixa,
+  type Linha,
+  type LinhaDaConversa,
+} from "./linhas";
+import { outrosNumerosPorId, rotuloDoOutroNumero, type OutroNumero } from "./outros-numeros";
 import {
   attributionStrategy,
   messagePreview,
@@ -133,10 +146,20 @@ export interface InboundRecord {
  */
 export async function recordInboundMessage(
   message: ParsedInboundMessage,
-  extra: { profileName: string | null; raw: Record<string, unknown>; linha: Linha }
+  extra: {
+    profileName: string | null;
+    raw: Record<string, unknown>;
+    /** O número que recebeu: linha nossa ou outro número (lib/whatsapp/linhas.ts). */
+    linha: LinhaDaConversa;
+  }
 ): Promise<InboundRecord | null> {
   const db = getDb();
-  const strategy = attributionStrategy(message);
+  // Mensagem a número de outro sistema não responde a envio do Campanhas: o
+  // que saiu daqui saiu por uma linha nossa. Ligá-la ao envio recente mudaria
+  // o relatório da campanha com conversa que não é dela.
+  const strategy = outroNumeroDaLinha(extra.linha)
+    ? "none"
+    : attributionStrategy(message);
 
   // O envio citado identifica o contato com certeza, qualquer que seja o
   // formato do número — é o caminho de todo toque de botão.
@@ -339,8 +362,8 @@ export async function recordInboundMessage(
  */
 export async function sendTextInConversation(args: {
   conversationId: string;
-  /** A linha da conversa: a resposta sai pelo mesmo número que o contato chamou. */
-  linha: Linha;
+  /** O número da conversa: a resposta sai pelo mesmo número que o contato chamou. */
+  linha: LinhaDaConversa;
   to: string;
   text: string;
   sentBy: { id: string | null; name: string };
@@ -379,11 +402,14 @@ export async function sendTextInConversation(args: {
   }
 
   try {
+    const outroNumero = outroNumeroDaLinha(args.linha);
     const { wamid } = await sendTextMessage({
       to: args.to,
       text: args.text,
       previewUrl: /https?:\/\//i.test(args.text),
-      linha: args.linha,
+      ...(outroNumero
+        ? { phoneNumberId: outroNumero }
+        : { linha: ehLinha(args.linha) ? args.linha : LINHA_PADRAO }),
     });
     const [sent] = await db
       .update(whatsappMessages)
@@ -626,15 +652,28 @@ export async function markConversationRead(
   return { lastInboundWamid: last?.wamid ?? null };
 }
 
-/** Conversas com mensagem por ler nas linhas dadas — o número ao lado de "Conversas" no menu. */
-export async function countUnreadConversations(linhas: Linha[]): Promise<number> {
-  if (linhas.length === 0) return 0;
+/**
+ * As conversas das caixas dadas: as linhas nossas pelo nome; "outros" são
+ * todos os números que não são linha nossa (`outros:<id>`).
+ */
+function filtroDasCaixas(caixas: Caixa[]): SQL | undefined {
+  const linhas = caixas.filter(ehLinha);
+  const partes: SQL[] = [];
+  if (linhas.length > 0) partes.push(inArray(whatsappConversations.line, linhas));
+  if (caixas.includes(CAIXA_OUTROS)) {
+    partes.push(like(whatsappConversations.line, linhaDeOutroNumero("%")));
+  }
+  return partes.length > 1 ? or(...partes) : partes[0];
+}
+
+/** Conversas com mensagem por ler nas caixas dadas — o número ao lado de "Conversas" no menu. */
+export async function countUnreadConversations(caixas: Caixa[]): Promise<number> {
+  const daCaixa = filtroDasCaixas(caixas);
+  if (!daCaixa) return 0;
   const [row] = await getDb()
     .select({ total: count() })
     .from(whatsappConversations)
-    .where(
-      and(gt(whatsappConversations.unreadCount, 0), inArray(whatsappConversations.line, linhas))
-    );
+    .where(and(gt(whatsappConversations.unreadCount, 0), daCaixa));
   return row?.total ?? 0;
 }
 
@@ -665,7 +704,7 @@ const SUMMARY_FIELDS = {
 
 type SummaryRow = {
   id: string;
-  line: Linha;
+  line: LinhaDaConversa;
   phone: string;
   contactId: string | null;
   profileName: string | null;
@@ -678,10 +717,35 @@ type SummaryRow = {
   company: string | null;
 };
 
-function toSummary(row: SummaryRow): ConversationSummary {
+/** O número que o contato chamou, como a tela mostra. */
+function numeroDaConversa(
+  line: LinhaDaConversa,
+  outros: Map<string, OutroNumero>
+): ConversationSummary["numero"] {
+  if (ehLinha(line)) return { nome: LINHA_LABEL[line], telefone: null };
+  const id = outroNumeroDaLinha(line) ?? "";
+  return rotuloDoOutroNumero(id, outros.get(id));
+}
+
+/** Os números de fora das conversas dadas, para o rótulo de cada uma. */
+async function outrosNumerosDasLinhas(
+  lines: LinhaDaConversa[]
+): Promise<Map<string, OutroNumero>> {
+  const ids = lines
+    .map((line) => outroNumeroDaLinha(line))
+    .filter((id): id is string => id !== null);
+  return ids.length > 0 ? outrosNumerosPorId(ids) : new Map();
+}
+
+function toSummary(
+  row: SummaryRow,
+  outros: Map<string, OutroNumero>
+): ConversationSummary {
   return {
     id: row.id,
     line: row.line,
+    caixa: caixaDaLinha(row.line),
+    numero: numeroDaConversa(row.line, outros),
     phone: row.phone,
     contactId: row.contactId,
     displayName: displayName(row),
@@ -700,11 +764,12 @@ export const CONVERSATION_LIST_LIMIT = 200;
 export async function listConversations(opts: {
   search?: string;
   unreadOnly?: boolean;
-  /** As linhas que quem olha alcança (lib/whatsapp/linhas.ts). */
-  linhas: Linha[];
+  /** As caixas que quem olha alcança (lib/whatsapp/linhas.ts). */
+  caixas: Caixa[];
 }): Promise<ConversationSummary[]> {
-  if (opts.linhas.length === 0) return [];
-  const conditions: SQL[] = [inArray(whatsappConversations.line, opts.linhas)];
+  const daCaixa = filtroDasCaixas(opts.caixas);
+  if (!daCaixa) return [];
+  const conditions: SQL[] = [daCaixa];
   if (opts.unreadOnly) conditions.push(gt(whatsappConversations.unreadCount, 0));
   const search = opts.search?.trim();
   if (search) {
@@ -730,7 +795,8 @@ export async function listConversations(opts: {
     .orderBy(desc(whatsappConversations.lastMessageAt))
     .limit(CONVERSATION_LIST_LIMIT);
 
-  return rows.map(toSummary);
+  const outros = await outrosNumerosDasLinhas(rows.map((r) => r.line));
+  return rows.map((row) => toSummary(row, outros));
 }
 
 /**
@@ -830,7 +896,9 @@ export async function loadConversationThread(
   const templateItems: ThreadTemplate[] = [];
   // O wamid de cada modelo, só para achar o texto citado — não vai para a tela.
   const templateWamids = new Map<string, string>();
-  if (row.contactId) {
+  // Os modelos de campanha saíram por uma linha nossa: na conversa de outro
+  // número eles não aconteceram, e misturá-los ali confunde quem atende.
+  if (row.contactId && ehLinha(row.line)) {
     const sends = await db
       .select({
         id: campaignSends.id,
@@ -991,14 +1059,15 @@ export async function loadConversationThread(
   );
 
   const window = serviceWindow(row.lastInboundAt);
+  const outros = await outrosNumerosDasLinhas([row.line]);
   return {
     conversation: {
-      ...toSummary(row),
+      ...toSummary(row, outros),
       profileName: row.profileName,
       optedOut: row.contactId !== null && row.whatsappOptOutAt !== null && !row.whatsappSubscribed,
     },
     items,
     window: { open: window.open, closesAt: window.closesAt?.toISOString() ?? null },
-    canSend: isLinhaConfigurada(row.line),
+    canSend: isLinhaDaConversaConfigurada(row.line),
   };
 }

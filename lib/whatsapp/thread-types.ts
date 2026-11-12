@@ -1,6 +1,6 @@
 import type { WhatsAppMessageDirection } from "@/lib/db/schema";
 
-import type { Linha } from "./linhas";
+import type { Caixa, LinhaDaConversa } from "./linhas";
 import type { WhatsAppMediaHeaderType } from "./types";
 
 // Formato da conversa entre a API e a tela. Mora fora de conversations.ts
@@ -8,8 +8,15 @@ import type { WhatsAppMediaHeaderType } from "./types";
 
 export interface ConversationSummary {
   id: string;
-  /** O nosso número desta conversa (lib/whatsapp/linhas.ts). */
-  line: Linha;
+  /** O número desta conversa (lib/whatsapp/linhas.ts). */
+  line: LinhaDaConversa;
+  /** Em que caixa da tela ela fica: uma linha nossa ou "outros" números. */
+  caixa: Caixa;
+  /**
+   * O número que o contato chamou, para mostrar: o nome da linha nossa ou,
+   * em outro número, o nome verificado na Meta (sem ele, o telefone).
+   */
+  numero: { nome: string; telefone: string | null };
   phone: string;
   contactId: string | null;
   /** Nome do contato; sem contato, o do perfil do WhatsApp; sem os dois, o número. */

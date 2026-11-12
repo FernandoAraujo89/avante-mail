@@ -1,10 +1,12 @@
 import { RESTRICTION_ERROR_CODES } from "./errors";
 import {
+  ehLinha,
   envDaLinha,
   LINHA_PADRAO,
   linhaConfigurada,
   phoneNumberIdDaLinha,
   type Linha,
+  type LinhaDaConversa,
 } from "./linhas";
 import { getBaseUrl } from "../base-url";
 import {
@@ -218,9 +220,15 @@ export async function sendTextMessage(args: {
   /** Mostra a prévia do primeiro link do texto na conversa. */
   previewUrl?: boolean;
   linha?: Linha;
+  /**
+   * Sai por este número da Meta em vez do da linha: a resposta numa conversa
+   * de outro número (lib/whatsapp/linhas.ts) sai pelo número que o contato
+   * chamou — de outro, a Meta recusa (fora da janela de 24h daquele número).
+   */
+  phoneNumberId?: string;
 }): Promise<{ wamid: string }> {
   const json = await graphRequest<{ messages?: { id: string }[] }>(
-    `${phoneIdDaLinha(args.linha)}/messages`,
+    `${args.phoneNumberId ?? phoneIdDaLinha(args.linha)}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -296,6 +304,28 @@ export async function markMessageAsRead(wamid: string, linha?: Linha): Promise<v
       message_id: wamid,
     }),
   });
+}
+
+/**
+ * O número e o nome verificado de um número da Meta. Serve para mostrar os
+ * números de outros sistemas na caixa de conversas; só funciona quando o token
+ * do Campanhas alcança a conta (WABA) do número — senão a Meta recusa.
+ */
+export async function fetchPhoneNumberInfo(
+  phoneNumberId: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<{ displayPhoneNumber: string | null; verifiedName: string | null }> {
+  const json = await graphRequest<{
+    display_phone_number?: string;
+    verified_name?: string;
+  }>(
+    `${encodeURIComponent(phoneNumberId)}?fields=display_phone_number,verified_name`,
+    { signal: AbortSignal.timeout(opts.timeoutMs ?? 4_000) }
+  );
+  return {
+    displayPhoneNumber: json.display_phone_number?.trim() || null,
+    verifiedName: json.verified_name?.trim() || null,
+  };
 }
 
 // ─── Mídia recebida ──────────────────────────────────────────────
@@ -574,6 +604,17 @@ export async function fetchAllTemplates(): Promise<MetaTemplate[]> {
 /** A linha tem número e o token do canal existe. */
 export function isLinhaConfigurada(linha: Linha): boolean {
   return Boolean(process.env.WHATSAPP_ACCESS_TOKEN) && linhaConfigurada(linha);
+}
+
+/**
+ * Dá para responder na conversa: linha nossa configurada ou, em conversa de
+ * outro número, o token do canal (a resposta sai pelo id do próprio número; se
+ * o token não alcançar a conta dele, a Meta recusa e o erro fica no balão).
+ */
+export function isLinhaDaConversaConfigurada(linha: LinhaDaConversa): boolean {
+  return ehLinha(linha)
+    ? isLinhaConfigurada(linha)
+    : Boolean(process.env.WHATSAPP_ACCESS_TOKEN);
 }
 
 export function isWhatsAppConfigured(): boolean {

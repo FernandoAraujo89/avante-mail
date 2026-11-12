@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { errorMessage } from "@/lib/utils";
 import { countUnreadConversations } from "@/lib/whatsapp/conversations";
-import { linhasDaRequisicao } from "@/lib/whatsapp/linhas-acesso";
+import { caixasDaRequisicao } from "@/lib/whatsapp/linhas-acesso";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     return NextResponse.json({
-      unread: await countUnreadConversations(await linhasDaRequisicao(request)),
+      unread: await countUnreadConversations(await caixasDaRequisicao(request)),
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

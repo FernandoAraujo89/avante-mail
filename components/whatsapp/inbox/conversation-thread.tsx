@@ -27,7 +27,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { dayKey, formatDateTime, formatDayLabel } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { WHATSAPP_TEXT_MAX } from "@/lib/whatsapp/inbound";
-import { LINHA_LABEL } from "@/lib/whatsapp/linhas";
 import type {
   ConversationThread as Thread,
   ThreadMessage,
@@ -256,6 +255,12 @@ export function ConversationThread({
   const { conversation, window: serviceWindow, canSend } = thread;
   const phone = formatPhone(conversation.phone);
   const canWrite = canSend && serviceWindow.open;
+  // Conversa com um número de outro sistema (o NRG Hub), não com uma linha nossa.
+  const deOutroNumero = conversation.caixa === "outros";
+  const numeroChamado =
+    conversation.numero.telefone && conversation.numero.telefone !== conversation.numero.nome
+      ? `${conversation.numero.nome} (${conversation.numero.telefone})`
+      : conversation.numero.nome;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -280,8 +285,8 @@ export function ConversationThread({
             {[
               conversation.displayName !== phone ? phone : null,
               conversation.company,
-              // De que número nosso é esta conversa.
-              LINHA_LABEL[conversation.line],
+              // Que número o contato chamou.
+              deOutroNumero ? `Para ${numeroChamado}` : conversation.numero.nome,
               // Sem contato, o nome no topo é o do perfil do WhatsApp — que
               // a pessoa escolhe e pode ser qualquer coisa.
               !conversation.contactId ? "Fora da base de contatos" : null,
@@ -308,6 +313,21 @@ export function ConversationThread({
           </Button>
         ) : null}
       </header>
+
+      {deOutroNumero ? (
+        <p className="flex items-start gap-2 border-b border-border bg-info-light px-3 py-2 text-xs text-info-dark @2xl:px-4">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span>
+            <span className="font-semibold">
+              Número de outro sistema: {numeroChamado}.
+            </span>{" "}
+            Aqui só aparece o que o contato escreve — o que o outro sistema
+            (como o NRG Hub) manda por esse número não chega ao Campanhas. Nada
+            sai sozinho daqui por ele, e a conversa não entra em relatório de
+            campanha. Se você responder, a resposta sai por esse número.
+          </span>
+        </p>
+      ) : null}
 
       <div
         ref={scrollRef}
@@ -356,8 +376,10 @@ export function ConversationThread({
               {conversation.lastInboundAt
                 ? ` (${formatDateTime(conversation.lastInboundAt)})`
                 : ""}
-              . Para retomar, envie um modelo aprovado por uma campanha — a
-              conversa reabre quando ele responder.
+              .{" "}
+              {deOutroNumero
+                ? "Por este número, só o sistema dono dele pode retomar a conversa — ela reabre quando o contato escrever de novo."
+                : "Para retomar, envie um modelo aprovado por uma campanha — a conversa reabre quando ele responder."}
             </span>
           </p>
         ) : null}
@@ -375,7 +397,11 @@ export function ConversationThread({
                 onKeyDown={onKeyDown}
                 rows={1}
                 maxLength={WHATSAPP_TEXT_MAX}
-                placeholder="Escreva a resposta"
+                placeholder={
+                  deOutroNumero
+                    ? `Responder por ${conversation.numero.nome}`
+                    : "Escreva a resposta"
+                }
                 aria-label="Resposta para o contato"
                 className="max-h-40 min-h-9 resize-none py-2"
               />
@@ -394,6 +420,7 @@ export function ConversationThread({
                 Janela aberta: fecha em{" "}
                 {serviceWindow.closesAt ? closesIn(serviceWindow.closesAt, now) : "—"}.
                 Resposta dentro dela não é cobrada.
+                {deOutroNumero ? ` Sai pelo número ${numeroChamado}.` : null}
               </span>
               {text.length > WHATSAPP_TEXT_MAX - 500 ? (
                 <span className={cn(text.length >= WHATSAPP_TEXT_MAX && "text-destructive-hover")}>
