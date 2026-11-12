@@ -102,4 +102,8 @@ export interface LeadDto {
   leadScoreBand: string | null;
   /** Funil do CRM em que o lead está (nome), se conhecido. */
   crmFunil: string | null;
+  /** Motivo da perda no CRM (lead perdido), se o CRM informou. */
+  crmMotivoPerda: string | null;
+  /** Quando o CRM fechou o negócio como perdido. */
+  crmPerdidoEm: string | null;
 }

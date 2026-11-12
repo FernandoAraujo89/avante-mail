@@ -329,6 +329,16 @@ export default async function LeadPage({
               {lead.crmFunil}
             </Badge>
           ) : null}
+          {lead.crmMotivoPerda ? (
+            <Badge
+              variant="outline"
+              title={`Motivo da perda no CRM${
+                lead.crmPerdidoEm ? ` · perdido em ${formatDate(lead.crmPerdidoEm)}` : ""
+              }`}
+            >
+              Motivo da perda: {lead.crmMotivoPerda}
+            </Badge>
+          ) : null}
           {lead.subscribed ? (
             <Badge variant="success">Aceita e-mail</Badge>
           ) : (

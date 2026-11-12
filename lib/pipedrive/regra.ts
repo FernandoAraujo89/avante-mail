@@ -27,6 +27,19 @@ export interface NegocioDoLead {
   updateTime: string;
   /** Nome do funil do CRM em que o negócio está (para a ficha do lead). */
   funil?: string | null;
+  /** Motivo da perda escrito no CRM (negócio perdido). */
+  motivoPerda?: string | null;
+  /** Quando o negócio foi fechado, segundo o CRM. */
+  fechadoEm?: Date | null;
+}
+
+/**
+ * Por que e quando o lead foi perdido. `null` em `perda` (na decisão) = não
+ * mexer; um objeto com campos nulos = limpar (o lead voltou a ter negócio).
+ */
+export interface PerdaDoLead {
+  motivo: string | null;
+  em: Date | null;
 }
 
 export interface DecisaoDoLead {
@@ -38,7 +51,15 @@ export interface DecisaoDoLead {
   recusas: number;
   /** Funil do negócio que decidiu a etapa; nulo sem negócio vivo. */
   funil: string | null;
+  /**
+   * Motivo e data da perda. Preenchidos quando TODOS os negócios vivos estão
+   * perdidos; zerados quando há aberto ou ganho; `null` (não mexer) sem
+   * negócio vivo — o lead fica onde está, e o motivo junto.
+   */
+  perda: PerdaDoLead | null;
 }
+
+const SEM_PERDA: PerdaDoLead = { motivo: null, em: null };
 
 const ETAPA_DE_COMPRA = "comprou";
 
@@ -58,12 +79,13 @@ export function decidirPelosNegocios(
     .filter((n) => ["open", "won", "lost"].includes(n.status))
     .sort(porAtualizacao);
   if (vivos.length === 0) {
-    return { etapa: null, qualificacao: null, recusas: 0, funil: null };
+    return { etapa: null, qualificacao: null, recusas: 0, funil: null, perda: null };
   }
 
   let recusas = 0;
   let etapa: LeadStageRow | null = null;
   let base: NegocioDoLead;
+  let perda: PerdaDoLead = SEM_PERDA;
 
   const ganhos = vivos.filter((n) => n.status === "won");
   const abertos = vivos.filter((n) => n.status === "open");
@@ -101,6 +123,14 @@ export function decidirPelosNegocios(
     // Todos perdidos. Sem a etapa "perdido" cadastrada, não mexe.
     base = vivos[0];
     etapa = casarEtapa(etapas, ETAPA_DE_PERDA);
+    // O motivo da perda mais recente. Se a última perda veio sem motivo, vale
+    // o da anterior que tiver: para o remarketing, um motivo antigo diz mais
+    // do que nenhum. A data é sempre a da perda mais recente.
+    const comMotivo = vivos.find((n) => n.motivoPerda?.trim());
+    perda = {
+      motivo: comMotivo?.motivoPerda?.trim() ?? null,
+      em: base.fechadoEm ?? null,
+    };
   }
 
   // A qualificação do negócio que decidiu a etapa; se ele não tiver, a do
@@ -112,5 +142,5 @@ export function decidirPelosNegocios(
     if (!qualificacao) recusas++;
   }
 
-  return { etapa, qualificacao, recusas, funil: base.funil ?? null };
+  return { etapa, qualificacao, recusas, funil: base.funil ?? null, perda };
 }

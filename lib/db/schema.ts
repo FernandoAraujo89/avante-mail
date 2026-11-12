@@ -259,6 +259,14 @@ export const contacts = pgTable("contacts", {
   // Só informativo: a etapa continua sendo a régua única do Campanhas.
   crmFunil: text("crm_funil"),
 
+  // Por que o lead foi perdido no CRM ("Preço", "Sem perfil"...) e quando —
+  // para o remarketing. Preenchidos pela sincronização quando TODOS os
+  // negócios dele estão perdidos (é quando a etapa daqui vira "perdido");
+  // limpos quando ele volta a ter negócio aberto ou ganho. Só informativo,
+  // como o funil. scripts/migrate-sincroniza-nrg-motivo-perda.ts
+  crmMotivoPerda: text("crm_motivo_perda"),
+  crmPerdidoEm: timestamp("crm_perdido_em", { withTimezone: true }),
+
   // Origem do PRIMEIRO contato. Gravada uma vez e NÃO sobrescrita: quem chegou
   // pelo Instagram e voltou meses depois pelo Google continua sendo do
   // Instagram — é isso que responde "qual canal traz lead". As visitas
@@ -763,6 +771,10 @@ export const pipedriveDeals = pgTable(
     }),
     /** Rótulo da opção do campo de qualificação. */
     qualificacao: text("qualificacao"),
+    /** Motivo da perda escrito no CRM (só no negócio perdido; nulo sem motivo). */
+    motivoPerda: text("motivo_perda"),
+    /** Quando o negócio foi fechado (ganho ou perdido), segundo o CRM. */
+    fechadoEm: timestamp("fechado_em", { withTimezone: true }),
     updateTime: text("update_time").notNull(),
     /** Quando a sincronização viu o negócio pela última vez numa leitura. */
     lidoEm: timestamp("lido_em", { withTimezone: true })

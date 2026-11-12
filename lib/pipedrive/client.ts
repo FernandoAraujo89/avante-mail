@@ -23,6 +23,13 @@ export interface DealDoPipedrive {
   updateTime: string;
   /** Valor cru do campo de qualificação (id da opção no Pipedrive; rótulo no Hub). */
   qualificacaoCrua: unknown;
+  /**
+   * Motivo da perda escrito no CRM; nulo sem motivo. Só o NRG Hub manda — o
+   * cliente do Pipedrive (desligado desde 23/10/2026) não lê.
+   */
+  motivoPerda?: string | null;
+  /** Quando o negócio foi fechado (ISO 8601 com fuso); nulo se aberto. */
+  fechadoEm?: string | null;
 }
 
 export interface PessoaDoPipedrive {

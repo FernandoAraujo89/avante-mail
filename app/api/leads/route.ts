@@ -23,7 +23,7 @@ import {
 } from "@/lib/db";
 import { ehLead } from "@/lib/leads";
 import { lerFunisDaUltimaPassada } from "@/lib/pipedrive/funis";
-import { listarEtapas } from "@/lib/leads/etapas";
+import { ETAPA_DE_PERDA, listarEtapas } from "@/lib/leads/etapas";
 import { listarQualificacoes } from "@/lib/leads/qualificacoes";
 import { lerConfiguracao } from "@/lib/leads/score";
 import { errorMessage, normalizeIds } from "@/lib/utils";
@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
     const faixa = params.get("faixa")?.trim();
     const qualificacao = params.get("qualificacao")?.trim();
     const funil = params.get("funil")?.trim();
+    const motivo = params.get("motivo")?.trim();
 
     // Etapas e qualificações válidas vêm de tabela, não de constante: elas
     // espelham o Pipedrive (funil e campo "Lead qualificado") e mudam sem
@@ -107,6 +108,15 @@ export async function GET(request: NextRequest) {
     if (canal) condicoes.push(eq(contacts.sourceChannel, canal));
     // "__sem__" = lead sem funil conhecido (ainda não casou com negócio no CRM).
     if (funil) condicoes.push(funil === "__sem__" ? isNull(contacts.crmFunil) : eq(contacts.crmFunil, funil));
+    // Motivo da perda no CRM, para o remarketing. "__sem__" = está perdido
+    // aqui e o CRM não disse por quê (perdido sem motivo preenchido lá).
+    if (motivo) {
+      const alvo =
+        motivo === "__sem__"
+          ? and(eq(contacts.stage, ETAPA_DE_PERDA), isNull(contacts.crmMotivoPerda))
+          : eq(contacts.crmMotivoPerda, motivo);
+      if (alvo) condicoes.push(alvo);
+    }
     if (faixa && LEAD_SCORE_BANDS.includes(faixa as LeadScoreBand)) {
       condicoes.push(eq(contacts.leadScoreBand, faixa as LeadScoreBand));
     }
@@ -135,6 +145,8 @@ export async function GET(request: NextRequest) {
         stageChangedAt: contacts.stageChangedAt,
         qualification: contacts.qualification,
         crmFunil: contacts.crmFunil,
+        crmMotivoPerda: contacts.crmMotivoPerda,
+        crmPerdidoEm: contacts.crmPerdidoEm,
       })
       .from(contacts)
       .where(and(...condicoes))
@@ -187,6 +199,28 @@ export async function GET(request: NextRequest) {
       if (!funisDoCrm.some((x) => x.funil === f.nome)) funisDoCrm.push({ funil: f.nome, total: 0 });
     }
 
+    // Motivos da perda, do mais comum para o menos — é a pergunta do
+    // remarketing ("por que estamos perdendo?"), e o filtro só oferece motivo
+    // que existe. Mais os perdidos sem motivo no CRM, para a lacuna aparecer.
+    const [porMotivo, [perdidosSemMotivo]] = await Promise.all([
+      db
+        .select({ motivo: contacts.crmMotivoPerda, total: count() })
+        .from(contacts)
+        .where(and(ehLead(), isNotNull(contacts.crmMotivoPerda)))
+        .groupBy(contacts.crmMotivoPerda)
+        .orderBy(desc(count())),
+      db
+        .select({ total: count() })
+        .from(contacts)
+        .where(
+          and(
+            ehLead(),
+            eq(contacts.stage, ETAPA_DE_PERDA),
+            isNull(contacts.crmMotivoPerda)
+          )
+        ),
+    ]);
+
     // Distribuição por faixa — o "quantos estão quentes" do painel.
     const porFaixa = await db
       .select({ faixa: contacts.leadScoreBand, total: count() })
@@ -228,6 +262,11 @@ export async function GET(request: NextRequest) {
       acumulado,
       funil: Object.fromEntries(porEstagio.map((r) => [r.stage, r.total])),
       funisDoCrm,
+      motivosDePerda: porMotivo.map((r) => ({
+        motivo: r.motivo as string,
+        total: r.total,
+      })),
+      perdidosSemMotivo: perdidosSemMotivo?.total ?? 0,
       qualificacoes: Object.fromEntries(
         porQualificacao
           .filter((r) => r.qualificacao)

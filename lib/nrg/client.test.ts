@@ -49,8 +49,20 @@ describe("clienteNrgHub", () => {
             contact_id: "p1",
             alterado_em: "2026-10-22T13:05:41.123456+00:00",
             qualificacao: "Sim: Experiente",
+            motivo_perda: null,
+            fechado_em: "2026-10-22T13:05:41+00:00",
           },
           { id: "n2", situacao: "open", stage_id: "e1", contact_id: null, alterado_em: "2026-10-22T14:00:00+00:00", qualificacao: "" },
+          {
+            id: "n3",
+            situacao: "lost",
+            stage_id: "e1",
+            contact_id: "p1",
+            alterado_em: "2026-10-22T15:00:00+00:00",
+            qualificacao: "",
+            motivo_perda: "  Preço  ",
+            fechado_em: "2026-10-22T15:00:00+00:00",
+          },
         ],
         next_cursor: "abc",
       },
@@ -60,8 +72,28 @@ describe("clienteNrgHub", () => {
     const api = clienteNrgHub("hub_teste", "https://hub.exemplo/", buscar);
     const pagina = await api.deals({ pipelineId: "f1", campoKey: "lead_qualificado", updatedSince: "2026-10-01T00:00:00-03:00" });
     expect(pagina.deals).toEqual([
-      { id: "n1", status: "won", stageId: "e2", personId: "p1", updateTime: "2026-10-22T13:05:41.123456+00:00", qualificacaoCrua: "Sim: Experiente" },
-      { id: "n2", status: "open", stageId: "e1", personId: null, updateTime: "2026-10-22T14:00:00+00:00", qualificacaoCrua: null },
+      {
+        id: "n1",
+        status: "won",
+        stageId: "e2",
+        personId: "p1",
+        updateTime: "2026-10-22T13:05:41.123456+00:00",
+        qualificacaoCrua: "Sim: Experiente",
+        motivoPerda: null,
+        fechadoEm: "2026-10-22T13:05:41+00:00",
+      },
+      // Sem os campos novos na resposta (Hub antigo): nulos, sem erro.
+      { id: "n2", status: "open", stageId: "e1", personId: null, updateTime: "2026-10-22T14:00:00+00:00", qualificacaoCrua: null, motivoPerda: null, fechadoEm: null },
+      {
+        id: "n3",
+        status: "lost",
+        stageId: "e1",
+        personId: "p1",
+        updateTime: "2026-10-22T15:00:00+00:00",
+        qualificacaoCrua: null,
+        motivoPerda: "Preço",
+        fechadoEm: "2026-10-22T15:00:00+00:00",
+      },
     ]);
     expect(pagina.nextCursor).toBe("abc");
     const seguinte = await api.deals({ pipelineId: "f1", campoKey: null, updatedSince: "2026-10-01T00:00:00-03:00", cursor: "abc" });

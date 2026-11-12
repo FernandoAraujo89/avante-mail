@@ -244,6 +244,24 @@ funil do CRM — a sincronização grava o funil do negócio que decidiu a etapa
 `/leads` (inclui "sem funil conhecido"). Só informativo: a etapa continua
 sendo a régua única.
 
+**Motivo da perda (12/11/2026), para o remarketing:** a API do Hub manda em
+cada negócio `motivo_perda` e `fechado_em`, que até aqui eram descartados. O
+espelho guarda os dois (`pipedrive_deals.motivo_perda/fechado_em`; motivo só
+em negócio `lost`) e a decisão leva ao lead (`DecisaoDoLead.perda` →
+`contacts.crm_motivo_perda/crm_perdido_em`): com TODOS os negócios vivos
+perdidos, o motivo da perda mais recente (se ela veio sem motivo, o da
+anterior que tiver) e a data dela; com negócio aberto ou ganho, os dois são
+limpos; sem negócio vivo, não mexe. Em `/leads`: filtro "Motivo da perda"
+com a contagem de cada motivo (mais "Perdido sem motivo no CRM", a lacuna do
+preenchimento lá) e "Motivo: …" embaixo da etapa; selo na ficha. Só
+informativo, sem evento nem régua. A migração
+`migrate-sincroniza-nrg-motivo-perda.ts` acrescenta as colunas e, uma vez só,
+adianta a releitura completa (apaga `nrg_releitura_ultima`) para os
+perdidos antigos ganharem o motivo na passada seguinte. Pela documentação do
+Hub, troca de motivo por função administrativa (catálogo) pode não mudar
+`alterado_em` — a releitura diária cobre. O webhook não mapeia o motivo: a
+sincronização de 5 min basta.
+
 **Caminho de volta (23/10, fim da tarde) — todo lead existe no Hub:** o
 Fernando decidiu que não pode haver lead "sem funil conhecido": os funis do
 Hub são os do Campanhas. Token e webhook do Hub passaram a cobrir os SEIS

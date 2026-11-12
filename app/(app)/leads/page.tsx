@@ -75,6 +75,10 @@ interface Resposta {
   canais: { canal: string; total: number }[];
   /** Funis do CRM presentes nos leads (nulo = sem funil conhecido). */
   funisDoCrm: { funil: string | null; total: number }[];
+  /** Motivos da perda no CRM, do mais comum para o menos. */
+  motivosDePerda: { motivo: string; total: number }[];
+  /** Leads perdidos aqui sem motivo informado no CRM. */
+  perdidosSemMotivo: number;
   config: {
     faixaQuente: number;
     faixaAquecido: number;
@@ -115,6 +119,7 @@ export default function LeadsPage() {
   const [faixa, setFaixa] = useState("todas");
   const [qualificacao, setQualificacao] = useState("todas");
   const [funil, setFunil] = useState("todos");
+  const [motivo, setMotivo] = useState("todos");
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [excluirAberto, setExcluirAberto] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
@@ -140,6 +145,7 @@ export default function LeadsPage() {
         if (faixa !== "todas") params.set("faixa", faixa);
         if (qualificacao !== "todas") params.set("qualificacao", qualificacao);
         if (funil !== "todos") params.set("funil", funil);
+        if (motivo !== "todos") params.set("motivo", motivo);
 
         const res = await fetch(`/api/leads?${params.toString()}`);
         const json = await res.json();
@@ -174,6 +180,8 @@ export default function LeadsPage() {
           faixas: {},
           canais: [],
           funisDoCrm: [],
+          motivosDePerda: [],
+          perdidosSemMotivo: 0,
           config: {
             faixaQuente: 100,
             faixaAquecido: 50,
@@ -184,7 +192,7 @@ export default function LeadsPage() {
         setErro(err instanceof Error ? err.message : String(err));
       }
     },
-    [busca, estagio, canal, faixa, qualificacao, funil]
+    [busca, estagio, canal, faixa, qualificacao, funil, motivo]
   );
 
   useEffect(() => {
@@ -211,7 +219,7 @@ export default function LeadsPage() {
   // fica pendurado descrevendo uma ação que já saiu de vista.
   useEffect(() => {
     setAviso("");
-  }, [busca, estagio, canal, faixa, qualificacao, funil]);
+  }, [busca, estagio, canal, faixa, qualificacao, funil, motivo]);
 
   function alternarUm(id: string) {
     setSelecionados((antes) => {
@@ -330,6 +338,7 @@ export default function LeadsPage() {
       canal,
       faixa,
       qualificacao,
+      motivo,
       ordem.chave,
       ordem.direcao,
     ],
@@ -499,7 +508,10 @@ export default function LeadsPage() {
             </Button>
           </span>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {/* Seis filtros: 2 por linha no tablet e 3 do notebook para cima —
+            duas linhas iguais, em vez de cinco e um sobrando. Seis numa linha
+            só cortavam o texto ("Todas as qualificaçõe…") mesmo em 1680px. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {/* O mesmo filtro dos cartões do funil, em forma de seletor: os
               cartões não se enxergam como controle, e o filtro por etapa
               precisa estar onde os outros filtros estão. Etapa que converte
@@ -582,6 +594,28 @@ export default function LeadsPage() {
               {(dados?.funisDoCrm ?? []).some((f) => !f.funil) ? (
                 <SelectItem value="__sem__">
                   Sem funil conhecido ({dados?.funisDoCrm?.find((f) => !f.funil)?.total ?? 0})
+                </SelectItem>
+              ) : null}
+            </SelectContent>
+          </Select>
+          {/* Por que o lead foi perdido no CRM — a base do remarketing. Os
+              motivos vêm do próprio CRM (só aparece o que existe), do mais
+              comum para o menos; "sem motivo" mostra a lacuna do
+              preenchimento lá. */}
+          <Select value={motivo} onValueChange={setMotivo}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Motivo da perda" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos os motivos de perda</SelectItem>
+              {(dados?.motivosDePerda ?? []).map((m) => (
+                <SelectItem key={m.motivo} value={m.motivo}>
+                  {m.motivo} ({m.total})
+                </SelectItem>
+              ))}
+              {(dados?.perdidosSemMotivo ?? 0) > 0 ? (
+                <SelectItem value="__sem__">
+                  Perdido sem motivo no CRM ({dados?.perdidosSemMotivo ?? 0})
                 </SelectItem>
               ) : null}
             </SelectContent>
@@ -791,6 +825,14 @@ export default function LeadsPage() {
                         {lead.stageChangedAt ? (
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             desde {formatDate(lead.stageChangedAt)}
+                          </p>
+                        ) : null}
+                        {lead.crmMotivoPerda ? (
+                          <p
+                            className="mt-0.5 max-w-56 truncate text-xs text-muted-foreground"
+                            title={`Motivo da perda no CRM: ${lead.crmMotivoPerda}`}
+                          >
+                            Motivo: {lead.crmMotivoPerda}
                           </p>
                         ) : null}
                       </>

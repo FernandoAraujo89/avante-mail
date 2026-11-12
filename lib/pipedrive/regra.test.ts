@@ -135,7 +135,69 @@ describe("decidirPelosNegocios", () => {
   });
 
   it("sem negócio vivo, não mexe em nada", () => {
-    expect(decidir([])).toEqual({ etapa: null, qualificacao: null, recusas: 0, funil: null });
+    expect(decidir([])).toEqual({ etapa: null, qualificacao: null, recusas: 0, funil: null, perda: null });
+  });
+
+  describe("motivo da perda", () => {
+    const perdido = (
+      updateTime: string,
+      motivoPerda: string | null,
+      fechadoEm: string | null = updateTime
+    ): NegocioDoLead => ({
+      status: "lost",
+      stageName: "Qualificar lead",
+      qualificacao: null,
+      updateTime,
+      motivoPerda,
+      fechadoEm: fechadoEm ? new Date(fechadoEm) : null,
+    });
+
+    it("todos perdidos: motivo e data da perda mais recente", () => {
+      const d = decidir([
+        perdido("2026-10-01T10:00:00Z", "Sem perfil"),
+        perdido("2026-10-05T10:00:00Z", "Preço"),
+      ]);
+      expect(d.etapa?.slug).toBe("perdido");
+      expect(d.perda).toEqual({ motivo: "Preço", em: new Date("2026-10-05T10:00:00Z") });
+    });
+
+    it("última perda sem motivo: vale o motivo da anterior, com a data da última", () => {
+      const d = decidir([
+        perdido("2026-10-01T10:00:00Z", "Sem perfil"),
+        perdido("2026-10-05T10:00:00Z", "  "),
+      ]);
+      expect(d.perda).toEqual({ motivo: "Sem perfil", em: new Date("2026-10-05T10:00:00Z") });
+    });
+
+    it("perdido sem motivo nenhum: motivo nulo, data mantida", () => {
+      const d = decidir([perdido("2026-10-05T10:00:00Z", null)]);
+      expect(d.perda).toEqual({ motivo: null, em: new Date("2026-10-05T10:00:00Z") });
+    });
+
+    it("com negócio aberto ao lado: limpa (o lead não está perdido)", () => {
+      const d = decidir([
+        perdido("2026-10-05T10:00:00Z", "Preço"),
+        negocio("open", "Realizar contato", "2026-10-01T10:00:00Z"),
+      ]);
+      expect(d.etapa?.slug).toBe("realizar-contato");
+      expect(d.perda).toEqual({ motivo: null, em: null });
+    });
+
+    it("com negócio ganho: limpa (comprou vence tudo)", () => {
+      const d = decidir([
+        perdido("2026-10-05T10:00:00Z", "Preço"),
+        negocio("won", "Qualificar lead", "2026-10-01T10:00:00Z"),
+      ]);
+      expect(d.perda).toEqual({ motivo: null, em: null });
+    });
+
+    it("negócio excluído ou fora do funil não entra no motivo", () => {
+      const d = decidir([
+        { ...perdido("2026-10-09T10:00:00Z", "Concorrente"), status: "fora" },
+        perdido("2026-10-05T10:00:00Z", "Preço"),
+      ]);
+      expect(d.perda?.motivo).toBe("Preço");
+    });
   });
 
   it("devolve o funil do negócio que decidiu a etapa", () => {

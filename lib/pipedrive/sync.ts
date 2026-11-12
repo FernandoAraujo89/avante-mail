@@ -128,6 +128,18 @@ function normalizado(texto: string): string {
   return texto.trim().toLowerCase();
 }
 
+/** Data ISO do CRM → Date; vazia ou inválida → null (nunca "Invalid Date" no banco). */
+function dataDoCrm(texto: string | null | undefined): Date | null {
+  if (!texto) return null;
+  const data = new Date(texto);
+  return Number.isNaN(data.getTime()) ? null : data;
+}
+
+/** Mesma data, comparando o instante (null só é igual a null). */
+function mesmaData(a: Date | null, b: Date | null): boolean {
+  return a === null || b === null ? a === b : a.getTime() === b.getTime();
+}
+
 /** O rótulo da opção escolhida no campo de qualificação, das formas que a API manda. */
 function rotuloDaOpcao(
   cru: unknown,
@@ -484,6 +496,10 @@ async function espelharLote(
       qualificacao: campo
         ? rotuloDaOpcao(deal.qualificacaoCrua, campo.opcoes)
         : null,
+      // Só negócio perdido carrega motivo: um reaberto que ainda traga o
+      // motivo antigo no CRM não pode marcar o lead como perdido por isso.
+      motivoPerda: deal.status === "lost" ? (deal.motivoPerda?.trim() || null) : null,
+      fechadoEm: dataDoCrm(deal.fechadoEm),
       updateTime: deal.updateTime,
       lidoEm: agora,
     };
@@ -502,6 +518,8 @@ async function espelharLote(
         personId: sql`excluded.person_id`,
         contactId: sql`excluded.contact_id`,
         qualificacao: sql`excluded.qualificacao`,
+        motivoPerda: sql`excluded.motivo_perda`,
+        fechadoEm: sql`excluded.fechado_em`,
         updateTime: sql`excluded.update_time`,
         lidoEm: sql`excluded.lido_em`,
       },
@@ -535,6 +553,8 @@ async function recalcularLeads(
           stage: contacts.stage,
           qualification: contacts.qualification,
           crmFunil: contacts.crmFunil,
+          crmMotivoPerda: contacts.crmMotivoPerda,
+          crmPerdidoEm: contacts.crmPerdidoEm,
         })
         .from(contacts)
         .where(inArray(contacts.id, lote)),
@@ -546,6 +566,8 @@ async function recalcularLeads(
           qualificacao: pipedriveDeals.qualificacao,
           updateTime: pipedriveDeals.updateTime,
           pipelineId: pipedriveDeals.pipelineId,
+          motivoPerda: pipedriveDeals.motivoPerda,
+          fechadoEm: pipedriveDeals.fechadoEm,
         })
         .from(pipedriveDeals)
         .where(
@@ -579,6 +601,19 @@ async function recalcularLeads(
       // O funil é só informação na ficha: muda sem evento e sem régua.
       if (decisao.funil && decisao.funil !== lead.crmFunil) {
         await db.update(contacts).set({ crmFunil: decisao.funil }).where(eq(contacts.id, lead.id));
+      }
+
+      // O motivo da perda também: informação para o remarketing, sem evento.
+      // Grava só quando muda, para a releitura não reescrever a base inteira.
+      const perda = decisao.perda;
+      if (
+        perda &&
+        (perda.motivo !== lead.crmMotivoPerda || !mesmaData(perda.em, lead.crmPerdidoEm))
+      ) {
+        await db
+          .update(contacts)
+          .set({ crmMotivoPerda: perda.motivo, crmPerdidoEm: perda.em })
+          .where(eq(contacts.id, lead.id));
       }
 
       const aplicado = await aplicarMudancaDoLead(lead, {

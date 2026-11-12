@@ -19,6 +19,9 @@
  * a qualificação vem como RÓTULO ("Sim: Experiente"), não como id de opção —
  * por isso as opções do campo são um mapa rótulo → rótulo; a pessoa é o
  * `contact_id` do negócio.
+ *
+ * Do negócio também saem `motivo_perda` e `fechado_em` (desde 12/11/2026), que
+ * a sincronização leva ao lead perdido para o remarketing.
  */
 
 import type {
@@ -114,6 +117,8 @@ export function clienteNrgHub(
         personId: d.contact_id ? texto(d.contact_id) : null,
         updateTime: texto(d.alterado_em),
         qualificacaoCrua: typeof d.qualificacao === "string" && d.qualificacao.trim() ? d.qualificacao.trim() : null,
+        motivoPerda: texto(d.motivo_perda) || null,
+        fechadoEm: texto(d.fechado_em) || null,
       }));
       const nextCursor = typeof json?.next_cursor === "string" && json.next_cursor ? json.next_cursor : null;
       return { deals, nextCursor };
