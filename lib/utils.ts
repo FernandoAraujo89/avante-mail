@@ -9,6 +9,24 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * A mensagem do erro sem o SQL. O Drizzle embrulha a falha do banco num
+ * DrizzleQueryError cuja mensagem é o comando inteiro com os valores
+ * ("Failed query: insert into … params: …") — numa campanha grande, uma
+ * parede de texto na tela. O motivo de verdade é o erro de dentro (`cause`).
+ * Qualquer outro erro sai igual a errorMessage.
+ */
+export function mensagemSemSql(error: unknown): string {
+  if (
+    error instanceof Error &&
+    error.message.startsWith("Failed query:") &&
+    error.cause instanceof Error
+  ) {
+    return error.cause.message;
+  }
+  return errorMessage(error);
+}
+
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** E-mail como o sistema guarda: minúsculo e sem espaços nas pontas. */

@@ -21,6 +21,7 @@ import {
   whatsappTemplates,
   type Campaign,
 } from "@/lib/db";
+import { gravarEnviosDeCampanha } from "@/lib/db/envios-de-campanha";
 import { agendarCopias } from "@/lib/acompanhamento";
 import { enderecosElegiveis } from "@/lib/contatos/destinatarios";
 import { naoEhLead } from "@/lib/leads";
@@ -29,7 +30,7 @@ import { sessionUserFromRequest } from "@/lib/session";
 import { isSmsEnabled } from "@/lib/sms/config";
 import { countSms, sanitizeGsm7 } from "@/lib/sms/gsm7";
 import { resolveNewsList, resolveTeamList } from "@/lib/settings";
-import { ehViolacaoDeUnico, errorMessage } from "@/lib/utils";
+import { ehViolacaoDeUnico, errorMessage, mensagemSemSql } from "@/lib/utils";
 import { isWhatsAppConfigured } from "@/lib/whatsapp/client";
 import { planBatchDelays, whatsappDailyLimit } from "@/lib/whatsapp/pacing";
 import { missingVariableSources } from "@/lib/whatsapp/variables";
@@ -217,17 +218,12 @@ async function dispatchWhatsApp(
     usedLast24h = row.used;
   }
 
-  const sends = await db
-    .insert(campaignSends)
-    .values(
-      eligible.map((destino) => ({
-        campaignId: campaign.id,
-        channel: "whatsapp" as const,
-        contactId: destino.contactId,
-        address: destino.address,
-      }))
-    )
-    .returning({ id: campaignSends.id, contactId: campaignSends.contactId });
+  const sends = await gravarEnviosDeCampanha(
+    db,
+    campaign.id,
+    "whatsapp",
+    eligible
+  );
 
   const delay = campaign.scheduledAt
     ? Math.max(campaign.scheduledAt.getTime() - Date.now(), 0)
@@ -372,17 +368,12 @@ async function dispatchSms(db: ReturnType<typeof getDb>, campaign: Campaign) {
     );
   }
 
-  const sends = await db
-    .insert(campaignSends)
-    .values(
-      eligible.map((destino) => ({
-        campaignId: campaign.id,
-        channel: "sms" as const,
-        contactId: destino.contactId,
-        address: destino.address,
-      }))
-    )
-    .returning({ id: campaignSends.id, contactId: campaignSends.contactId });
+  const sends = await gravarEnviosDeCampanha(
+    db,
+    campaign.id,
+    "sms",
+    eligible
+  );
 
   const delay = campaign.scheduledAt
     ? Math.max(campaign.scheduledAt.getTime() - Date.now(), 0)
@@ -581,21 +572,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // 2. Um registro de envio por endereço.
-    const sends = await db
-      .insert(campaignSends)
-      .values(
-        eligible.map((destino) => ({
-          campaignId: campaign.id,
-          channel: "email" as const,
-          contactId: destino.contactId,
-          address: destino.address,
-        }))
-      )
-      .returning({
-        id: campaignSends.id,
-        contactId: campaignSends.contactId,
-      });
+    // 2. Um registro de envio por endereço, em lotes (gravarEnviosDeCampanha).
+    const sends = await gravarEnviosDeCampanha(
+      db,
+      campaign.id,
+      "email",
+      eligible
+    );
 
     // 3. Enfileira no Redis. Agendamentos futuros viram jobs com delay.
     const delay = campaign.scheduledAt
@@ -643,16 +626,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   } catch (error) {
     // 23505 = violação de unicidade. Aqui só pode ser o índice
-    // (campaign_id, contact_id): duas requisições de disparo correndo juntas
-    // (clique duplo, aba repetida). A segunda perde a corrida e o INSERT
-    // inteiro é recusado pelo Postgres — nenhuma linha parcial, ninguém
-    // recebe duas vezes. Vira 409 porque é conflito, não falha do servidor.
+    // (campaign_id, contact_id, address): duas requisições de disparo
+    // correndo juntas (clique duplo, aba repetida). A segunda perde a corrida
+    // e a transação de gravarEnviosDeCampanha é desfeita inteira — nenhuma
+    // linha parcial, ninguém recebe duas vezes. Vira 409 porque é conflito,
+    // não falha do servidor.
     if (ehViolacaoDeUnico(error)) {
       return NextResponse.json(
         { error: "Esta campanha já está sendo disparada." },
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+    // Sem o SQL: numa campanha grande ele tem milhares de linhas e escondia
+    // o motivo na tela (e no log).
+    const motivo = mensagemSemSql(error);
+    console.error("[DISPARO] Falha ao disparar a campanha:", motivo);
+    return NextResponse.json({ error: motivo }, { status: 500 });
   }
 }
