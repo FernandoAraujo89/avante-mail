@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 
 import { AvanteLogo } from "@/components/avante-logo";
 
@@ -11,12 +12,20 @@ export function MolduraPublica({
   titulo,
   subtitulo,
   rodape,
+  sobre,
   children,
 }: {
   titulo: string;
   subtitulo?: string | null;
   /** O cartão do fim do painel (quem responde, quantas perguntas…). */
   rodape?: ReactNode;
+  /**
+   * Contexto abaixo do subtítulo (o "por quê" da pesquisa). No computador
+   * ocupa o meio do painel; no celular fica recolhido num "Por que
+   * responder?", para o formulário continuar logo abaixo do cabeçalho.
+   * Sem ele, o painel é o de antes.
+   */
+  sobre?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -32,6 +41,18 @@ export function MolduraPublica({
               <p className="mt-3 max-w-md text-sm leading-relaxed text-primary-foreground/80 md:mt-5 md:text-base">
                 {subtitulo}
               </p>
+            ) : null}
+            {sobre ? (
+              <>
+                <div className="mt-12 hidden md:block">{sobre}</div>
+                <details className="group mt-4 md:hidden">
+                  <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                    Por que responder?
+                    <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
+                  </summary>
+                  <div className="mt-5 pb-1">{sobre}</div>
+                </details>
+              </>
             ) : null}
           </div>
           {rodape ? <div className="mt-6 hidden md:block">{rodape}</div> : null}

@@ -5,6 +5,7 @@ import { Eye } from "lucide-react";
 
 import { CartaoDoPainel, MolduraPublica } from "@/components/pesquisas/moldura-publica";
 import { PaginaDeResposta } from "@/components/pesquisas/pagina-de-resposta";
+import { PorQueResponder } from "@/components/pesquisas/por-que-responder";
 import { usuarioDaSessao } from "@/lib/escopo-parceiros";
 import { paginaInicial } from "@/lib/perfis";
 import { minutosEstimados } from "@/lib/pesquisas/etapas";
@@ -84,6 +85,7 @@ export default async function PreviaDaPesquisaPage({
       <MolduraPublica
         titulo={OBJETIVO_CHAMADA[convite.survey.objective]}
         subtitulo={OBJETIVO_CONVITE[convite.survey.objective]}
+        sobre={<PorQueResponder />}
         rodape={
           <CartaoDoPainel
             titulo={convite.survey.name}

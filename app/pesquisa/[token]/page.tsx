@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { CartaoDoPainel, MolduraPublica } from "@/components/pesquisas/moldura-publica";
 import { PaginaDeResposta } from "@/components/pesquisas/pagina-de-resposta";
+import { PorQueResponder } from "@/components/pesquisas/por-que-responder";
 import { tokenBemFormado } from "@/lib/pesquisas/convites";
 import { minutosEstimados } from "@/lib/pesquisas/etapas";
 import {
@@ -54,6 +55,7 @@ export default async function PesquisaPublicaPage({
     <MolduraPublica
       titulo={OBJETIVO_CHAMADA[convite.survey.objective]}
       subtitulo={OBJETIVO_CONVITE[convite.survey.objective]}
+      sobre={<PorQueResponder />}
       rodape={
         <CartaoDoPainel
           titulo={convite.survey.name}
