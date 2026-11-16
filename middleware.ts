@@ -23,6 +23,8 @@ const PUBLIC_PREFIXES = [
   "/api/webhooks/",
   "/uploads/",
   "/fonts/",
+  // Vídeo de boas-vindas da pesquisa (public/videos): o parceiro não tem conta.
+  "/videos/",
   "/icon.svg",
 ];
 

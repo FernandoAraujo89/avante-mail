@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, CloudOff, Loader2 } from "lucide-r
 
 import { FormularioPesquisa, type Respostas } from "@/components/pesquisas/formulario-pesquisa";
 import { IndicadorDeEtapas } from "@/components/pesquisas/indicador-de-etapas";
+import { VideoDeBoasVindas } from "@/components/pesquisas/video-de-boas-vindas";
 import { Button } from "@/components/ui/button";
 import type { SurveyAnswerValue } from "@/lib/db/schema";
 import { aceitaResposta } from "@/lib/pesquisas/convites";
@@ -17,6 +18,7 @@ import {
 import type { ConviteCarregado } from "@/lib/pesquisas/resposta-publica";
 import { progresso } from "@/lib/pesquisas/respostas";
 import { OBJETIVO_CONVITE } from "@/lib/pesquisas/rotulos";
+import { videoDaFase } from "@/lib/pesquisas/video";
 
 // A coluna branca da página do parceiro, em etapas: boas-vindas, as perguntas
 // (por seção) e a conclusão. Cada resposta é gravada sozinha pouco depois de
@@ -317,6 +319,8 @@ function BoasVindas({
   semPerguntas: boolean;
 }) {
   const retomando = respondidas > 0 && respondidas < total;
+  // Fase sem vídeo (lib/pesquisas/video.ts): boas-vindas como antes.
+  const video = videoDaFase(convite.survey.objective);
   return (
     <div className="flex flex-1 flex-col">
       <h2 className="text-2xl font-normal tracking-tight">
@@ -326,6 +330,12 @@ function BoasVindas({
         Olá, <strong className="font-medium text-foreground">{convite.contact.name}</strong>
         {convite.contact.company ? ` · ${convite.contact.company}` : ""}
       </p>
+
+      {video ? (
+        <div className="mt-6">
+          <VideoDeBoasVindas video={video} />
+        </div>
+      ) : null}
 
       <p className="mt-6 max-w-prose text-sm leading-relaxed whitespace-pre-line">
         {convite.survey.intro ?? OBJETIVO_CONVITE[convite.survey.objective]}
