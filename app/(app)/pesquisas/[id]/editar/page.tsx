@@ -905,7 +905,7 @@ export default function EditarPesquisaPage() {
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{nome.trim() || "Pesquisa"}</DialogTitle>
-            <DialogDescription>É assim que o parceiro vê. Pode responder aqui para testar — nada é gravado.</DialogDescription>
+            <DialogDescription>É assim que o parceiro vê. Pode responder aqui para testar. Nada é gravado.</DialogDescription>
           </DialogHeader>
           {previaConteudo}
         </DialogContent>

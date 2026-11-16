@@ -67,8 +67,8 @@ export default async function PreviaDaPesquisaPage({
             <Eye className="size-4 shrink-0" aria-hidden />
             <span>
               <span className="font-medium">Pré-visualização.</span>{" "}
-              <span className="hidden sm:inline">É assim que o parceiro vê a pesquisa. Pode responder para testar — </span>
-              nada é gravado.
+              <span className="hidden sm:inline">É assim que o parceiro vê a pesquisa. Pode responder para testar. </span>
+              Nada é gravado.
             </span>
           </p>
           <nav className="flex items-center gap-4" aria-label="Voltar ao sistema">
@@ -92,7 +92,7 @@ export default async function PreviaDaPesquisaPage({
             linhas={[
               `Pesquisa para ${convite.contact.name}${convite.contact.company ? ` · ${convite.contact.company}` : ""}`,
               `${total} pergunta${total === 1 ? "" : "s"} · cerca de ${minutosEstimados(total)} min`,
-              "Suas respostas ficam salvas — pode parar e voltar pelo mesmo link.",
+              "Suas respostas ficam salvas. Pode parar e voltar pelo mesmo link.",
             ]}
           />
         }

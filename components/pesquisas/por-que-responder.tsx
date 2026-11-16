@@ -20,7 +20,7 @@ const PONTOS = [
   {
     icone: ScanSearch,
     titulo: "Conhecer você de perto",
-    texto: "Cada operação é diferente. A gente quer entender a sua, sem achismo.",
+    texto: "Cada operação é diferente. A gente quer entender a sua.",
   },
   {
     icone: ListChecks,
@@ -43,8 +43,7 @@ export function PorQueResponder() {
         </h2>
         <p className="mt-3 max-w-md text-sm leading-relaxed text-primary-foreground/80">
           A Avante cresce junto com os parceiros. Pra apoiar cada um do jeito certo, a
-          equipe de Expansão quer conhecer a realidade de cada operação — não uma média
-          de todas.
+          equipe de Expansão quer conhecer a realidade de cada operação.
         </p>
       </section>
 

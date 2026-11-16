@@ -71,7 +71,7 @@ const SUGERIDAS: Record<
   dados_empresa: {
     name: "Fase 1 · Diagnóstico e organização",
     intro:
-      "Queremos saber quem é a sua empresa e o tamanho da operação. Leva uns 10 minutos — e dá para parar e voltar depois pelo mesmo link.",
+      "Queremos saber quem é a sua empresa e o tamanho da operação. Leva uns 10 minutos, e dá para parar e voltar depois pelo mesmo link.",
     thanks:
       "Obrigado! Com a realidade da sua empresa em mãos, a Expansão consegue apoiar você do jeito certo.",
     perguntas: [
@@ -128,7 +128,7 @@ const SUGERIDAS: Record<
   nps: {
     name: "Fase 2 · Nível de satisfação",
     intro:
-      "Queremos medir como você avalia a parceria, a operação e o suporte — e onde estão os riscos. Respostas sinceras são o que faz a Avante melhorar.",
+      "Queremos medir como você avalia a parceria, a operação e o suporte, e onde estão os riscos. Respostas sinceras são o que faz a Avante melhorar.",
     thanks: "Obrigado pela sinceridade. Se algo pediu atenção, a Expansão entra em contato em até 48 horas.",
     perguntas: [
       secao("Operação, implantação e suporte", "Identificar gargalos que comprometem a entrega e a experiência do cliente final."),
@@ -187,7 +187,7 @@ const SUGERIDAS: Record<
   crescimento: {
     name: "Fase 3 · Melhorias",
     intro:
-      "Queremos identificar o potencial real de expansão da sua empresa, os recursos necessários para realizá-lo e as prioridades dos próximos meses — para transformar o diagnóstico em ações concretas.",
+      "Queremos identificar o potencial real de expansão da sua empresa, os recursos necessários para realizá-lo e as prioridades dos próximos meses. Assim, o diagnóstico vira ações concretas.",
     thanks: "Obrigado! A Expansão vai ler suas respostas e voltar a falar com você com um plano.",
     perguntas: [
       secao("Estratégia comercial e crescimento", "Identificar o potencial real de expansão e os recursos necessários para realizá-lo."),

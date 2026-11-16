@@ -62,7 +62,7 @@ export default async function PesquisaPublicaPage({
           linhas={[
             `Pesquisa para ${convite.contact.name}${convite.contact.company ? ` · ${convite.contact.company}` : ""}`,
             `${total} pergunta${total === 1 ? "" : "s"} · cerca de ${minutosEstimados(total)} min`,
-            "Suas respostas ficam salvas — pode parar e voltar pelo mesmo link.",
+            "Suas respostas ficam salvas. Pode parar e voltar pelo mesmo link.",
           ]}
         />
       }

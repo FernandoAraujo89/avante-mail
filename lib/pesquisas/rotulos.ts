@@ -24,7 +24,7 @@ export const OBJETIVO_NOME_COMPLETO: Record<SurveyObjective, string> = {
 
 export const OBJETIVO_DESCRICAO: Record<SurveyObjective, string> = {
   dados_empresa: "Quem é o parceiro, o tamanho da operação e o que ele vende.",
-  nps: "Como ele avalia a parceria, a operação e o suporte — e onde estão os riscos de saída.",
+  nps: "Como ele avalia a parceria, a operação e o suporte, e onde estão os riscos de saída.",
   crescimento: "Metas, obstáculos e o plano de ação para os próximos 90 dias.",
 };
 
@@ -41,7 +41,7 @@ export const OBJETIVO_CONVITE: Record<SurveyObjective, string> = {
     "Com a realidade da sua empresa em mãos, a Avante consegue apoiar você do jeito certo.",
   nps: "Poucas perguntas, respostas sinceras: é assim que a Avante melhora.",
   crescimento:
-    "Conte onde quer chegar e onde a Avante pode ajudar — a Expansão volta a falar com você.",
+    "Conte onde quer chegar e onde a Avante pode ajudar. A Expansão volta a falar com você.",
 };
 
 export const STATUS_LABEL: Record<SurveyStatus, string> = {

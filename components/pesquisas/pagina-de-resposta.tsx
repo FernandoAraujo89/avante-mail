@@ -88,7 +88,7 @@ export function PaginaDeResposta({
         } catch (err) {
           setGravacao("erro");
           setErroGeral(
-            err instanceof Error ? err.message : "Sem conexão — a última resposta não foi salva."
+            err instanceof Error ? err.message : "Sem conexão. A última resposta não foi salva."
           );
           throw err;
         } finally {
