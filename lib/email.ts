@@ -29,8 +29,12 @@ export interface SendContent {
  */
 export async function buildSendVariables(
   content: SendContent,
-  contact: Contact,
-  sendId: string,
+  // Só o id e o nome entram no e-mail: quem chama não precisa carregar a
+  // linha inteira do contato.
+  contact: Pick<Contact, "id" | "name">,
+  // Indefinido no reenvio avulso a um contato que não estava no disparo: o
+  // descadastro vale igual, só não é atribuído a um envio.
+  sendId: string | undefined,
   email?: string
 ): Promise<TemplateVariables> {
   const baseUrl = getBaseUrl();
@@ -57,8 +61,8 @@ export async function buildSendVariables(
 
 export async function buildCampaignVariables(
   campaign: Campaign,
-  contact: Contact,
-  sendId: string,
+  contact: Pick<Contact, "id" | "name">,
+  sendId: string | undefined,
   email?: string
 ): Promise<TemplateVariables> {
   return buildSendVariables(
@@ -112,6 +116,28 @@ export function buildTestVariables(campaign: Campaign): TemplateVariables {
     corpo: textToHtml(campaign.body ?? ""),
     cta_texto: campaign.ctaText ?? "Saiba mais",
     cta_url: campaign.ctaUrl || baseUrl,
+    unsubscribe_url: `${baseUrl}/unsubscribe`,
+  };
+}
+
+/**
+ * Variáveis de um envio REAL a quem não é contato da base (reenvio avulso,
+ * lib/reenvio): o conteúdo da campanha como foi para todo mundo, com o nome
+ * digitado na saudação. Não há contato de quem assinar o descadastro — o
+ * rodapé leva à página de descadastro sem token, como no e-mail de teste.
+ */
+export function buildGuestVariables(
+  campaign: Campaign,
+  name: string | null
+): TemplateVariables {
+  const baseUrl = getBaseUrl();
+  return {
+    nome_parceiro: name ?? "",
+    titulo: campaign.name,
+    subtitulo: campaign.preheader ?? "",
+    corpo: textToHtml(campaign.body ?? ""),
+    cta_texto: campaign.ctaText ?? "",
+    cta_url: campaign.ctaUrl ?? baseUrl,
     unsubscribe_url: `${baseUrl}/unsubscribe`,
   };
 }

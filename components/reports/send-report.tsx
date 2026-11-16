@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CheckCheck,
   DollarSign,
+  Eye,
   MailOpen,
   MailWarning,
   MessageCircle,
@@ -18,6 +19,11 @@ import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import {
+  ImprimirEmailButton,
+  ReenviarEmailButton,
+} from "@/components/reports/email-acoes";
+import { Reenvios } from "@/components/reports/reenvios";
 import { RefreshButton } from "@/components/reports/refresh-button";
 import { ResendButton } from "@/components/reports/resend-button";
 import { SendsTable } from "@/components/reports/sends-table";
@@ -47,6 +53,7 @@ import {
 import { campaignSenderLabel } from "@/lib/campaign-author";
 import { linhasGuardadas } from "@/lib/paginacao-servidor";
 import { campaignCost } from "@/lib/pricing";
+import { podeReenviar } from "@/lib/reenvio";
 import { conversationIdsByContact } from "@/lib/whatsapp/conversations";
 import {
   isResendableErrorCode,
@@ -546,9 +553,34 @@ export async function SendReport({
   const chargeable = sends.filter((s) => s.sentAt !== null).length;
   const cost = campaignCost({ channel: "email", chargeable });
 
+  // O e-mail que saiu: ver, imprimir (salvar em PDF) e reenviar para
+  // endereços específicos. A página do e-mail segue a rota de quem chamou —
+  // /campaigns ou /news.
+  const emailHref = `${isNews ? "/news" : "/campaigns"}/${campaign.id}/email`;
+  const temEmail = Boolean(campaign.mjmlContent || campaign.templateId);
+
   return (
     <>
       {header}
+
+      {temEmail ? (
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link href={emailHref}>
+              <Eye />
+              Ver e-mail enviado
+            </Link>
+          </Button>
+          <ImprimirEmailButton campaignId={campaign.id} size="sm" />
+          {podeReenviar(campaign) ? (
+            <ReenviarEmailButton
+              campaignId={campaign.id}
+              assunto={campaign.subject}
+              size="sm"
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
@@ -620,6 +652,8 @@ export async function SendReport({
           linhasIniciais={linhasDosEnvios}
         />
       </Card>
+
+      <Reenvios campaignId={campaign.id} />
     </>
   );
 }

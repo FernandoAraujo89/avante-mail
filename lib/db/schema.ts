@@ -1095,6 +1095,49 @@ export const campaignSends = pgTable("campaign_sends", {
     .where(sql`${t.campaignId} is not null`),
 ]);
 
+// Reenvio avulso do e-mail de uma campanha já disparada, para endereços
+// digitados à mão (lib/reenvio): o parceiro que diz que não recebeu, o
+// diretor que pede uma cópia. Fica FORA de campaign_sends de propósito — lá
+// vale "um envio por endereço por campanha" (o índice único acima) e cada
+// linha conta nas métricas e exige um contato; aqui o endereço pode nem estar
+// na base e o mesmo pode receber de novo. Sem rastreio de abertura e clique:
+// o relatório continua sendo o do disparo. O que esta tabela garante é o
+// registro de quem reenviou, para quem e quando.
+export const RESEND_STATUSES = ["sent", "failed"] as const;
+export type ResendStatus = (typeof RESEND_STATUSES)[number];
+
+export const campaignResends = pgTable(
+  "campaign_resends",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    // Minúsculo, como em contact_emails.
+    email: text("email").notNull(),
+    // O contato dono do endereço, quando ele está na base. "set null": apagar
+    // o contato não apaga o registro de que o e-mail saiu.
+    contactId: uuid("contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    // O nome que foi na saudação ({{nome_parceiro}}): o do contato ou o
+    // digitado no reenvio. Cópia, pelo mesmo motivo de sent_by_name.
+    name: text("name"),
+    status: text("status").$type<ResendStatus>().notNull(),
+    errorMessage: text("error_message"),
+    providerMessageId: text("provider_message_id"),
+    // Quem reenviou — id e cópia do nome, como em campaigns.sent_by_*.
+    sentByUserId: uuid("sent_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    sentByName: text("sent_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("campaign_resends_campanha_idx").on(t.campaignId)]
+);
+
 // ─── Conversas de WhatsApp ─────────────────────────────────────────────────
 // A caixa de entrada: o que o contato escreve de volta e o que a equipe
 // responde pelo sistema. Os modelos disparados por campanha e automação NÃO
@@ -1652,6 +1695,8 @@ export type WhatsAppTemplate = typeof whatsappTemplates.$inferSelect;
 export type NewWhatsAppTemplate = typeof whatsappTemplates.$inferInsert;
 export type CampaignSend = typeof campaignSends.$inferSelect;
 export type NewCampaignSend = typeof campaignSends.$inferInsert;
+export type CampaignResend = typeof campaignResends.$inferSelect;
+export type NewCampaignResend = typeof campaignResends.$inferInsert;
 export type WhatsAppConversation = typeof whatsappConversations.$inferSelect;
 export type WhatsAppMessage = typeof whatsappMessages.$inferSelect;
 export type NewWhatsAppMessage = typeof whatsappMessages.$inferInsert;
